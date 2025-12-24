@@ -178,7 +178,7 @@ kubectl get externalsecrets -A            # Should show SecretSynced
 kubectl get secrets -n pihole             # Should show pihole-secret
 
 # Test DNS
-dig @192.168.1.55 google.com
+nslookup google.com 192.168.1.55
 
 # Debug
 kubectl get pods -A

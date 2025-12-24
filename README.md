@@ -210,8 +210,8 @@ kubectl -n pihole get pods
 kubectl -n pihole logs deploy/pihole
 
 # Test DNS
-dig @192.168.1.55 google.com
-dig @192.168.1.55 ads.google.com  # Should be blocked
+nslookup google.com 192.168.1.55
+nslookup ads.google.com 192.168.1.55  # Should be blocked (returns 0.0.0.0)
 ```
 
 ## Network Configuration
@@ -265,7 +265,7 @@ kubectl -n pihole logs -l app=pihole --previous
 kubectl -n pihole exec deploy/unbound -- drill google.com @127.0.0.1 -p 5335
 
 # Test Pi-hole
-dig @192.168.1.55 google.com
+nslookup google.com 192.168.1.55
 ```
 
 ### Secrets not syncing
