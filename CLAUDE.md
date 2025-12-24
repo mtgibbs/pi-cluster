@@ -27,7 +27,9 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] Flux GitOps setup
 - [x] 1Password + ESO secrets management
 - [x] Observability stack (Prometheus, Grafana) - via kube-prometheus-stack
-- [ ] DNS resilience during upgrades (Pi uses itself for DNS)
+- [x] DNS resilience during upgrades (Pi uses static DNS: 1.1.1.1/8.8.8.8)
+- [x] Pi-hole v6 API configuration (password, upstream DNS, adlists)
+- [x] GitOps-managed adlists (Firebog curated, ~900k domains)
 - [ ] Ingress + TLS for web UIs
 
 ## Architecture
@@ -141,8 +143,18 @@ Kustomizations are applied in order via `dependsOn`:
 - Uses `hostNetwork: true` for port 53 access
 - Strategy: `Recreate` (PVCs are ReadWriteOnce)
 - Password via ExternalSecret from 1Password
-- Upstream DNS: Unbound at `unbound.pihole.svc.cluster.local#5335`
+- Upstream DNS: Unbound (configured via API, env vars ignored in v6)
 - DNSSEC disabled (Unbound handles it)
+- Adlists: Firebog curated lists via ConfigMap (~900k domains)
+
+### Pi-hole v6 API Notes
+Pi-hole v6 ignores most environment variables. Configuration is done via REST API in postStart hook:
+- `POST /api/auth` - Get session ID
+- `PATCH /api/config` - Set upstream DNS to Unbound ClusterIP
+- `POST /api/lists` - Add adlists from ConfigMap (batch format)
+- `POST /api/action/gravity` - Update gravity database
+
+See `docs/pihole-v6-api.md` for full API reference.
 
 ### Unbound Config
 - Port 5335 (non-privileged)
@@ -182,8 +194,8 @@ op run --env-file=<(echo 'OP_TOKEN="op://Development - Private/<item-id>/credent
 
 ## Known Issues / Future Work
 
-### DNS Resilience
-The Pi uses itself (192.168.1.55) for DNS resolution. During Pi-hole upgrades or if Pi-hole is down, the Pi cannot resolve DNS to pull new images. Workaround: temporarily add `8.8.8.8` to `/etc/resolv.conf` on the Pi.
+### DNS Resilience (RESOLVED)
+The Pi now uses static DNS (1.1.1.1, 8.8.8.8) configured via NetworkManager. This ensures the Pi can pull images even when Pi-hole is down. See ARCHITECTURE.md for details.
 
 ### Monitoring Stack
 kube-prometheus-stack is partially set up but still uses `op inject` for secrets. Should migrate to ExternalSecret for Grafana password.

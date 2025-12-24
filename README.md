@@ -84,6 +84,7 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 
 ```
 ├── README.md                 # You are here
+├── ARCHITECTURE.md           # Detailed architecture documentation
 ├── CLAUDE.md                 # Development context and notes
 ├── clusters/
 │   └── pi-k3s/
@@ -275,11 +276,12 @@ kubectl describe externalsecret -n pihole pihole-secret
 
 ## Future Improvements
 
-- [ ] Observability stack (Prometheus, Grafana, Loki)
+- [x] Observability stack (Prometheus, Grafana) - deployed via kube-prometheus-stack
 - [ ] Ingress controller with TLS (cert-manager)
 - [ ] Additional workloads (Uptime Kuma, Homepage)
 - [ ] Multi-node cluster (add another Pi)
 - [ ] Automated backups
+- [ ] Migrate Grafana secrets to ExternalSecret
 
 ## License
 

@@ -130,7 +130,24 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  ┌─────────────────────────────────────────────────────────────┐ │  │
 │  │  │                       Secrets                               │ │  │
 │  │  │  • pihole-secret (WEBPASSWORD)                             │ │  │
-│  │  │    Created manually, NOT in git                             │ │  │
+│  │  │    Synced from 1Password via ExternalSecret                │ │  │
+│  │  └─────────────────────────────────────────────────────────────┘ │  │
+│  │                                                                   │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐ │  │
+│  │  │                      ConfigMaps                             │ │  │
+│  │  │  • pihole-adlists (adlists.txt)                            │ │  │
+│  │  │    GitOps-managed blocklists (Firebog curated, ~900k)      │ │  │
+│  │  └─────────────────────────────────────────────────────────────┘ │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                  external-secrets namespace                       │  │
+│  │                                                                   │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐ │  │
+│  │  │  External Secrets Operator (ESO v1.2.0)                     │ │  │
+│  │  │  • Syncs secrets from 1Password via SDK provider            │ │  │
+│  │  │  • ClusterSecretStore: onepassword (pi-cluster vault)       │ │  │
+│  │  │  • Service Account token in onepassword-service-account     │ │  │
 │  │  └─────────────────────────────────────────────────────────────┘ │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -188,16 +205,27 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Enabling in both would be redundant
 - Unbound is the authoritative validator in our chain
 
-### 5. Secrets Outside Git
+### 5. Secrets via External Secrets Operator
 
-**Decision**: `pihole-secret.yaml` in `.gitignore`, create manually
+**Decision**: Use ESO with 1Password SDK provider instead of manual secrets
 
 **Why**:
-- Never commit secrets to version control
-- Placeholder for future Sealed Secrets or SOPS integration
-- Manual creation required: `kubectl create secret generic pihole-secret --from-literal=WEBPASSWORD=<pw>`
+- Secrets synced from 1Password cloud automatically
+- No secrets in git, no manual `kubectl create secret` commands
+- Service account token is the only bootstrap secret (one-time setup)
+- Secrets auto-refresh on schedule (1h default)
 
-### 6. Traefik Disabled
+### 6. Pi-hole v6 Configuration via API
+
+**Decision**: Configure Pi-hole settings via REST API in postStart hook, not env vars
+
+**Why**:
+- Pi-hole v6 ignores most environment variables (`WEBPASSWORD`, `PIHOLE_DNS_`, etc.)
+- postStart lifecycle hook runs after container starts
+- API calls configure: password, upstream DNS (Unbound), adlists
+- Adlists managed via ConfigMap, added in batch via API
+
+### 7. Traefik Disabled
 
 **Decision**: Install k3s with `--disable=traefik`
 
@@ -311,10 +339,29 @@ kubectl -n pihole port-forward svc/pihole-exporter 9617:9617
 curl localhost:9617/metrics
 ```
 
+## DNS Resilience
+
+The Pi node needs DNS to pull container images during upgrades. Since the Pi runs Pi-hole, there's a chicken-and-egg problem: if Pi-hole is down, the Pi can't resolve DNS to pull the new Pi-hole image.
+
+**Solution**: Configure static DNS on the Pi node that doesn't depend on Pi-hole:
+
+```bash
+# NetworkManager configuration (persists across reboots)
+sudo nmcli con mod "Wired connection 1" ipv4.dns "1.1.1.1 8.8.8.8"
+sudo nmcli con mod "Wired connection 1" ipv4.ignore-auto-dns yes
+sudo nmcli con up "Wired connection 1"
+```
+
+This ensures:
+- Pi node can always pull images (uses 1.1.1.1/8.8.8.8 directly)
+- K8s pods use CoreDNS → Unbound for cluster DNS (independent of Pi-hole)
+- Network clients experience brief timeouts during Pi-hole restarts, but never bypass ad blocking
+
 ## Future Roadmap
 
-- [ ] **Secrets Management**: Sealed Secrets or SOPS for GitOps-safe secrets
-- [ ] **Flux GitOps**: Auto-deploy on git push
+- [x] **Secrets Management**: External Secrets Operator with 1Password
+- [x] **Flux GitOps**: Auto-deploy on git push
+- [x] **DNS Resilience**: Static DNS on Pi node for image pulls
 - [ ] **Ingress + TLS**: nginx-ingress + cert-manager for HTTPS
 - [ ] **Additional Apps**: Uptime Kuma, Homepage dashboard
 - [ ] **Multi-node**: Add second Pi for HA learning
