@@ -209,9 +209,9 @@ flux get all
 kubectl -n pihole get pods
 kubectl -n pihole logs deploy/pihole
 
-# Test DNS
-nslookup google.com 192.168.1.55
-nslookup ads.google.com 192.168.1.55  # Should be blocked (returns 0.0.0.0)
+# Test DNS (from a client machine, or install dnsutils on the Pi)
+# On Mac/Linux with dig: dig @192.168.1.55 google.com
+# On Pi: ping -c 1 google.com  # Verifies DNS resolution works
 ```
 
 ## Network Configuration
@@ -261,11 +261,11 @@ kubectl -n pihole logs -l app=pihole --previous
 
 ### DNS not resolving
 ```bash
-# Test Unbound directly
+# Test Unbound directly (drill is in the container)
 kubectl -n pihole exec deploy/unbound -- drill google.com @127.0.0.1 -p 5335
 
-# Test Pi-hole
-nslookup google.com 192.168.1.55
+# Test Pi-hole from your Mac
+# dig @192.168.1.55 google.com
 ```
 
 ### Secrets not syncing

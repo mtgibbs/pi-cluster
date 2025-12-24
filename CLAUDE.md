@@ -177,8 +177,8 @@ kubectl get clustersecretstores           # Should show 'onepassword' as Ready
 kubectl get externalsecrets -A            # Should show SecretSynced
 kubectl get secrets -n pihole             # Should show pihole-secret
 
-# Test DNS
-nslookup google.com 192.168.1.55
+# Test DNS (from Mac)
+# dig @192.168.1.55 google.com
 
 # Debug
 kubectl get pods -A

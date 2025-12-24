@@ -325,8 +325,8 @@ kubectl get pods -A
 # Pi-hole logs
 kubectl -n pihole logs -f deploy/pihole
 
-# Test DNS resolution
-nslookup google.com 192.168.1.55
+# Test DNS resolution (from Mac)
+# dig @192.168.1.55 google.com
 
 # Access Grafana (then open http://localhost:3000)
 kubectl -n monitoring port-forward svc/kube-prometheus-grafana 3000:80
