@@ -19,7 +19,7 @@ Stores are **vault-specific** - a single ExternalSecret cannot access multiple v
 ### SecretStore (namespace-scoped)
 
 ```yaml
-apiVersion: external-secrets.io/v1
+apiVersion: external-secrets.io/v1beta1   # v0.12.x uses v1beta1
 kind: SecretStore
 metadata:
   name: onepassword-sdk
@@ -36,7 +36,7 @@ spec:
 ### ClusterSecretStore (cluster-scoped)
 
 ```yaml
-apiVersion: external-secrets.io/v1
+apiVersion: external-secrets.io/v1beta1   # v0.12.x uses v1beta1
 kind: ClusterSecretStore
 metadata:
   name: onepassword-sdk
@@ -58,7 +58,7 @@ Secret references use format: `<item>/[section/]<field>`
 For OTP fields: `<item>/[section/]one-time password?attribute=otp`
 
 ```yaml
-apiVersion: external-secrets.io/v1
+apiVersion: external-secrets.io/v1beta1   # v0.12.x uses v1beta1
 kind: ExternalSecret
 metadata:
   name: my-secret
@@ -79,7 +79,7 @@ spec:
 ## Multiple Fields Example
 
 ```yaml
-apiVersion: external-secrets.io/v1
+apiVersion: external-secrets.io/v1beta1   # v0.12.x uses v1beta1
 kind: ExternalSecret
 metadata:
   name: database-credentials
