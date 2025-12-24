@@ -51,7 +51,7 @@ spec:
             - name: REV_SERVER
               value: "false"
           # Pi-hole v6+ doesn't reliably use WEBPASSWORD env var
-          # This hook sets password and configures adlists after Pi-hole initializes
+          # This hook sets password and configures adlists via API after Pi-hole initializes
           lifecycle:
             postStart:
               exec:
@@ -59,17 +59,44 @@ spec:
                   - /bin/bash
                   - -c
                   - |
-                    # Wait for Pi-hole web interface to be ready
-                    until curl -s http://localhost/admin/ &>/dev/null; do sleep 3; done
+                    # Wait for Pi-hole API to be ready
+                    until curl -s http://localhost/api/info &>/dev/null; do sleep 3; done
+
                     # Set password from environment variable
                     pihole setpassword "${WEBPASSWORD}"
-                    # Add adlists from ConfigMap (skip comments and empty lines)
+
+                    # Authenticate with the API
+                    AUTH_RESPONSE=$(curl -s -X POST http://localhost/api/auth \
+                      -H "Content-Type: application/json" \
+                      -d "{\"password\":\"${WEBPASSWORD}\"}")
+                    SID=$(echo "$AUTH_RESPONSE" | grep -o '"sid":"[^"]*"' | cut -d'"' -f4)
+
+                    if [ -z "$SID" ]; then
+                      echo "Failed to authenticate with Pi-hole API"
+                      exit 0  # Don't fail the container startup
+                    fi
+
+                    # Collect all adlist URLs from ConfigMap (skip comments and empty lines)
+                    URLS=""
                     while IFS= read -r url; do
                       [[ -z "$url" || "$url" =~ ^# ]] && continue
-                      pihole adlist add "$url" 2>/dev/null || true
+                      if [ -z "$URLS" ]; then
+                        URLS="\"$url\""
+                      else
+                        URLS="$URLS,\"$url\""
+                      fi
                     done < /etc/pihole-config/adlists.txt
-                    # Update gravity to fetch the lists
-                    pihole updateGravity
+
+                    # Add all adlists via API (batch add)
+                    if [ -n "$URLS" ]; then
+                      curl -s -X POST "http://localhost/api/lists?type=block&sid=${SID}" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"address\":[${URLS}],\"comment\":\"GitOps managed\",\"groups\":[0],\"enabled\":true}" \
+                        || true
+                    fi
+
+                    # Run gravity update to fetch the lists
+                    curl -s -X POST "http://localhost/api/action/gravity?sid=${SID}" || pihole updateGravity
           volumeMounts:
             - name: pihole-etc
               mountPath: /etc/pihole
