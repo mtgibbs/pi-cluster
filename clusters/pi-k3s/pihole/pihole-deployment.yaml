@@ -76,6 +76,15 @@ spec:
                       exit 0  # Don't fail the container startup
                     fi
 
+                    # Configure Unbound as upstream DNS (resolve service to IP)
+                    UNBOUND_IP=$(getent hosts unbound.pihole.svc.cluster.local | awk '{print $1}')
+                    if [ -n "$UNBOUND_IP" ]; then
+                      curl -s -X PATCH "http://localhost/api/config?sid=${SID}" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"config\":{\"dns\":{\"upstreams\":[\"${UNBOUND_IP}#5335\"]}}}" \
+                        || true
+                    fi
+
                     # Collect all adlist URLs from ConfigMap (skip comments and empty lines)
                     URLS=""
                     while IFS= read -r url; do
