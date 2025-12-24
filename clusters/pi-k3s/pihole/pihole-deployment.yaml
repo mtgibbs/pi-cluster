@@ -50,6 +50,17 @@ spec:
               value: "false"
             - name: REV_SERVER
               value: "false"
+          # Pi-hole v6+ doesn't reliably use WEBPASSWORD env var
+          # This hook sets the password after Pi-hole initializes
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    until pihole status &>/dev/null; do sleep 2; done
+                    pihole setpassword "$WEBPASSWORD"
           volumeMounts:
             - name: pihole-etc
               mountPath: /etc/pihole
