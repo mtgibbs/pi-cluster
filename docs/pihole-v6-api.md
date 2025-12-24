@@ -225,6 +225,31 @@ For reference, the underlying SQLite table structure:
 | `invalid_domains` | integer | Malformed entry count |
 | `status` | integer | Sync status code |
 
+## Configuration
+
+### PATCH /api/config
+
+Update Pi-hole configuration settings.
+
+```bash
+curl -X PATCH "http://localhost/api/config?sid=${SID}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "dns": {
+        "upstreams": ["10.43.102.209#5335"]
+      }
+    }
+  }'
+```
+
+**Common config paths:**
+- `dns.upstreams` - Array of upstream DNS servers (format: `IP#port`)
+- `dns.dnssec` - Enable/disable DNSSEC validation
+- `dns.bogusPriv` - Never forward reverse lookups for private ranges
+
+**Note:** Pi-hole v6 ignores the `PIHOLE_DNS_` environment variable. You must configure upstreams via the API.
+
 ## Example: Complete Adlist Setup Script
 
 ```bash
