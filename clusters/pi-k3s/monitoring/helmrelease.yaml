@@ -28,8 +28,10 @@ spec:
     grafana:
       admin:
         existingSecret: grafana-secret
-        userKey: admin-user
         passwordKey: admin-password
+      # Use Recreate strategy for RWO PVC compatibility
+      deploymentStrategy:
+        type: Recreate
       persistence:
         enabled: true
         size: 1Gi
