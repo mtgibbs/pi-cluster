@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Only include flux-system at the root level
+  # Child Kustomizations in infrastructure.yaml handle other paths
+  - flux-system
