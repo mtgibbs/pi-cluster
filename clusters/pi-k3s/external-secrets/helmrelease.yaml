@@ -28,3 +28,12 @@ spec:
     serviceAccount:
       create: true
       name: external-secrets
+    # Use GitHub Container Registry instead of oci.external-secrets.io
+    image:
+      repository: ghcr.io/external-secrets/external-secrets
+    webhook:
+      image:
+        repository: ghcr.io/external-secrets/external-secrets
+    certController:
+      image:
+        repository: ghcr.io/external-secrets/external-secrets
