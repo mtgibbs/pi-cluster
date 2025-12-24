@@ -50,3 +50,21 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 4. Monitoring stack - depends on secret store for ExternalSecrets
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/monitoring
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 10m

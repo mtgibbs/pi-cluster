@@ -111,7 +111,9 @@ pi-cluster/
         │   ├── pihole-exporter.yaml
         │   └── external-secret.yaml   # Syncs password from 1Password
         └── monitoring/
-            └── kube-prometheus-values.yaml.tpl
+            ├── kustomization.yaml
+            ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease
+            └── external-secret.yaml    # Grafana password from 1Password
 ```
 
 ## Flux Dependency Chain
@@ -122,6 +124,7 @@ Kustomizations are applied in order via `dependsOn`:
 1. external-secrets       → Installs ESO operator + CRDs
 2. external-secrets-config → Creates ClusterSecretStore (needs CRDs)
 3. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
+4. monitoring             → kube-prometheus-stack + Grafana ExternalSecret
 ```
 
 ## Key Technical Details
@@ -198,11 +201,10 @@ op run --env-file=<(echo 'OP_TOKEN="op://Development - Private/<item-id>/credent
 The Pi now uses static DNS (1.1.1.1, 8.8.8.8) configured via NetworkManager. This ensures the Pi can pull images even when Pi-hole is down. See ARCHITECTURE.md for details.
 
 ### Monitoring Stack
-kube-prometheus-stack is partially set up but still uses `op inject` for secrets. Should migrate to ExternalSecret for Grafana password.
+kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for Grafana password.
 
 ## Future Additions (Backlog)
 
-- **Grafana ExternalSecret** - Migrate from op inject to ESO
 - **Ingress + TLS** - nginx-ingress + cert-manager
 - **Additional workloads** - Uptime Kuma, Homepage dashboard
 - **Multi-node** - Add another Pi for HA learning
