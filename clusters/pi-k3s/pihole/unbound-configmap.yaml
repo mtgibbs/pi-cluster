@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unbound-config
+  namespace: pihole
+data:
+  unbound.conf: |
+    server:
+      verbosity: 1
+      interface: 0.0.0.0
+      port: 5335
+      do-ip4: yes
+      do-ip6: no
+      do-udp: yes
+      do-tcp: yes
+
+      # Access control - allow RFC1918 private ranges
+      access-control: 127.0.0.0/8 allow
+      access-control: 10.0.0.0/8 allow
+      access-control: 172.16.0.0/12 allow
+      access-control: 192.168.0.0/16 allow
+
+      # Security hardening
+      hide-identity: yes
+      hide-version: yes
+      harden-glue: yes
+      harden-dnssec-stripped: yes
+      harden-referral-path: yes
+
+      # DNSSEC validation
+      auto-trust-anchor-file: "/opt/unbound/etc/unbound/root.key"
+
+      # Performance tuning
+      num-threads: 2
+      msg-cache-slabs: 4
+      rrset-cache-slabs: 4
+      infra-cache-slabs: 4
+      key-cache-slabs: 4
+      rrset-cache-size: 64m
+      msg-cache-size: 32m
+
+      # Privacy - minimize query info sent upstream
+      qname-minimisation: yes
+
+      # Prefetch popular entries before TTL expiry
+      prefetch: yes
+      prefetch-key: yes
+
+      # Root hints for recursive resolution
+      root-hints: "/opt/unbound/etc/unbound/root.hints"
+
+      # Deny queries of type ANY (reduces attack surface)
+      deny-any: yes
+
+      # Aggressive NSEC uses cached NSEC records for negative answers
+      aggressive-nsec: yes
+
+      # Time to live bounds
+      cache-min-ttl: 300
+      cache-max-ttl: 86400
+      serve-expired: yes

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pihole-web
+  namespace: pihole
+  labels:
+    app: pihole
+spec:
+  type: ClusterIP
+  selector:
+    app: pihole
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

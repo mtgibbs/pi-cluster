@@ -1,0 +1,18 @@
+# Kubernetes credentials
+kubeconfig
+*.kubeconfig
+
+# 1Password secrets
+1password-credentials.json
+pihole-secret.yaml
+*.secret.yaml
+
+# Rendered templates (contain actual secrets)
+clusters/pi-k3s/monitoring/kube-prometheus-values.yaml
+
+# OS/Editor files
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

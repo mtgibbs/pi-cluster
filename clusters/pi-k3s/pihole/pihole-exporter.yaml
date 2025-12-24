@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pihole-exporter
+  namespace: pihole
+  labels:
+    app: pihole-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pihole-exporter
+  template:
+    metadata:
+      labels:
+        app: pihole-exporter
+    spec:
+      containers:
+        - name: pihole-exporter
+          image: ekofr/pihole-exporter:latest
+          ports:
+            - containerPort: 9617
+              name: metrics
+          env:
+            - name: PIHOLE_HOSTNAME
+              value: "192.168.1.55"
+            - name: PIHOLE_PORT
+              value: "80"
+            - name: PIHOLE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pihole-secret
+                  key: WEBPASSWORD
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pihole-exporter
+  namespace: pihole
+  labels:
+    app: pihole-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: pihole-exporter
+  ports:
+    - port: 9617
+      targetPort: 9617
+      name: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pihole-exporter
+  namespace: pihole
+  labels:
+    release: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: pihole-exporter
+  namespaceSelector:
+    matchNames:
+      - pihole
+  endpoints:
+    - port: metrics
+      interval: 30s
