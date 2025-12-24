@@ -59,8 +59,10 @@ spec:
                   - /bin/bash
                   - -c
                   - |
-                    until pihole status &>/dev/null; do sleep 2; done
-                    pihole setpassword "$WEBPASSWORD"
+                    # Wait for Pi-hole web interface to be ready
+                    until curl -s http://localhost/admin/ &>/dev/null; do sleep 3; done
+                    # Set password from environment variable
+                    pihole setpassword "${WEBPASSWORD}"
           volumeMounts:
             - name: pihole-etc
               mountPath: /etc/pihole
