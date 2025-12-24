@@ -3,6 +3,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: pihole-etc
   namespace: pihole
+  annotations:
+    # Prevent Flux from ever deleting this PVC (protects data)
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes:
     - ReadWriteOnce
@@ -16,6 +19,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: pihole-dnsmasq
   namespace: pihole
+  annotations:
+    # Prevent Flux from ever deleting this PVC (protects data)
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes:
     - ReadWriteOnce

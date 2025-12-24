@@ -51,7 +51,7 @@ spec:
             - name: REV_SERVER
               value: "false"
           # Pi-hole v6+ doesn't reliably use WEBPASSWORD env var
-          # This hook sets the password after Pi-hole initializes
+          # This hook sets password and configures adlists after Pi-hole initializes
           lifecycle:
             postStart:
               exec:
@@ -63,11 +63,21 @@ spec:
                     until curl -s http://localhost/admin/ &>/dev/null; do sleep 3; done
                     # Set password from environment variable
                     pihole setpassword "${WEBPASSWORD}"
+                    # Add adlists from ConfigMap (skip comments and empty lines)
+                    while IFS= read -r url; do
+                      [[ -z "$url" || "$url" =~ ^# ]] && continue
+                      pihole adlist add "$url" 2>/dev/null || true
+                    done < /etc/pihole-config/adlists.txt
+                    # Update gravity to fetch the lists
+                    pihole updateGravity
           volumeMounts:
             - name: pihole-etc
               mountPath: /etc/pihole
             - name: pihole-dnsmasq
               mountPath: /etc/dnsmasq.d
+            - name: pihole-config
+              mountPath: /etc/pihole-config
+              readOnly: true
           resources:
             requests:
               memory: "128Mi"
@@ -96,3 +106,6 @@ spec:
         - name: pihole-dnsmasq
           persistentVolumeClaim:
             claimName: pihole-dnsmasq
+        - name: pihole-config
+          configMap:
+            name: pihole-adlists
