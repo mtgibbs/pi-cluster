@@ -6,6 +6,9 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: "pi-cluster-ca-issuer"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Rewrite /status to / for Uptime Kuma
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: nginx
   tls:
@@ -17,8 +20,8 @@ spec:
     - host: "192-168-1-55.sslip.io"
       http:
         paths:
-          - path: /status
-            pathType: Prefix
+          - path: /status(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: uptime-kuma
@@ -27,8 +30,8 @@ spec:
     - host: "pi-k3s.local"
       http:
         paths:
-          - path: /status
-            pathType: Prefix
+          - path: /status(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: uptime-kuma
