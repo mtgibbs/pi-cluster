@@ -1,5 +1,41 @@
 ---
-# Self-signed issuer for generating CA
+# Let's Encrypt Staging (for testing, avoids rate limits)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: matt@mtgibbs.xyz
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+# Let's Encrypt Production
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: matt@mtgibbs.xyz
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+# Self-signed issuer (fallback/legacy)
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -7,7 +43,7 @@ metadata:
 spec:
   selfSigned: {}
 ---
-# CA Certificate (signed by self-signed issuer)
+# CA Certificate for self-signed fallback
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -27,7 +63,7 @@ spec:
     kind: ClusterIssuer
     group: cert-manager.io
 ---
-# ClusterIssuer using the CA
+# Self-signed CA issuer (fallback)
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:

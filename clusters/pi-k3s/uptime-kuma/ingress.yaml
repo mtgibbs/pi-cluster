@@ -4,17 +4,16 @@ metadata:
   name: uptime-kuma
   namespace: uptime-kuma
   annotations:
-    cert-manager.io/cluster-issuer: "pi-cluster-ca-issuer"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        # sslip.io subdomain: status.192-168-1-55.sslip.io -> 192.168.1.55
-        - "status.192-168-1-55.sslip.io"
+        - "status.lab.mtgibbs.dev"
       secretName: uptime-kuma-tls
   rules:
-    - host: "status.192-168-1-55.sslip.io"
+    - host: "status.lab.mtgibbs.dev"
       http:
         paths:
           - path: /

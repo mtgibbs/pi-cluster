@@ -50,8 +50,8 @@ spec:
       # Configure for subdomain access
       grafana.ini:
         server:
-          domain: "grafana.192-168-1-55.sslip.io"
-          root_url: "https://grafana.192-168-1-55.sslip.io"
+          domain: "grafana.lab.mtgibbs.dev"
+          root_url: "https://grafana.lab.mtgibbs.dev"
 
     # Prometheus settings
     prometheus:

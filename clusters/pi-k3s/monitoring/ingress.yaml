@@ -4,17 +4,16 @@ metadata:
   name: grafana
   namespace: monitoring
   annotations:
-    cert-manager.io/cluster-issuer: "pi-cluster-ca-issuer"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        # sslip.io subdomain: grafana.192-168-1-55.sslip.io -> 192.168.1.55
-        - "grafana.192-168-1-55.sslip.io"
+        - "grafana.lab.mtgibbs.dev"
       secretName: grafana-tls
   rules:
-    - host: "grafana.192-168-1-55.sslip.io"
+    - host: "grafana.lab.mtgibbs.dev"
       http:
         paths:
           - path: /

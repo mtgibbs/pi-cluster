@@ -26,20 +26,18 @@ data:
       {
         "name": "Grafana",
         "type": "http",
-        "url": "https://grafana.192-168-1-55.sslip.io/api/health",
+        "url": "https://grafana.lab.mtgibbs.dev/api/health",
         "interval": 60,
         "retryInterval": 30,
-        "maxretries": 3,
-        "ignoreTls": true
+        "maxretries": 3
       },
       {
         "name": "Uptime Kuma",
         "type": "http",
-        "url": "https://status.192-168-1-55.sslip.io/",
+        "url": "https://status.lab.mtgibbs.dev/",
         "interval": 60,
         "retryInterval": 30,
-        "maxretries": 3,
-        "ignoreTls": true
+        "maxretries": 3
       },
       {
         "name": "Unbound DNS",
