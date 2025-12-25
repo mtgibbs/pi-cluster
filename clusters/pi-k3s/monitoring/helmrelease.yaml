@@ -50,7 +50,8 @@ spec:
       # Configure for path-based ingress access
       grafana.ini:
         server:
-          root_url: "%(protocol)s://%(domain)s/grafana"
+          domain: "192-168-1-55.sslip.io"
+          root_url: "https://192-168-1-55.sslip.io/grafana"
           serve_from_sub_path: true
 
     # Prometheus settings
