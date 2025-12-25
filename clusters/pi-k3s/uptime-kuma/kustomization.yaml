@@ -7,6 +7,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
-  - external-secret.yaml
-  - monitors-configmap.yaml
-  - setup-job.yaml
+  # Monitor setup requires manual configuration via web UI
+  # The uptime-kuma-api library has compatibility issues with v2
+  # See monitors-configmap.yaml for suggested monitors to add
