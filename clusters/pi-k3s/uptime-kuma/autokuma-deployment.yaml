@@ -39,6 +39,8 @@ spec:
               value: "delete"
             - name: AUTOKUMA__DOCKER__ENABLED
               value: "false"
+            - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
+              value: "true"
             - name: RUST_LOG
               value: "debug"
           volumeMounts:
