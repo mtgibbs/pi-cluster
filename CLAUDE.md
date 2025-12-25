@@ -30,7 +30,7 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] DNS resilience during upgrades (Pi uses static DNS: 1.1.1.1/8.8.8.8)
 - [x] Pi-hole v6 API configuration (password, upstream DNS, adlists)
 - [x] GitOps-managed adlists (Firebog curated, ~900k domains)
-- [ ] Ingress + TLS for web UIs
+- [x] Ingress + TLS for web UIs (nginx-ingress + cert-manager with self-signed CA)
 
 ## Architecture
 
