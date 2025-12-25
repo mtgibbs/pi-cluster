@@ -6,8 +6,6 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: "pi-cluster-ca-issuer"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # Rewrite /grafana to / for Grafana
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
   ingressClassName: nginx
   tls:
@@ -20,8 +18,8 @@ spec:
     - host: "192-168-1-55.sslip.io"
       http:
         paths:
-          - path: /grafana(/|$)(.*)
-            pathType: ImplementationSpecific
+          - path: /grafana
+            pathType: Prefix
             backend:
               service:
                 name: kube-prometheus-grafana
@@ -31,8 +29,8 @@ spec:
     - host: "pi-k3s.local"
       http:
         paths:
-          - path: /grafana(/|$)(.*)
-            pathType: ImplementationSpecific
+          - path: /grafana
+            pathType: Prefix
             backend:
               service:
                 name: kube-prometheus-grafana
