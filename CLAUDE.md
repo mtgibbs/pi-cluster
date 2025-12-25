@@ -24,6 +24,7 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 8. **cert-manager** - Let's Encrypt certificates via Cloudflare DNS-01 challenge
 9. **Uptime Kuma** - Status page for home services monitoring
 10. **AutoKuma** - GitOps-managed monitors for Uptime Kuma
+11. **Homepage** - Unified dashboard for all cluster services
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -42,6 +43,7 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 
 ### Service URLs
 All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
+- **Homepage**: https://home.lab.mtgibbs.dev (unified dashboard)
 - **Grafana**: https://grafana.lab.mtgibbs.dev
 - **Uptime Kuma**: https://status.lab.mtgibbs.dev
 - **Pi-hole Admin**: https://pihole.lab.mtgibbs.dev (also available via hostNetwork: http://192.168.1.55/admin/)
@@ -140,16 +142,23 @@ pi-cluster/
         │   ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease
         │   ├── ingress.yaml            # Grafana Ingress
         │   └── external-secret.yaml    # Grafana password from 1Password
-        └── uptime-kuma/
+        ├── uptime-kuma/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml
+        │   ├── pvc.yaml
+        │   ├── deployment.yaml
+        │   ├── service.yaml
+        │   ├── ingress.yaml               # status.lab.mtgibbs.dev
+        │   ├── external-secret.yaml       # Uptime Kuma password from 1Password
+        │   ├── autokuma-deployment.yaml   # AutoKuma for GitOps monitors
+        │   └── autokuma-monitors.yaml     # ConfigMap with monitor definitions
+        └── homepage/
             ├── kustomization.yaml
             ├── namespace.yaml
-            ├── pvc.yaml
-            ├── deployment.yaml
+            ├── deployment.yaml            # Homepage with initContainer + emptyDir
             ├── service.yaml
-            ├── ingress.yaml               # status.lab.mtgibbs.dev
-            ├── external-secret.yaml       # Uptime Kuma password from 1Password
-            ├── autokuma-deployment.yaml   # AutoKuma for GitOps monitors
-            └── autokuma-monitors.yaml     # ConfigMap with monitor definitions
+            ├── ingress.yaml               # home.lab.mtgibbs.dev
+            └── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
 ```
 
 ## Flux Dependency Chain
@@ -165,6 +174,7 @@ Kustomizations are applied in order via `dependsOn`:
 6. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
 7. monitoring              → kube-prometheus-stack + Grafana (needs secrets, ingress, certs)
 8. uptime-kuma             → Status page (needs secrets, ingress, certs)
+9. homepage                → Unified dashboard (needs ingress, certs)
 ```
 
 ## Key Technical Details
@@ -268,7 +278,7 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
   - `AUTOKUMA__ON_DELETE=delete` (monitors removed from ConfigMap are deleted)
 - Credentials synced from 1Password via ExternalSecret
 
-#### Configured Monitors (7 total)
+#### Configured Monitors (8 total)
 | Monitor | Type | Target |
 |---------|------|--------|
 | Pi-hole DNS | port | 192.168.1.55:53 |
@@ -278,6 +288,7 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
 | Unbound DNS | port | unbound.pihole.svc.cluster.local:5335 |
 | K3s API | port | 192.168.1.55:6443 (TCP port check) |
 | Uptime Kuma | http | https://status.lab.mtgibbs.dev/ |
+| Homepage | http | https://home.lab.mtgibbs.dev/ |
 
 ## Commands Reference
 
@@ -318,8 +329,23 @@ The Pi now uses static DNS (1.1.1.1, 8.8.8.8) configured via NetworkManager. Thi
 ### Monitoring Stack
 kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for Grafana password.
 
+### Homepage Dashboard
+- **Image**: `ghcr.io/gethomepage/homepage:latest`
+- **URL**: https://home.lab.mtgibbs.dev
+- **Configuration**: Fully GitOps-managed via ConfigMap
+- **Theme**: Dark theme with clean layout
+- **Sections**:
+  - Infrastructure: Pi-hole, Unbound, K3s Cluster
+  - Monitoring: Grafana, Uptime Kuma, Prometheus
+  - System resources widget (CPU, RAM, disk)
+  - Bookmarks to GitHub repo and Flux docs
+- **Technical details**:
+  - Uses initContainer to copy ConfigMap to writable emptyDir (Homepage needs writable config dir)
+  - Requires `HOMEPAGE_ALLOWED_HOSTS` env var set to ingress hostname
+  - Port 3000 exposed via ClusterIP service
+  - TLS certificate via Let's Encrypt (cert-manager)
+
 ## Future Additions (Backlog)
 
-- **Homepage dashboard** - Unified dashboard for all services
 - **Multi-node** - Add another Pi for HA learning
 - **Automated backups** - Backup strategy for PVCs and cluster state

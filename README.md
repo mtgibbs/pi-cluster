@@ -87,11 +87,13 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Unbound | latest | Recursive DNS resolver |
 | Uptime Kuma | v2.x | Status page for home services |
 | AutoKuma | latest | GitOps-managed monitors for Uptime Kuma |
+| Homepage | latest | Unified dashboard for all services |
 
 ## Service URLs
 
 | Service | URL |
 |---------|-----|
+| Homepage | https://home.lab.mtgibbs.dev |
 | Grafana | https://grafana.lab.mtgibbs.dev |
 | Uptime Kuma | https://status.lab.mtgibbs.dev |
 | Pi-hole Admin | https://pihole.lab.mtgibbs.dev |
@@ -115,7 +117,8 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 │       ├── cert-manager-config/      # ClusterIssuers (Let's Encrypt) + Cloudflare secret
 │       ├── pihole/                   # Pi-hole + Unbound + exporter + ingress
 │       ├── monitoring/               # kube-prometheus-stack + Grafana
-│       └── uptime-kuma/              # Status page + AutoKuma monitors
+│       ├── uptime-kuma/              # Status page + AutoKuma monitors
+│       └── homepage/                 # Homepage dashboard (unified landing page)
 ├── docs/
 │   ├── external-secrets-1password-sdk.md
 │   └── pihole-v6-api.md
@@ -344,7 +347,7 @@ kubectl describe externalsecret -n pihole pihole-secret
 - [x] Observability stack (Prometheus, Grafana) - deployed via kube-prometheus-stack
 - [x] Ingress controller with TLS (nginx-ingress + cert-manager)
 - [x] Uptime Kuma status page with GitOps-managed monitors (AutoKuma)
-- [ ] Homepage dashboard - unified dashboard for all services
+- [x] Homepage dashboard - unified landing page for all services
 - [ ] Multi-node cluster (add another Pi)
 - [ ] Automated backups
 

@@ -196,7 +196,19 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • GitOps-managed monitors via ConfigMap                         │  │
 │  │  • Syncs monitor definitions to Uptime Kuma API                  │  │
 │  │  • Monitors: Pi-hole DNS, Admin, Grafana, Prometheus, Unbound,  │  │
-│  │    K3s API, Uptime Kuma (7 total)                                │  │
+│  │    K3s API, Uptime Kuma, Homepage (8 total)                      │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                      homepage namespace                           │  │
+│  │                                                                   │  │
+│  │  Homepage (gethomepage/homepage)                                 │  │
+│  │  • Unified dashboard for all cluster services                    │  │
+│  │  • Dark theme with system resource widgets                       │  │
+│  │  • GitOps-managed configuration via ConfigMap                    │  │
+│  │  • initContainer copies config to writable emptyDir              │  │
+│  │  • Ingress: home.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -373,13 +385,20 @@ pi-cluster/
         │   ├── helmrelease.yaml     # kube-prometheus-stack
         │   ├── ingress.yaml         # Grafana Ingress
         │   └── external-secret.yaml # Grafana password from 1Password
-        └── uptime-kuma/
-            ├── deployment.yaml           # Uptime Kuma v2
-            ├── pvc.yaml                  # Persistent storage
-            ├── ingress.yaml              # status.lab.mtgibbs.dev
-            ├── external-secret.yaml      # Uptime Kuma password from 1Password
-            ├── autokuma-deployment.yaml  # AutoKuma for GitOps monitors
-            └── autokuma-monitors.yaml    # ConfigMap with monitor definitions
+        ├── uptime-kuma/
+        │   ├── deployment.yaml           # Uptime Kuma v2
+        │   ├── pvc.yaml                  # Persistent storage
+        │   ├── ingress.yaml              # status.lab.mtgibbs.dev
+        │   ├── external-secret.yaml      # Uptime Kuma password from 1Password
+        │   ├── autokuma-deployment.yaml  # AutoKuma for GitOps monitors
+        │   └── autokuma-monitors.yaml    # ConfigMap with monitor definitions
+        └── homepage/
+            ├── namespace.yaml            # homepage namespace
+            ├── deployment.yaml           # Homepage dashboard with initContainer
+            ├── service.yaml              # ClusterIP service
+            ├── ingress.yaml              # home.lab.mtgibbs.dev with TLS
+            ├── configmap.yaml            # Dashboard configuration (settings, services, widgets)
+            └── kustomization.yaml
 ```
 
 ## Network Details
@@ -393,6 +412,7 @@ pi-cluster/
 | nginx-ingress | 443 | TCP | hostPort (192.168.1.55:443) |
 | Grafana | 3000 | TCP | Ingress (grafana.lab.mtgibbs.dev) |
 | Uptime Kuma | 3001 | TCP | Ingress (status.lab.mtgibbs.dev) |
+| Homepage | 3000 | TCP | Ingress (home.lab.mtgibbs.dev) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
 
 ## Resource Allocations
@@ -419,6 +439,7 @@ kubectl -n pihole logs -f deploy/pihole
 # dig @192.168.1.55 google.com
 
 # Access web UIs (via Ingress with Let's Encrypt certs)
+# Homepage:    https://home.lab.mtgibbs.dev
 # Grafana:     https://grafana.lab.mtgibbs.dev
 # Uptime Kuma: https://status.lab.mtgibbs.dev
 # Pi-hole:     https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
@@ -462,5 +483,5 @@ This ensures:
 - [x] **Ingress + TLS**: nginx-ingress + cert-manager for HTTPS
 - [x] **Uptime Kuma**: Status page for home services monitoring
 - [x] **GitOps monitor setup**: AutoKuma manages monitors declaratively via ConfigMap
-- [ ] **Homepage dashboard**: Unified dashboard for all services
+- [x] **Homepage dashboard**: Unified landing page for all services
 - [ ] **Multi-node**: Add second Pi for HA learning
