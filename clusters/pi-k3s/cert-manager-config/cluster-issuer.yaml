@@ -1,0 +1,37 @@
+---
+# Self-signed issuer for generating CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA Certificate (signed by self-signed issuer)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pi-cluster-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: pi-cluster-ca
+  secretName: pi-cluster-ca-secret
+  duration: 87600h # 10 years
+  renewBefore: 8760h # 1 year
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# ClusterIssuer using the CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: pi-cluster-ca-issuer
+spec:
+  ca:
+    secretName: pi-cluster-ca-secret

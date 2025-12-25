@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: "pi-cluster-ca-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Rewrite /grafana to / for Grafana
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "192.168.1.55"
+      secretName: grafana-tls
+  rules:
+    - host: "192.168.1.55"
+      http:
+        paths:
+          - path: /grafana(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: kube-prometheus-grafana
+                port:
+                  number: 3000

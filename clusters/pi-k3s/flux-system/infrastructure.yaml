@@ -33,7 +33,57 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 3. Pi-hole stack - depends on secret store for ExternalSecrets
+# 3. Ingress controller (nginx)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ingress
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/pi-k3s/ingress
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 4. Cert-manager - TLS certificate management
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/pi-k3s/cert-manager
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 5. Cert-manager config - ClusterIssuers (depends on cert-manager CRDs)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager-config
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: cert-manager
+  interval: 10m
+  path: ./clusters/pi-k3s/cert-manager-config
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 6. Pi-hole stack - depends on secret store for ExternalSecrets
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -51,7 +101,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 4. Monitoring stack - depends on secret store for ExternalSecrets
+# 7. Monitoring stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -60,6 +110,8 @@ metadata:
 spec:
   dependsOn:
     - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
   interval: 10m
   path: ./clusters/pi-k3s/monitoring
   prune: true

@@ -6,3 +6,4 @@ resources:
   - helmrelease.yaml
   - dashboard-pihole.yaml
   - dashboard-k8s-overview.yaml
+  - ingress.yaml
