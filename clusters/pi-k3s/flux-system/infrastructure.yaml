@@ -129,6 +129,7 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
+    - name: external-secrets-config
     - name: ingress
     - name: cert-manager-config
   interval: 10m

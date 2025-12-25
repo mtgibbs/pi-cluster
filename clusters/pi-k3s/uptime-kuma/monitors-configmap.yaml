@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uptime-kuma-monitors
+  namespace: uptime-kuma
+data:
+  monitors.json: |
+    [
+      {
+        "name": "Pi-hole DNS",
+        "type": "port",
+        "hostname": "192.168.1.55",
+        "port": 53,
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3
+      },
+      {
+        "name": "Pi-hole Admin",
+        "type": "http",
+        "url": "http://192.168.1.55/admin/",
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3
+      },
+      {
+        "name": "Grafana",
+        "type": "http",
+        "url": "https://grafana.192-168-1-55.sslip.io/api/health",
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3,
+        "ignoreTls": true
+      },
+      {
+        "name": "Uptime Kuma",
+        "type": "http",
+        "url": "https://status.192-168-1-55.sslip.io/",
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3,
+        "ignoreTls": true
+      },
+      {
+        "name": "Unbound DNS",
+        "type": "port",
+        "hostname": "unbound.pihole.svc.cluster.local",
+        "port": 5335,
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3
+      },
+      {
+        "name": "Prometheus",
+        "type": "http",
+        "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3
+      },
+      {
+        "name": "K3s API",
+        "type": "keyword",
+        "url": "https://192.168.1.55:6443/healthz",
+        "keyword": "ok",
+        "interval": 60,
+        "retryInterval": 30,
+        "maxretries": 3,
+        "ignoreTls": true
+      }
+    ]
