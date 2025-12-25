@@ -12,10 +12,23 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "192.168.1.55"
+        - "pi-k3s.local"
+        - "192-168-1-55.sslip.io"
       secretName: grafana-tls
   rules:
-    - host: "192.168.1.55"
+    # sslip.io provides wildcard DNS: 192-168-1-55.sslip.io -> 192.168.1.55
+    - host: "192-168-1-55.sslip.io"
+      http:
+        paths:
+          - path: /grafana(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: kube-prometheus-grafana
+                port:
+                  number: 3000
+    # Also support local hostname
+    - host: "pi-k3s.local"
       http:
         paths:
           - path: /grafana(/|$)(.*)
