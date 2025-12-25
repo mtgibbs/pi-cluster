@@ -39,6 +39,8 @@ spec:
               value: "delete"
             - name: AUTOKUMA__DOCKER__ENABLED
               value: "false"
+            - name: RUST_LOG
+              value: "debug"
           volumeMounts:
             - name: monitors
               mountPath: /monitors
