@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autokuma
+  namespace: uptime-kuma
+  labels:
+    app: autokuma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autokuma
+  template:
+    metadata:
+      labels:
+        app: autokuma
+    spec:
+      containers:
+        - name: autokuma
+          image: ghcr.io/bigboot/autokuma:latest
+          env:
+            - name: AUTOKUMA__KUMA__URL
+              value: "http://uptime-kuma:3001"
+            - name: AUTOKUMA__KUMA__USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-secret
+                  key: username
+            - name: AUTOKUMA__KUMA__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-secret
+                  key: password
+            - name: AUTOKUMA__STATIC_MONITORS
+              value: "/monitors"
+            - name: AUTOKUMA__TAG_NAME
+              value: "AutoKuma"
+            - name: AUTOKUMA__ON_DELETE
+              value: "delete"
+          volumeMounts:
+            - name: monitors
+              mountPath: /monitors
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: monitors
+          configMap:
+            name: autokuma-monitors

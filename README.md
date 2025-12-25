@@ -9,7 +9,7 @@ This project demonstrates enterprise-grade infrastructure practices on affordabl
 - **GitOps with Flux**: All configuration is declarative and version-controlled
 - **Secrets Management**: 1Password integration via External Secrets Operator - no secrets in git
 - **DNS Security**: Pi-hole for ad blocking + Unbound for recursive DNS resolution
-- **Ingress + TLS**: nginx-ingress with self-signed certificates via cert-manager
+- **Ingress + TLS**: nginx-ingress with Let's Encrypt certificates via Cloudflare DNS-01
 - **Observability**: Prometheus + Grafana with GitOps-managed dashboards
 - **Status Monitoring**: Uptime Kuma for home service health checks
 - **Infrastructure as Code**: Reproducible, auditable, and self-healing
@@ -81,7 +81,7 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Flux | v2.x | GitOps operator |
 | External Secrets Operator | 1.2.0 | Secrets sync from 1Password |
 | nginx-ingress | latest | Ingress controller (hostPort 443) |
-| cert-manager | latest | TLS certificates (self-signed CA) |
+| cert-manager | latest | TLS certificates (Let's Encrypt via Cloudflare) |
 | kube-prometheus-stack | latest | Prometheus + Grafana |
 | Pi-hole | latest | DNS-level ad blocking |
 | Unbound | latest | Recursive DNS resolver |
@@ -91,11 +91,11 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 
 | Service | URL |
 |---------|-----|
-| Grafana | https://grafana.192-168-1-55.sslip.io |
-| Uptime Kuma | https://status.192-168-1-55.sslip.io |
+| Grafana | https://grafana.lab.mtgibbs.dev |
+| Uptime Kuma | https://status.lab.mtgibbs.dev |
 | Pi-hole Admin | http://192.168.1.55/admin/ |
 
-*Note: Services use self-signed TLS certificates. Accept the browser warning or install the CA certificate.*
+*Note: Services use trusted Let's Encrypt certificates. Requires `*.lab.mtgibbs.dev` DNS configured in Cloudflare.*
 
 ## Repository Structure
 
@@ -111,7 +111,7 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 │       ├── external-secrets-config/  # ClusterSecretStore for 1Password
 │       ├── ingress/                  # nginx-ingress HelmRelease
 │       ├── cert-manager/             # cert-manager HelmRelease
-│       ├── cert-manager-config/      # ClusterIssuer (self-signed CA)
+│       ├── cert-manager-config/      # ClusterIssuers (Let's Encrypt) + Cloudflare secret
 │       ├── pihole/                   # Pi-hole + Unbound + exporter
 │       ├── monitoring/               # kube-prometheus-stack + Grafana
 │       └── uptime-kuma/              # Status page
@@ -196,8 +196,54 @@ kubectl -n external-secrets create secret generic onepassword-service-account \
 
 ### Create 1Password items
 
-Create items in your 1Password vault with these fields:
-- `pihole` item with `password` field
+Create items in your 1Password vault (`pi-cluster` vault) with these fields:
+
+| Item | Field | Purpose |
+|------|-------|---------|
+| `pihole` | `password` | Pi-hole admin password |
+| `grafana` | `admin-user`, `admin-password` | Grafana login credentials |
+| `cloudflare` | `api-token` | Let's Encrypt DNS-01 challenge |
+
+## Cloudflare Setup (for Let's Encrypt)
+
+Let's Encrypt uses DNS-01 challenge via Cloudflare to issue trusted TLS certificates.
+
+### 1. Create Cloudflare API Token
+
+Go to https://dash.cloudflare.com/profile/api-tokens and create a token:
+- **Permissions**: Zone → DNS → Edit
+- **Zone Resources**: Include → Specific zone → `mtgibbs.dev`
+
+### 2. Create Wildcard DNS Record
+
+In Cloudflare DNS for `mtgibbs.dev`, add:
+- **Type**: A
+- **Name**: `*.lab`
+- **Content**: `192.168.1.55`
+- **Proxy status**: OFF (DNS only, grey cloud)
+
+This makes all `*.lab.mtgibbs.dev` subdomains resolve to the Pi.
+
+### 3. Add Token to 1Password
+
+Create a `cloudflare` item in the `pi-cluster` vault with an `api-token` field containing your API token.
+
+### Troubleshooting Certificates
+
+```bash
+# Check ClusterIssuers are ready
+kubectl get clusterissuers
+
+# Check certificate status
+kubectl get certificates -A
+
+# Debug certificate issues
+kubectl describe certificate grafana-tls -n monitoring
+kubectl -n cert-manager logs deploy/cert-manager
+
+# Verify certificate issuer (should show "Let's Encrypt")
+curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
+```
 
 ## Deployment
 

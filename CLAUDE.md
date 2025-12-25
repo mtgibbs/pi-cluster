@@ -21,7 +21,7 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 5. **External Secrets Operator** - v1.2.0, syncs secrets from 1Password
 6. **Pi-hole + Unbound** - Deployed via Flux with GitOps-managed secrets
 7. **nginx-ingress** - Ingress controller with hostPort 443 (port 80 used by Pi-hole)
-8. **cert-manager** - Self-signed CA for TLS certificates
+8. **cert-manager** - Let's Encrypt certificates via Cloudflare DNS-01 challenge
 9. **Uptime Kuma** - Status page for home services monitoring
 
 ### Checklist
@@ -33,13 +33,14 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] DNS resilience during upgrades (Pi uses static DNS: 1.1.1.1/8.8.8.8)
 - [x] Pi-hole v6 API configuration (password, upstream DNS, adlists)
 - [x] GitOps-managed adlists (Firebog curated, ~900k domains)
-- [x] Ingress + TLS for web UIs (nginx-ingress + cert-manager with self-signed CA)
+- [x] Ingress + TLS for web UIs (nginx-ingress + cert-manager)
 - [x] Uptime Kuma status page (subdomain-based routing)
+- [x] Let's Encrypt certificates via Cloudflare DNS-01 challenge
 
 ### Service URLs
-All services use subdomain-based routing via sslip.io (resolves to 192.168.1.55):
-- **Grafana**: https://grafana.192-168-1-55.sslip.io
-- **Uptime Kuma**: https://status.192-168-1-55.sslip.io
+All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
+- **Grafana**: https://grafana.lab.mtgibbs.dev
+- **Uptime Kuma**: https://status.lab.mtgibbs.dev
 - **Pi-hole Admin**: http://192.168.1.55/admin/ (hostNetwork, no ingress)
 
 ## Architecture
@@ -119,7 +120,8 @@ pi-cluster/
         │   └── helmrelease.yaml      # cert-manager HelmRelease
         ├── cert-manager-config/
         │   ├── kustomization.yaml
-        │   └── cluster-issuer.yaml   # Self-signed CA ClusterIssuer
+        │   ├── external-secret.yaml  # Cloudflare API token from 1Password
+        │   └── cluster-issuer.yaml   # Let's Encrypt ClusterIssuers
         ├── pihole/
         │   ├── kustomization.yaml
         │   ├── unbound-configmap.yaml
@@ -140,7 +142,7 @@ pi-cluster/
             ├── pvc.yaml
             ├── deployment.yaml
             ├── service.yaml
-            └── ingress.yaml            # status.192-168-1-55.sslip.io
+            └── ingress.yaml            # status.lab.mtgibbs.dev
 ```
 
 ## Flux Dependency Chain
@@ -152,7 +154,7 @@ Kustomizations are applied in order via `dependsOn`:
 2. external-secrets-config → Creates ClusterSecretStore (needs CRDs)
 3. ingress                 → nginx-ingress controller
 4. cert-manager            → Installs cert-manager CRDs + controllers
-5. cert-manager-config     → Creates ClusterIssuer (needs cert-manager CRDs)
+5. cert-manager-config     → Creates ClusterIssuers + Cloudflare secret (needs cert-manager + ESO)
 6. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
 7. monitoring              → kube-prometheus-stack + Grafana (needs secrets, ingress, certs)
 8. uptime-kuma             → Status page (needs secrets, ingress, certs)
@@ -168,10 +170,17 @@ Kustomizations are applied in order via `dependsOn`:
 - Key format: `item/field` (e.g., `pihole/password`)
 
 ### 1Password Setup
-- Vault: `pi-cluster` (contains `pihole`, `grafana` items)
+- Vault: `pi-cluster` (contains `pihole`, `grafana`, `cloudflare` items)
 - Service Account: `pi-cluster-operator` (token in Development - Private vault)
 - K8s Secret: `onepassword-service-account` in `external-secrets` namespace
 - Bootstrap: Service account token must be created manually before Flux sync
+
+**Required 1Password Items:**
+| Item | Field | Used By |
+|------|-------|---------|
+| `pihole` | `password` | Pi-hole admin password |
+| `grafana` | `admin-user`, `admin-password` | Grafana login |
+| `cloudflare` | `api-token` | Let's Encrypt DNS-01 challenge |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -200,23 +209,46 @@ See `docs/pihole-v6-api.md` for full API reference.
 - Deployed via HelmRelease
 - Handles TLS termination for all web UIs
 
-### cert-manager Config
-- Self-signed CA ClusterIssuer: `pi-cluster-ca-issuer`
-- Auto-generates TLS certificates for Ingress resources
-- Certificates are stored as K8s secrets (e.g., `grafana-tls`, `uptime-kuma-tls`)
+### TLS Certificates (Let's Encrypt + Cloudflare)
+- **ClusterIssuers**: `letsencrypt-prod` (primary), `letsencrypt-staging` (testing)
+- **Challenge type**: DNS-01 via Cloudflare API
+- **Domain**: `*.lab.mtgibbs.dev` (wildcard DNS record)
+- **Email**: matt@mtgibbs.xyz (for Let's Encrypt notifications)
+- **Cloudflare API token**: Synced from 1Password via ExternalSecret
+
+#### Cloudflare Setup
+1. **API Token** (https://dash.cloudflare.com/profile/api-tokens):
+   - Permissions: Zone → DNS → Edit
+   - Zone Resources: Include → mtgibbs.dev
+2. **DNS Record**:
+   - Type: A, Name: `*.lab`, Content: `192.168.1.55`, Proxy status: OFF
+3. **1Password Item**:
+   - Vault: `pi-cluster`, Item: `cloudflare`, Field: `api-token`
+
+#### Certificate Troubleshooting
+```bash
+# Check ClusterIssuers status
+kubectl get clusterissuers
+
+# Check certificate status
+kubectl get certificates -A
+
+# Debug certificate issues
+kubectl describe certificate grafana-tls -n monitoring
+
+# Check cert-manager logs
+kubectl -n cert-manager logs deploy/cert-manager
+
+# Test HTTPS (should show "Let's Encrypt" issuer)
+curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
+```
 
 ### Uptime Kuma Config
 - Version 2.x
 - Status page for monitoring home services
-- URL: https://status.192-168-1-55.sslip.io
+- URL: https://status.lab.mtgibbs.dev
 - Data persisted to PVC (2Gi, local-path storage)
 - Monitors configured manually via web UI (uptime-kuma-api library has v2 compatibility issues)
-
-### sslip.io DNS Pattern
-Services use subdomain-based routing via sslip.io:
-- `*.192-168-1-55.sslip.io` resolves to `192.168.1.55`
-- Allows wildcard DNS without custom DNS server configuration
-- Future migration: Can switch to custom domain by updating Ingress hosts
 
 ## Commands Reference
 

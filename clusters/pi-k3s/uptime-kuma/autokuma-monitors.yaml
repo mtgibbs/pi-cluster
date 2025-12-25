@@ -1,69 +1,69 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: uptime-kuma-monitors
+  name: autokuma-monitors
   namespace: uptime-kuma
 data:
   monitors.json: |
-    [
-      {
+    {
+      "pihole-dns": {
+        "monitor_type": "port",
         "name": "Pi-hole DNS",
-        "type": "port",
         "hostname": "192.168.1.55",
         "port": 53,
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
+      "pihole-admin": {
+        "monitor_type": "http",
         "name": "Pi-hole Admin",
-        "type": "http",
         "url": "http://192.168.1.55/admin/",
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
+      "grafana": {
+        "monitor_type": "http",
         "name": "Grafana",
-        "type": "http",
         "url": "https://grafana.lab.mtgibbs.dev/api/health",
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
-        "name": "Uptime Kuma",
-        "type": "http",
-        "url": "https://status.lab.mtgibbs.dev/",
+      "prometheus": {
+        "monitor_type": "http",
+        "name": "Prometheus",
+        "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
+      "unbound-dns": {
+        "monitor_type": "port",
         "name": "Unbound DNS",
-        "type": "port",
         "hostname": "unbound.pihole.svc.cluster.local",
         "port": 5335,
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
-        "name": "Prometheus",
-        "type": "http",
-        "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
+      "k3s-api": {
+        "monitor_type": "keyword",
+        "name": "K3s API",
+        "url": "https://192.168.1.55:6443/healthz",
+        "keyword": "ok",
+        "ignoreTls": true,
         "interval": 60,
         "retryInterval": 30,
         "maxretries": 3
       },
-      {
-        "name": "K3s API",
-        "type": "keyword",
-        "url": "https://192.168.1.55:6443/healthz",
-        "keyword": "ok",
+      "uptime-kuma": {
+        "monitor_type": "http",
+        "name": "Uptime Kuma",
+        "url": "https://status.lab.mtgibbs.dev/",
         "interval": 60,
         "retryInterval": 30,
-        "maxretries": 3,
-        "ignoreTls": true
+        "maxretries": 3
       }
-    ]
+    }

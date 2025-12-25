@@ -160,7 +160,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Alertmanager   - alert routing                                │  │
 │  │  • Node Exporter  - host metrics                                 │  │
 │  │                                                                   │  │
-│  │  Grafana Ingress: grafana.192-168-1-55.sslip.io                 │  │
+│  │  Grafana Ingress: grafana.lab.mtgibbs.dev                       │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -177,8 +177,9 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                    cert-manager namespace                         │  │
 │  │                                                                   │  │
 │  │  cert-manager (Helm)                                             │  │
-│  │  • Self-signed CA ClusterIssuer (pi-cluster-ca-issuer)           │  │
-│  │  • Auto-generates TLS certs for Ingress resources                │  │
+│  │  • Let's Encrypt ClusterIssuers (letsencrypt-prod, staging)      │  │
+│  │  • Cloudflare DNS-01 challenge for *.lab.mtgibbs.dev             │  │
+│  │  • Auto-generates trusted TLS certs for Ingress resources        │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -190,7 +191,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Monitors home services (Pi-hole, Grafana, K3s API, etc)       │  │
 │  │  • PVC for SQLite database (2Gi)                                 │  │
 │  │                                                                   │  │
-│  │  Ingress: status.192-168-1-55.sslip.io                          │  │
+│  │  Ingress: status.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -275,25 +276,30 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - All traffic should be HTTPS anyway
 - Services accessed via HTTPS (self-signed certificates)
 
-### 9. Self-Signed CA with cert-manager
+### 9. Let's Encrypt with Cloudflare DNS-01
 
-**Decision**: Use self-signed ClusterIssuer instead of Let's Encrypt
+**Decision**: Use Let's Encrypt certificates with Cloudflare DNS-01 challenge
 
 **Why**:
-- No public domain to validate
-- sslip.io hostnames can't get real certs
-- Self-signed is fine for homelab use
-- Simple setup, no external dependencies
+- Trusted TLS certificates (no browser warnings)
+- DNS-01 challenge works for internal services (no public HTTP required)
+- Cloudflare manages `mtgibbs.dev` DNS, easy API integration
+- API token synced from 1Password via ExternalSecret
 
-### 10. Subdomain-based Routing via sslip.io
+**Setup**:
+- ClusterIssuers: `letsencrypt-prod`, `letsencrypt-staging`
+- Cloudflare API token with Zone:DNS:Edit permission
+- Wildcard DNS record `*.lab.mtgibbs.dev → 192.168.1.55` (proxy OFF)
 
-**Decision**: Use `service.192-168-1-55.sslip.io` pattern instead of path-based routing
+### 10. Subdomain-based Routing via lab.mtgibbs.dev
+
+**Decision**: Use `service.lab.mtgibbs.dev` pattern instead of path-based routing
 
 **Why**:
 - Many apps (like Uptime Kuma) don't work well with subpath routing
 - Subdomains are cleaner and more standard
-- sslip.io provides free wildcard DNS without configuration
-- Easy migration to custom domain later (just update Ingress hosts)
+- Custom domain allows for trusted Let's Encrypt certificates
+- Wildcard DNS record means no per-service DNS configuration
 
 ## Observability Stack
 
@@ -352,7 +358,7 @@ pi-cluster/
         ├── external-secrets-config/ # ClusterSecretStore for 1Password
         ├── ingress/                 # nginx-ingress (HelmRelease)
         ├── cert-manager/            # cert-manager (HelmRelease)
-        ├── cert-manager-config/     # ClusterIssuer (self-signed CA)
+        ├── cert-manager-config/     # ClusterIssuers (Let's Encrypt) + Cloudflare secret
         ├── pihole/
         │   ├── unbound-*.yaml       # Unbound DNS config + deployment
         │   ├── pihole-*.yaml        # Pi-hole deployment, PVC, service
@@ -365,7 +371,7 @@ pi-cluster/
         └── uptime-kuma/
             ├── deployment.yaml      # Uptime Kuma v2
             ├── pvc.yaml             # Persistent storage
-            └── ingress.yaml         # status.192-168-1-55.sslip.io
+            └── ingress.yaml         # status.lab.mtgibbs.dev
 ```
 
 ## Network Details
@@ -377,8 +383,8 @@ pi-cluster/
 | Unbound | 5335 | UDP/TCP | ClusterIP (internal only) |
 | pihole-exporter | 9617 | TCP | ClusterIP (Prometheus scrapes) |
 | nginx-ingress | 443 | TCP | hostPort (192.168.1.55:443) |
-| Grafana | 3000 | TCP | Ingress (grafana.192-168-1-55.sslip.io) |
-| Uptime Kuma | 3001 | TCP | Ingress (status.192-168-1-55.sslip.io) |
+| Grafana | 3000 | TCP | Ingress (grafana.lab.mtgibbs.dev) |
+| Uptime Kuma | 3001 | TCP | Ingress (status.lab.mtgibbs.dev) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
 
 ## Resource Allocations
@@ -404,9 +410,9 @@ kubectl -n pihole logs -f deploy/pihole
 # Test DNS resolution (from Mac)
 # dig @192.168.1.55 google.com
 
-# Access web UIs (via Ingress with self-signed certs)
-# Grafana:     https://grafana.192-168-1-55.sslip.io
-# Uptime Kuma: https://status.192-168-1-55.sslip.io
+# Access web UIs (via Ingress with Let's Encrypt certs)
+# Grafana:     https://grafana.lab.mtgibbs.dev
+# Uptime Kuma: https://status.lab.mtgibbs.dev
 # Pi-hole:     http://192.168.1.55/admin/
 
 # Flux commands
