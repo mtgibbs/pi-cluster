@@ -43,16 +43,15 @@ spec:
         limits:
           cpu: 500m
           memory: 256Mi
-      # ClusterIP for ingress, NodePort kept as fallback
+      # ClusterIP for ingress access
       service:
         type: ClusterIP
         port: 3000
-      # Configure for path-based ingress access
+      # Configure for subdomain access
       grafana.ini:
         server:
-          domain: "192-168-1-55.sslip.io"
-          root_url: "https://192-168-1-55.sslip.io/grafana"
-          serve_from_sub_path: true
+          domain: "grafana.192-168-1-55.sslip.io"
+          root_url: "https://grafana.192-168-1-55.sslip.io"
 
     # Prometheus settings
     prometheus:
