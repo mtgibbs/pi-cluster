@@ -1,0 +1,54 @@
+---
+# Endpoints for Unifi Controller (external device)
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: unifi-external
+  namespace: external-services
+subsets:
+  - addresses:
+      - ip: 192.168.1.30
+    ports:
+      - port: 8443
+        name: https
+---
+# Service pointing to the external endpoints
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi-external
+  namespace: external-services
+spec:
+  ports:
+    - port: 8443
+      targetPort: 8443
+      name: https
+---
+# Ingress with TLS termination
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: unifi
+  namespace: external-services
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "unifi.lab.mtgibbs.dev"
+      secretName: unifi-tls
+  rules:
+    - host: "unifi.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: unifi-external
+                port:
+                  number: 8443

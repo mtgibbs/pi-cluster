@@ -162,3 +162,22 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 10. External Services - reverse proxy for Unifi, Synology, Plex
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-services
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/external-services
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

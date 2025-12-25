@@ -17,6 +17,12 @@ data:
       Monitoring:
         style: row
         columns: 3
+      Network:
+        style: row
+        columns: 2
+      Media & Storage:
+        style: row
+        columns: 2
 
   services.yaml: |
     - Infrastructure:
@@ -52,6 +58,25 @@ data:
             description: Metrics Collection
             server: kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local
             port: 9090
+
+    - Network:
+        - Unifi Controller:
+            icon: unifi.png
+            href: https://unifi.lab.mtgibbs.dev
+            description: Network Management
+            siteMonitor: https://unifi.lab.mtgibbs.dev
+
+    - Media & Storage:
+        - Synology NAS:
+            icon: synology.png
+            href: https://nas.lab.mtgibbs.dev
+            description: 3TB Redundant Storage
+            siteMonitor: https://nas.lab.mtgibbs.dev
+        - Plex:
+            icon: plex.png
+            href: https://plex.lab.mtgibbs.dev
+            description: Media Server (Pi 3)
+            siteMonitor: https://plex.lab.mtgibbs.dev
 
   widgets.yaml: |
     - resources:

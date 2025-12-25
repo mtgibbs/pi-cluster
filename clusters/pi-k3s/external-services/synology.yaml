@@ -1,0 +1,52 @@
+---
+# Endpoints for Synology NAS (external device)
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: synology-external
+  namespace: external-services
+subsets:
+  - addresses:
+      - ip: 192.168.1.60
+    ports:
+      - port: 5000
+        name: http
+---
+# Service pointing to the external endpoints
+apiVersion: v1
+kind: Service
+metadata:
+  name: synology-external
+  namespace: external-services
+spec:
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: http
+---
+# Ingress with TLS termination
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: synology
+  namespace: external-services
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "nas.lab.mtgibbs.dev"
+      secretName: synology-tls
+  rules:
+    - host: "nas.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: synology-external
+                port:
+                  number: 5000

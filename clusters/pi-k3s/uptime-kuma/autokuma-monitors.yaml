@@ -80,3 +80,30 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  unifi.json: |
+    {
+      "type": "http",
+      "name": "Unifi Controller",
+      "url": "https://unifi.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  synology.json: |
+    {
+      "type": "http",
+      "name": "Synology NAS",
+      "url": "https://nas.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  plex.json: |
+    {
+      "type": "http",
+      "name": "Plex",
+      "url": "https://plex.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
