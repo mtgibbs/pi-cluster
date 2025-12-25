@@ -71,3 +71,12 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  homepage.json: |
+    {
+      "type": "http",
+      "name": "Homepage",
+      "url": "https://home.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
