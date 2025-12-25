@@ -41,8 +41,6 @@ spec:
               value: "false"
             - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
               value: "true"
-            - name: RUST_LOG
-              value: "debug"
           volumeMounts:
             - name: monitors
               mountPath: /monitors
