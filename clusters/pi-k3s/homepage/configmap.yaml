@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage-config
+  namespace: homepage
+data:
+  settings.yaml: |
+    title: Pi-K3s Home Lab
+    description: Raspberry Pi Kubernetes Cluster
+    theme: dark
+    color: slate
+    headerStyle: clean
+    layout:
+      Infrastructure:
+        style: row
+        columns: 3
+      Monitoring:
+        style: row
+        columns: 3
+
+  services.yaml: |
+    - Infrastructure:
+        - Pi-hole:
+            icon: pi-hole.png
+            href: https://pihole.lab.mtgibbs.dev
+            description: DNS & Ad Blocking
+            siteMonitor: https://pihole.lab.mtgibbs.dev
+        - Unbound:
+            icon: mdi-dns
+            description: Recursive DNS Resolver
+            server: unbound.pihole.svc.cluster.local
+            port: 5335
+        - K3s Cluster:
+            icon: kubernetes.png
+            description: Lightweight Kubernetes
+            server: 192.168.1.55
+            port: 6443
+
+    - Monitoring:
+        - Grafana:
+            icon: grafana.png
+            href: https://grafana.lab.mtgibbs.dev
+            description: Dashboards & Visualization
+            siteMonitor: https://grafana.lab.mtgibbs.dev
+        - Uptime Kuma:
+            icon: uptime-kuma.png
+            href: https://status.lab.mtgibbs.dev
+            description: Status Page
+            siteMonitor: https://status.lab.mtgibbs.dev
+        - Prometheus:
+            icon: prometheus.png
+            description: Metrics Collection
+            server: kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local
+            port: 9090
+
+  widgets.yaml: |
+    - resources:
+        cpu: true
+        memory: true
+        disk: /
+        label: System
+
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: short
+
+  bookmarks.yaml: |
+    - Developer:
+        - GitHub:
+            - icon: github.png
+              href: https://github.com/mtgibbs/pi-cluster
+        - Flux CD:
+            - icon: flux-cd.png
+              href: https://fluxcd.io/docs/
+
+  docker.yaml: |
+    # Docker integration disabled - using Kubernetes
+
+  kubernetes.yaml: |
+    # Kubernetes integration disabled for now
+    # Can enable later for auto-discovery
