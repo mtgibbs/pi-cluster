@@ -21,12 +21,12 @@ data:
         """Wait for Uptime Kuma to be ready"""
         for i in range(max_retries):
             try:
-                api.connect()
+                api.connect(wait=True)
                 print(f"Connected to Uptime Kuma at {KUMA_URL}")
                 return True
             except Exception as e:
                 print(f"Waiting for Uptime Kuma... ({i+1}/{max_retries}): {e}")
-                time.sleep(5)
+                time.sleep(10)
         return False
 
     def setup_account(api):
@@ -168,7 +168,7 @@ spec:
             - sh
             - -c
             - |
-              pip install --quiet uptime-kuma-api &&
+              pip install --quiet uptime-kuma-api websocket-client &&
               python /scripts/setup.py
           env:
             - name: KUMA_URL
