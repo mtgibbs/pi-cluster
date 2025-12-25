@@ -19,12 +19,12 @@ data:
 
     def wait_for_kuma(api, max_retries=30):
         """Wait for Uptime Kuma to be ready"""
-        # Wait for Socket.IO to be fully initialized
-        print("Waiting for Socket.IO to initialize...")
-        time.sleep(15)
-
         for i in range(max_retries):
             try:
+                # API auto-connects on creation, check if already connected
+                if api.sio.connected:
+                    print(f"Already connected to Uptime Kuma at {KUMA_URL}")
+                    return True
                 api.connect()
                 print(f"Connected to Uptime Kuma at {KUMA_URL}")
                 return True
