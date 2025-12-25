@@ -23,6 +23,7 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 7. **nginx-ingress** - Ingress controller with hostPort 443 (port 80 used by Pi-hole)
 8. **cert-manager** - Let's Encrypt certificates via Cloudflare DNS-01 challenge
 9. **Uptime Kuma** - Status page for home services monitoring
+10. **AutoKuma** - GitOps-managed monitors for Uptime Kuma
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -36,12 +37,14 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] Ingress + TLS for web UIs (nginx-ingress + cert-manager)
 - [x] Uptime Kuma status page (subdomain-based routing)
 - [x] Let's Encrypt certificates via Cloudflare DNS-01 challenge
+- [x] AutoKuma for GitOps-managed monitors
+- [x] Pi-hole ingress (pihole.lab.mtgibbs.dev)
 
 ### Service URLs
 All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
 - **Grafana**: https://grafana.lab.mtgibbs.dev
 - **Uptime Kuma**: https://status.lab.mtgibbs.dev
-- **Pi-hole Admin**: http://192.168.1.55/admin/ (hostNetwork, no ingress)
+- **Pi-hole Admin**: https://pihole.lab.mtgibbs.dev (also available via hostNetwork: http://192.168.1.55/admin/)
 
 ## Architecture
 
@@ -130,6 +133,7 @@ pi-cluster/
         │   ├── pihole-deployment.yaml
         │   ├── pihole-service.yaml
         │   ├── pihole-exporter.yaml
+        │   ├── ingress.yaml           # pihole.lab.mtgibbs.dev
         │   └── external-secret.yaml   # Syncs password from 1Password
         ├── monitoring/
         │   ├── kustomization.yaml
@@ -142,7 +146,10 @@ pi-cluster/
             ├── pvc.yaml
             ├── deployment.yaml
             ├── service.yaml
-            └── ingress.yaml            # status.lab.mtgibbs.dev
+            ├── ingress.yaml               # status.lab.mtgibbs.dev
+            ├── external-secret.yaml       # Uptime Kuma password from 1Password
+            ├── autokuma-deployment.yaml   # AutoKuma for GitOps monitors
+            └── autokuma-monitors.yaml     # ConfigMap with monitor definitions
 ```
 
 ## Flux Dependency Chain
@@ -181,6 +188,7 @@ Kustomizations are applied in order via `dependsOn`:
 | `pihole` | `password` | Pi-hole admin password |
 | `grafana` | `admin-user`, `admin-password` | Grafana login |
 | `cloudflare` | `api-token` | Let's Encrypt DNS-01 challenge |
+| `uptime-kuma` | `username`, `password` | Uptime Kuma login + AutoKuma API access |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -248,7 +256,28 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
 - Status page for monitoring home services
 - URL: https://status.lab.mtgibbs.dev
 - Data persisted to PVC (2Gi, local-path storage)
-- Monitors configured manually via web UI (uptime-kuma-api library has v2 compatibility issues)
+- **AutoKuma** manages monitors declaratively via GitOps
+
+#### AutoKuma Configuration
+- Image: `ghcr.io/bigboot/autokuma:latest`
+- Monitors defined as JSON files in ConfigMap (`autokuma-monitors`)
+- Each `.json` file in the ConfigMap becomes a monitor (filename = monitor ID)
+- Required settings:
+  - `AUTOKUMA__FILES__FOLLOW_SYMLINKS=true` (Kubernetes ConfigMaps use symlinks)
+  - `AUTOKUMA__DOCKER__ENABLED=false` (not using Docker source)
+  - `AUTOKUMA__ON_DELETE=delete` (monitors removed from ConfigMap are deleted)
+- Credentials synced from 1Password via ExternalSecret
+
+#### Configured Monitors (7 total)
+| Monitor | Type | Target |
+|---------|------|--------|
+| Pi-hole DNS | port | 192.168.1.55:53 |
+| Pi-hole Admin | http | https://pihole.lab.mtgibbs.dev/admin/ |
+| Grafana | http | https://grafana.lab.mtgibbs.dev/api/health |
+| Prometheus | http | http://prometheus-kube-prometheus-prometheus.monitoring:9090/-/healthy |
+| Unbound DNS | port | unbound.pihole.svc.cluster.local:5335 |
+| K3s API | port | 192.168.1.55:6443 (TCP port check) |
+| Uptime Kuma | http | https://status.lab.mtgibbs.dev/ |
 
 ## Commands Reference
 
@@ -293,4 +322,4 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 
 - **Homepage dashboard** - Unified dashboard for all services
 - **Multi-node** - Add another Pi for HA learning
-- **GitOps monitor configuration** - Automated Uptime Kuma monitor setup when library supports v2
+- **Automated backups** - Backup strategy for PVCs and cluster state

@@ -190,8 +190,13 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Self-hosted status page                                       │  │
 │  │  • Monitors home services (Pi-hole, Grafana, K3s API, etc)       │  │
 │  │  • PVC for SQLite database (2Gi)                                 │  │
+│  │  • Ingress: status.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
-│  │  Ingress: status.lab.mtgibbs.dev                                │  │
+│  │  AutoKuma (bigboot/autokuma)                                     │  │
+│  │  • GitOps-managed monitors via ConfigMap                         │  │
+│  │  • Syncs monitor definitions to Uptime Kuma API                  │  │
+│  │  • Monitors: Pi-hole DNS, Admin, Grafana, Prometheus, Unbound,  │  │
+│  │    K3s API, Uptime Kuma (7 total)                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -369,9 +374,12 @@ pi-cluster/
         │   ├── ingress.yaml         # Grafana Ingress
         │   └── external-secret.yaml # Grafana password from 1Password
         └── uptime-kuma/
-            ├── deployment.yaml      # Uptime Kuma v2
-            ├── pvc.yaml             # Persistent storage
-            └── ingress.yaml         # status.lab.mtgibbs.dev
+            ├── deployment.yaml           # Uptime Kuma v2
+            ├── pvc.yaml                  # Persistent storage
+            ├── ingress.yaml              # status.lab.mtgibbs.dev
+            ├── external-secret.yaml      # Uptime Kuma password from 1Password
+            ├── autokuma-deployment.yaml  # AutoKuma for GitOps monitors
+            └── autokuma-monitors.yaml    # ConfigMap with monitor definitions
 ```
 
 ## Network Details
@@ -379,7 +387,7 @@ pi-cluster/
 | Component | Port | Protocol | Exposure |
 |-----------|------|----------|----------|
 | Pi-hole DNS | 53 | UDP/TCP | hostNetwork (192.168.1.55:53) |
-| Pi-hole Web | 80 | TCP | hostNetwork (192.168.1.55:80) |
+| Pi-hole Web | 80 | TCP | hostNetwork (192.168.1.55:80) AND Ingress (pihole.lab.mtgibbs.dev) |
 | Unbound | 5335 | UDP/TCP | ClusterIP (internal only) |
 | pihole-exporter | 9617 | TCP | ClusterIP (Prometheus scrapes) |
 | nginx-ingress | 443 | TCP | hostPort (192.168.1.55:443) |
@@ -413,7 +421,7 @@ kubectl -n pihole logs -f deploy/pihole
 # Access web UIs (via Ingress with Let's Encrypt certs)
 # Grafana:     https://grafana.lab.mtgibbs.dev
 # Uptime Kuma: https://status.lab.mtgibbs.dev
-# Pi-hole:     http://192.168.1.55/admin/
+# Pi-hole:     https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
 
 # Flux commands
 flux get all                              # Check all Flux resources
@@ -453,6 +461,6 @@ This ensures:
 - [x] **DNS Resilience**: Static DNS on Pi node for image pulls
 - [x] **Ingress + TLS**: nginx-ingress + cert-manager for HTTPS
 - [x] **Uptime Kuma**: Status page for home services monitoring
+- [x] **GitOps monitor setup**: AutoKuma manages monitors declaratively via ConfigMap
 - [ ] **Homepage dashboard**: Unified dashboard for all services
 - [ ] **Multi-node**: Add second Pi for HA learning
-- [ ] **GitOps monitor setup**: Automate Uptime Kuma monitors when library supports v2
