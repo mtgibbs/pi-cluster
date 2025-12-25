@@ -15,6 +15,20 @@ spec:
       labels:
         app: homepage
     spec:
+      initContainers:
+        - name: copy-config
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              cp /configmap/* /config/
+              mkdir -p /config/logs
+          volumeMounts:
+            - name: configmap
+              mountPath: /configmap
+            - name: config
+              mountPath: /config
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:latest
@@ -44,6 +58,8 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
-        - name: config
+        - name: configmap
           configMap:
             name: homepage-config
+        - name: config
+          emptyDir: {}
