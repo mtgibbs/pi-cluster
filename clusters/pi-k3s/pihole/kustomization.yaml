@@ -10,3 +10,4 @@ resources:
   - pihole-service.yaml
   - pihole-exporter.yaml
   - external-secret.yaml
+  - ingress.yaml
