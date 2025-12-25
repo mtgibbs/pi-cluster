@@ -54,11 +54,10 @@ data:
     }
   k3s-api.json: |
     {
-      "type": "keyword",
+      "type": "port",
       "name": "K3s API",
-      "url": "https://192.168.1.55:6443/healthz",
-      "keyword": "ok",
-      "ignoreTls": true,
+      "hostname": "192.168.1.55",
+      "port": 6443,
       "interval": 60,
       "retryInterval": 30,
       "maxretries": 3
