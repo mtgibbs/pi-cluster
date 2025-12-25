@@ -9,6 +9,9 @@ This project demonstrates enterprise-grade infrastructure practices on affordabl
 - **GitOps with Flux**: All configuration is declarative and version-controlled
 - **Secrets Management**: 1Password integration via External Secrets Operator - no secrets in git
 - **DNS Security**: Pi-hole for ad blocking + Unbound for recursive DNS resolution
+- **Ingress + TLS**: nginx-ingress with self-signed certificates via cert-manager
+- **Observability**: Prometheus + Grafana with GitOps-managed dashboards
+- **Status Monitoring**: Uptime Kuma for home service health checks
 - **Infrastructure as Code**: Reproducible, auditable, and self-healing
 
 ```
@@ -77,8 +80,22 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | K3s | v1.33.6+k3s1 | Lightweight Kubernetes |
 | Flux | v2.x | GitOps operator |
 | External Secrets Operator | 1.2.0 | Secrets sync from 1Password |
+| nginx-ingress | latest | Ingress controller (hostPort 443) |
+| cert-manager | latest | TLS certificates (self-signed CA) |
+| kube-prometheus-stack | latest | Prometheus + Grafana |
 | Pi-hole | latest | DNS-level ad blocking |
 | Unbound | latest | Recursive DNS resolver |
+| Uptime Kuma | v2.x | Status page for home services |
+
+## Service URLs
+
+| Service | URL |
+|---------|-----|
+| Grafana | https://grafana.192-168-1-55.sslip.io |
+| Uptime Kuma | https://status.192-168-1-55.sslip.io |
+| Pi-hole Admin | http://192.168.1.55/admin/ |
+
+*Note: Services use self-signed TLS certificates. Accept the browser warning or install the CA certificate.*
 
 ## Repository Structure
 
@@ -88,15 +105,16 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 ├── CLAUDE.md                 # Development context and notes
 ├── clusters/
 │   └── pi-k3s/
-│       ├── flux-system/      # Flux bootstrap and orchestration
-│       │   └── infrastructure.yaml
-│       ├── external-secrets/ # ESO Helm release
-│       ├── external-secrets-config/  # ClusterSecretStore
-│       └── pihole/           # Pi-hole + Unbound manifests
-│           ├── kustomization.yaml
-│           ├── unbound-*.yaml
-│           ├── pihole-*.yaml
-│           └── external-secret.yaml
+│       ├── flux-system/              # Flux bootstrap and orchestration
+│       │   └── infrastructure.yaml   # Kustomizations with dependencies
+│       ├── external-secrets/         # ESO Helm release
+│       ├── external-secrets-config/  # ClusterSecretStore for 1Password
+│       ├── ingress/                  # nginx-ingress HelmRelease
+│       ├── cert-manager/             # cert-manager HelmRelease
+│       ├── cert-manager-config/      # ClusterIssuer (self-signed CA)
+│       ├── pihole/                   # Pi-hole + Unbound + exporter
+│       ├── monitoring/               # kube-prometheus-stack + Grafana
+│       └── uptime-kuma/              # Status page
 ├── docs/
 │   ├── external-secrets-1password-sdk.md
 │   └── pihole-v6-api.md
@@ -277,11 +295,11 @@ kubectl describe externalsecret -n pihole pihole-secret
 ## Future Improvements
 
 - [x] Observability stack (Prometheus, Grafana) - deployed via kube-prometheus-stack
-- [ ] Ingress controller with TLS (cert-manager)
-- [ ] Additional workloads (Uptime Kuma, Homepage)
+- [x] Ingress controller with TLS (nginx-ingress + cert-manager)
+- [x] Uptime Kuma status page for home services
+- [ ] Homepage dashboard - unified dashboard for all services
 - [ ] Multi-node cluster (add another Pi)
 - [ ] Automated backups
-- [ ] Migrate Grafana secrets to ExternalSecret
 
 ## License
 

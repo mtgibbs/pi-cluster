@@ -20,6 +20,9 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 4. **Flux GitOps** - Bootstrapped to GitHub repo, manages all workloads
 5. **External Secrets Operator** - v1.2.0, syncs secrets from 1Password
 6. **Pi-hole + Unbound** - Deployed via Flux with GitOps-managed secrets
+7. **nginx-ingress** - Ingress controller with hostPort 443 (port 80 used by Pi-hole)
+8. **cert-manager** - Self-signed CA for TLS certificates
+9. **Uptime Kuma** - Status page for home services monitoring
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -31,6 +34,13 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] Pi-hole v6 API configuration (password, upstream DNS, adlists)
 - [x] GitOps-managed adlists (Firebog curated, ~900k domains)
 - [x] Ingress + TLS for web UIs (nginx-ingress + cert-manager with self-signed CA)
+- [x] Uptime Kuma status page (subdomain-based routing)
+
+### Service URLs
+All services use subdomain-based routing via sslip.io (resolves to 192.168.1.55):
+- **Grafana**: https://grafana.192-168-1-55.sslip.io
+- **Uptime Kuma**: https://status.192-168-1-55.sslip.io
+- **Pi-hole Admin**: http://192.168.1.55/admin/ (hostNetwork, no ingress)
 
 ## Architecture
 
@@ -101,6 +111,15 @@ pi-cluster/
         ├── external-secrets-config/
         │   ├── kustomization.yaml
         │   └── cluster-secret-store.yaml  # 1Password ClusterSecretStore
+        ├── ingress/
+        │   ├── kustomization.yaml
+        │   └── helmrelease.yaml      # nginx-ingress HelmRelease
+        ├── cert-manager/
+        │   ├── kustomization.yaml
+        │   └── helmrelease.yaml      # cert-manager HelmRelease
+        ├── cert-manager-config/
+        │   ├── kustomization.yaml
+        │   └── cluster-issuer.yaml   # Self-signed CA ClusterIssuer
         ├── pihole/
         │   ├── kustomization.yaml
         │   ├── unbound-configmap.yaml
@@ -110,10 +129,18 @@ pi-cluster/
         │   ├── pihole-service.yaml
         │   ├── pihole-exporter.yaml
         │   └── external-secret.yaml   # Syncs password from 1Password
-        └── monitoring/
+        ├── monitoring/
+        │   ├── kustomization.yaml
+        │   ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease
+        │   ├── ingress.yaml            # Grafana Ingress
+        │   └── external-secret.yaml    # Grafana password from 1Password
+        └── uptime-kuma/
             ├── kustomization.yaml
-            ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease
-            └── external-secret.yaml    # Grafana password from 1Password
+            ├── namespace.yaml
+            ├── pvc.yaml
+            ├── deployment.yaml
+            ├── service.yaml
+            └── ingress.yaml            # status.192-168-1-55.sslip.io
 ```
 
 ## Flux Dependency Chain
@@ -121,10 +148,14 @@ pi-cluster/
 Kustomizations are applied in order via `dependsOn`:
 
 ```
-1. external-secrets       → Installs ESO operator + CRDs
+1. external-secrets        → Installs ESO operator + CRDs
 2. external-secrets-config → Creates ClusterSecretStore (needs CRDs)
-3. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
-4. monitoring             → kube-prometheus-stack + Grafana ExternalSecret
+3. ingress                 → nginx-ingress controller
+4. cert-manager            → Installs cert-manager CRDs + controllers
+5. cert-manager-config     → Creates ClusterIssuer (needs cert-manager CRDs)
+6. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
+7. monitoring              → kube-prometheus-stack + Grafana (needs secrets, ingress, certs)
+8. uptime-kuma             → Status page (needs secrets, ingress, certs)
 ```
 
 ## Key Technical Details
@@ -163,6 +194,29 @@ See `docs/pihole-v6-api.md` for full API reference.
 - Port 5335 (non-privileged)
 - Full recursive resolution
 - DNSSEC validation enabled
+
+### nginx-ingress Config
+- Uses hostPort 443 (HTTPS only, port 80 is used by Pi-hole's hostNetwork)
+- Deployed via HelmRelease
+- Handles TLS termination for all web UIs
+
+### cert-manager Config
+- Self-signed CA ClusterIssuer: `pi-cluster-ca-issuer`
+- Auto-generates TLS certificates for Ingress resources
+- Certificates are stored as K8s secrets (e.g., `grafana-tls`, `uptime-kuma-tls`)
+
+### Uptime Kuma Config
+- Version 2.x
+- Status page for monitoring home services
+- URL: https://status.192-168-1-55.sslip.io
+- Data persisted to PVC (2Gi, local-path storage)
+- Monitors configured manually via web UI (uptime-kuma-api library has v2 compatibility issues)
+
+### sslip.io DNS Pattern
+Services use subdomain-based routing via sslip.io:
+- `*.192-168-1-55.sslip.io` resolves to `192.168.1.55`
+- Allows wildcard DNS without custom DNS server configuration
+- Future migration: Can switch to custom domain by updating Ingress hosts
 
 ## Commands Reference
 
@@ -205,6 +259,6 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 
 ## Future Additions (Backlog)
 
-- **Ingress + TLS** - nginx-ingress + cert-manager
-- **Additional workloads** - Uptime Kuma, Homepage dashboard
+- **Homepage dashboard** - Unified dashboard for all services
 - **Multi-node** - Add another Pi for HA learning
+- **GitOps monitor configuration** - Automated Uptime Kuma monitor setup when library supports v2

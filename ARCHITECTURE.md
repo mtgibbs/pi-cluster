@@ -160,6 +160,38 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Alertmanager   - alert routing                                │  │
 │  │  • Node Exporter  - host metrics                                 │  │
 │  │                                                                   │  │
+│  │  Grafana Ingress: grafana.192-168-1-55.sslip.io                 │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    ingress-nginx namespace                        │  │
+│  │                                                                   │  │
+│  │  nginx-ingress-controller (Helm)                                 │  │
+│  │  • hostPort 443 (HTTPS) - port 80 used by Pi-hole                │  │
+│  │  • TLS termination for all web UIs                               │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    cert-manager namespace                         │  │
+│  │                                                                   │  │
+│  │  cert-manager (Helm)                                             │  │
+│  │  • Self-signed CA ClusterIssuer (pi-cluster-ca-issuer)           │  │
+│  │  • Auto-generates TLS certs for Ingress resources                │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    uptime-kuma namespace                          │  │
+│  │                                                                   │  │
+│  │  Uptime Kuma v2                                                  │  │
+│  │  • Self-hosted status page                                       │  │
+│  │  • Monitors home services (Pi-hole, Grafana, K3s API, etc)       │  │
+│  │  • PVC for SQLite database (2Gi)                                 │  │
+│  │                                                                   │  │
+│  │  Ingress: status.192-168-1-55.sslip.io                          │  │
+│  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -232,7 +264,36 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 **Why**:
 - Not needed for DNS workload
 - Reduces resource usage on single Pi
-- Can add nginx-ingress or Traefik later if needed for web workloads
+- Using nginx-ingress instead for web workloads
+
+### 8. nginx-ingress on hostPort 443 Only
+
+**Decision**: Use hostPort 443 (HTTPS) only, not port 80
+
+**Why**:
+- Port 80 is already used by Pi-hole's hostNetwork
+- All traffic should be HTTPS anyway
+- Services accessed via HTTPS (self-signed certificates)
+
+### 9. Self-Signed CA with cert-manager
+
+**Decision**: Use self-signed ClusterIssuer instead of Let's Encrypt
+
+**Why**:
+- No public domain to validate
+- sslip.io hostnames can't get real certs
+- Self-signed is fine for homelab use
+- Simple setup, no external dependencies
+
+### 10. Subdomain-based Routing via sslip.io
+
+**Decision**: Use `service.192-168-1-55.sslip.io` pattern instead of path-based routing
+
+**Why**:
+- Many apps (like Uptime Kuma) don't work well with subpath routing
+- Subdomains are cleaner and more standard
+- sslip.io provides free wildcard DNS without configuration
+- Easy migration to custom domain later (just update Ingress hosts)
 
 ## Observability Stack
 
@@ -284,14 +345,27 @@ pi-cluster/
 ├── scripts/                 # Utility scripts
 └── clusters/
     └── pi-k3s/
+        ├── flux-system/             # Flux GitOps controllers
+        │   ├── infrastructure.yaml  # Kustomizations with dependencies
+        │   └── ...
+        ├── external-secrets/        # ESO operator (HelmRelease)
+        ├── external-secrets-config/ # ClusterSecretStore for 1Password
+        ├── ingress/                 # nginx-ingress (HelmRelease)
+        ├── cert-manager/            # cert-manager (HelmRelease)
+        ├── cert-manager-config/     # ClusterIssuer (self-signed CA)
         ├── pihole/
-        │   ├── unbound-configmap.yaml    # Unbound DNS config
-        │   ├── unbound-deployment.yaml   # Unbound + ClusterIP svc
-        │   ├── pihole-pvc.yaml           # Persistent volumes
-        │   ├── pihole-deployment.yaml    # Pi-hole with hostNetwork
-        │   ├── pihole-service.yaml       # ClusterIP for web UI
-        │   └── pihole-exporter.yaml      # Prometheus exporter + ServiceMonitor
-        └── flux-system/                  # Future GitOps (empty)
+        │   ├── unbound-*.yaml       # Unbound DNS config + deployment
+        │   ├── pihole-*.yaml        # Pi-hole deployment, PVC, service
+        │   ├── pihole-exporter.yaml # Prometheus exporter
+        │   └── external-secret.yaml # Password from 1Password
+        ├── monitoring/
+        │   ├── helmrelease.yaml     # kube-prometheus-stack
+        │   ├── ingress.yaml         # Grafana Ingress
+        │   └── external-secret.yaml # Grafana password from 1Password
+        └── uptime-kuma/
+            ├── deployment.yaml      # Uptime Kuma v2
+            ├── pvc.yaml             # Persistent storage
+            └── ingress.yaml         # status.192-168-1-55.sslip.io
 ```
 
 ## Network Details
@@ -302,7 +376,9 @@ pi-cluster/
 | Pi-hole Web | 80 | TCP | hostNetwork (192.168.1.55:80) |
 | Unbound | 5335 | UDP/TCP | ClusterIP (internal only) |
 | pihole-exporter | 9617 | TCP | ClusterIP (Prometheus scrapes) |
-| Grafana | 3000 | TCP | ClusterIP (port-forward to access) |
+| nginx-ingress | 443 | TCP | hostPort (192.168.1.55:443) |
+| Grafana | 3000 | TCP | Ingress (grafana.192-168-1-55.sslip.io) |
+| Uptime Kuma | 3001 | TCP | Ingress (status.192-168-1-55.sslip.io) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
 
 ## Resource Allocations
@@ -328,8 +404,15 @@ kubectl -n pihole logs -f deploy/pihole
 # Test DNS resolution (from Mac)
 # dig @192.168.1.55 google.com
 
-# Access Grafana (then open http://localhost:3000)
-kubectl -n monitoring port-forward svc/kube-prometheus-grafana 3000:80
+# Access web UIs (via Ingress with self-signed certs)
+# Grafana:     https://grafana.192-168-1-55.sslip.io
+# Uptime Kuma: https://status.192-168-1-55.sslip.io
+# Pi-hole:     http://192.168.1.55/admin/
+
+# Flux commands
+flux get all                              # Check all Flux resources
+flux reconcile source git flux-system     # Force git sync
+flux reconcile kustomization monitoring   # Reconcile specific kustomization
 
 # Set/reset Pi-hole password
 kubectl -n pihole exec deploy/pihole -- pihole setpassword 'newpassword'
@@ -362,6 +445,8 @@ This ensures:
 - [x] **Secrets Management**: External Secrets Operator with 1Password
 - [x] **Flux GitOps**: Auto-deploy on git push
 - [x] **DNS Resilience**: Static DNS on Pi node for image pulls
-- [ ] **Ingress + TLS**: nginx-ingress + cert-manager for HTTPS
-- [ ] **Additional Apps**: Uptime Kuma, Homepage dashboard
+- [x] **Ingress + TLS**: nginx-ingress + cert-manager for HTTPS
+- [x] **Uptime Kuma**: Status page for home services monitoring
+- [ ] **Homepage dashboard**: Unified dashboard for all services
 - [ ] **Multi-node**: Add second Pi for HA learning
+- [ ] **GitOps monitor setup**: Automate Uptime Kuma monitors when library supports v2
