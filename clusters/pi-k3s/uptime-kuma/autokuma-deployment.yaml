@@ -37,6 +37,8 @@ spec:
               value: "AutoKuma"
             - name: AUTOKUMA__ON_DELETE
               value: "delete"
+            - name: AUTOKUMA__DOCKER__ENABLED
+              value: "false"
           volumeMounts:
             - name: monitors
               mountPath: /monitors
