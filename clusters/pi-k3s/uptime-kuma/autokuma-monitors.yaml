@@ -4,66 +4,71 @@ metadata:
   name: autokuma-monitors
   namespace: uptime-kuma
 data:
-  monitors.json: |
+  # Each file is a separate monitor - filename (without .json) becomes the monitor ID
+  pihole-dns.json: |
     {
-      "pihole-dns": {
-        "type": "port",
-        "name": "Pi-hole DNS",
-        "hostname": "192.168.1.55",
-        "port": 53,
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "pihole-admin": {
-        "type": "http",
-        "name": "Pi-hole Admin",
-        "url": "https://pihole.lab.mtgibbs.dev/admin/",
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "grafana": {
-        "type": "http",
-        "name": "Grafana",
-        "url": "https://grafana.lab.mtgibbs.dev/api/health",
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "prometheus": {
-        "type": "http",
-        "name": "Prometheus",
-        "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "unbound-dns": {
-        "type": "port",
-        "name": "Unbound DNS",
-        "hostname": "unbound.pihole.svc.cluster.local",
-        "port": 5335,
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "k3s-api": {
-        "type": "keyword",
-        "name": "K3s API",
-        "url": "https://192.168.1.55:6443/healthz",
-        "keyword": "ok",
-        "ignoreTls": true,
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      },
-      "uptime-kuma": {
-        "type": "http",
-        "name": "Uptime Kuma",
-        "url": "https://status.lab.mtgibbs.dev/",
-        "interval": 60,
-        "retryInterval": 30,
-        "maxretries": 3
-      }
+      "type": "port",
+      "name": "Pi-hole DNS",
+      "hostname": "192.168.1.55",
+      "port": 53,
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  pihole-admin.json: |
+    {
+      "type": "http",
+      "name": "Pi-hole Admin",
+      "url": "https://pihole.lab.mtgibbs.dev/admin/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  grafana.json: |
+    {
+      "type": "http",
+      "name": "Grafana",
+      "url": "https://grafana.lab.mtgibbs.dev/api/health",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  prometheus.json: |
+    {
+      "type": "http",
+      "name": "Prometheus",
+      "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  unbound-dns.json: |
+    {
+      "type": "port",
+      "name": "Unbound DNS",
+      "hostname": "unbound.pihole.svc.cluster.local",
+      "port": 5335,
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  k3s-api.json: |
+    {
+      "type": "keyword",
+      "name": "K3s API",
+      "url": "https://192.168.1.55:6443/healthz",
+      "keyword": "ok",
+      "ignoreTls": true,
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  uptime-kuma.json: |
+    {
+      "type": "http",
+      "name": "Uptime Kuma",
+      "url": "https://status.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
     }
