@@ -62,6 +62,9 @@ spec:
                     # Wait for Pi-hole API to be ready
                     until curl -s http://localhost/api/info &>/dev/null; do sleep 3; done
 
+                    # Enable loading of custom dnsmasq configs from /etc/dnsmasq.d/
+                    sed -i 's/etc_dnsmasq_d = false/etc_dnsmasq_d = true/' /etc/pihole/pihole.toml
+
                     # Set password from environment variable
                     pihole setpassword "${WEBPASSWORD}"
 
@@ -106,6 +109,9 @@ spec:
 
                     # Run gravity update to fetch the lists
                     curl -s -X POST "http://localhost/api/action/gravity?sid=${SID}" || pihole updateGravity
+
+                    # Reload DNS to apply custom dnsmasq configs
+                    pihole reloaddns
           volumeMounts:
             - name: pihole-etc
               mountPath: /etc/pihole
