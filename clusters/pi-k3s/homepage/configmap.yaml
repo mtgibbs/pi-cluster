@@ -83,7 +83,7 @@ data:
         cpu: true
         memory: true
         disk: /
-        label: System
+        label: Pi Cluster
 
     - datetime:
         text_size: xl
