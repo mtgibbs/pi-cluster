@@ -211,6 +211,23 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Ingress: home.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                  external-services namespace                      │  │
+│  │                                                                   │  │
+│  │  Reverse proxies for external home infrastructure devices        │  │
+│  │  • Uses Endpoints + Service pattern to proxy external IPs        │  │
+│  │  • Each service gets TLS via cert-manager + Ingress              │  │
+│  │                                                                   │  │
+│  │  Services:                                                        │  │
+│  │  • Unifi Controller  - https://unifi.lab.mtgibbs.dev             │  │
+│  │    → 192.168.1.30:8443 (HTTPS backend)                          │  │
+│  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
+│  │    → 192.168.1.60:5000 (HTTP backend)                           │  │
+│  │  • Plex Media Server - https://plex.lab.mtgibbs.dev              │  │
+│  │    → 192.168.1.53:32400 (HTTP backend)                          │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -318,6 +335,42 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Custom domain allows for trusted Let's Encrypt certificates
 - Wildcard DNS record means no per-service DNS configuration
 
+### 11. External Service Reverse Proxies
+
+**Decision**: Create Kubernetes Endpoints + Service resources to proxy external home infrastructure devices
+
+**Why**:
+- Provides unified access pattern via `*.lab.mtgibbs.dev` subdomains
+- Adds TLS encryption for devices that don't natively support Let's Encrypt
+- Centralizes access through nginx-ingress for consistent logging/monitoring
+- No need to expose multiple ports on the Pi - everything goes through 443
+
+**How**:
+- Create manual Endpoints resource with external IP:port
+- Create Service with same name (type ClusterIP, no selector)
+- Service routes to Endpoints automatically
+- Ingress points to Service for TLS termination
+
+**Trade-offs**:
+- Adds extra network hop (client → nginx → external device)
+- Requires manual Endpoints updates if IP changes
+- Some devices (like Unifi) need special nginx annotations for HTTPS backends
+
+### 12. AutoKuma Persistent Storage
+
+**Decision**: Add PVC for AutoKuma's /data directory
+
+**Why**:
+- AutoKuma uses sled embedded database to track which monitors it has created
+- Without persistence, database is lost on pod restart
+- This causes AutoKuma to forget it created monitors and creates duplicates
+- PVC ensures database survives pod restarts
+
+**Implementation**:
+- 100Mi PVC (ReadWriteOnce)
+- Mounted at /data in AutoKuma container
+- Deployment strategy changed to Recreate (required for RWO PVC)
+
 ## Observability Stack
 
 ```
@@ -391,13 +444,20 @@ pi-cluster/
         │   ├── ingress.yaml              # status.lab.mtgibbs.dev
         │   ├── external-secret.yaml      # Uptime Kuma password from 1Password
         │   ├── autokuma-deployment.yaml  # AutoKuma for GitOps monitors
+        │   ├── autokuma-pvc.yaml         # AutoKuma persistent storage for sled DB
         │   └── autokuma-monitors.yaml    # ConfigMap with monitor definitions
-        └── homepage/
-            ├── namespace.yaml            # homepage namespace
-            ├── deployment.yaml           # Homepage dashboard with initContainer
-            ├── service.yaml              # ClusterIP service
-            ├── ingress.yaml              # home.lab.mtgibbs.dev with TLS
-            ├── configmap.yaml            # Dashboard configuration (settings, services, widgets)
+        ├── homepage/
+        │   ├── namespace.yaml            # homepage namespace
+        │   ├── deployment.yaml           # Homepage dashboard with initContainer
+        │   ├── service.yaml              # ClusterIP service
+        │   ├── ingress.yaml              # home.lab.mtgibbs.dev with TLS
+        │   ├── configmap.yaml            # Dashboard configuration (settings, services, widgets)
+        │   └── kustomization.yaml
+        └── external-services/
+            ├── namespace.yaml            # external-services namespace
+            ├── unifi.yaml                # Unifi Controller reverse proxy
+            ├── synology.yaml             # Synology NAS reverse proxy
+            ├── plex.yaml                 # Plex Media Server reverse proxy
             └── kustomization.yaml
 ```
 
@@ -414,6 +474,9 @@ pi-cluster/
 | Uptime Kuma | 3001 | TCP | Ingress (status.lab.mtgibbs.dev) |
 | Homepage | 3000 | TCP | Ingress (home.lab.mtgibbs.dev) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
+| Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
+| Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
+| Plex Media Server | 32400 | HTTP | External (192.168.1.53) → Ingress (plex.lab.mtgibbs.dev) |
 
 ## Resource Allocations
 
@@ -443,6 +506,9 @@ kubectl -n pihole logs -f deploy/pihole
 # Grafana:     https://grafana.lab.mtgibbs.dev
 # Uptime Kuma: https://status.lab.mtgibbs.dev
 # Pi-hole:     https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
+# Unifi:       https://unifi.lab.mtgibbs.dev
+# NAS:         https://nas.lab.mtgibbs.dev
+# Plex:        https://plex.lab.mtgibbs.dev
 
 # Flux commands
 flux get all                              # Check all Flux resources

@@ -97,6 +97,9 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Grafana | https://grafana.lab.mtgibbs.dev |
 | Uptime Kuma | https://status.lab.mtgibbs.dev |
 | Pi-hole Admin | https://pihole.lab.mtgibbs.dev |
+| Unifi Controller | https://unifi.lab.mtgibbs.dev |
+| Synology NAS | https://nas.lab.mtgibbs.dev |
+| Plex Media Server | https://plex.lab.mtgibbs.dev |
 
 *Note: Services use trusted Let's Encrypt certificates. Requires `*.lab.mtgibbs.dev` DNS configured in Cloudflare.*
 
@@ -118,7 +121,8 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 │       ├── pihole/                   # Pi-hole + Unbound + exporter + ingress
 │       ├── monitoring/               # kube-prometheus-stack + Grafana
 │       ├── uptime-kuma/              # Status page + AutoKuma monitors
-│       └── homepage/                 # Homepage dashboard (unified landing page)
+│       ├── homepage/                 # Homepage dashboard (unified landing page)
+│       └── external-services/        # Reverse proxies for external home infrastructure
 ├── docs/
 │   ├── external-secrets-1password-sdk.md
 │   └── pihole-v6-api.md

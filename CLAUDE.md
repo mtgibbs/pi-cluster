@@ -23,8 +23,9 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 7. **nginx-ingress** - Ingress controller with hostPort 443 (port 80 used by Pi-hole)
 8. **cert-manager** - Let's Encrypt certificates via Cloudflare DNS-01 challenge
 9. **Uptime Kuma** - Status page for home services monitoring
-10. **AutoKuma** - GitOps-managed monitors for Uptime Kuma
+10. **AutoKuma** - GitOps-managed monitors for Uptime Kuma (with persistent storage)
 11. **Homepage** - Unified dashboard for all cluster services
+12. **External Service Proxies** - Reverse proxies for Unifi, Synology, Plex with TLS
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -43,10 +44,17 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 
 ### Service URLs
 All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
+
+**Cluster Services:**
 - **Homepage**: https://home.lab.mtgibbs.dev (unified dashboard)
 - **Grafana**: https://grafana.lab.mtgibbs.dev
 - **Uptime Kuma**: https://status.lab.mtgibbs.dev
 - **Pi-hole Admin**: https://pihole.lab.mtgibbs.dev (also available via hostNetwork: http://192.168.1.55/admin/)
+
+**External Services (Reverse Proxies):**
+- **Unifi Controller**: https://unifi.lab.mtgibbs.dev (192.168.1.30:8443)
+- **Synology NAS**: https://nas.lab.mtgibbs.dev (192.168.1.60:5000)
+- **Plex Media Server**: https://plex.lab.mtgibbs.dev (192.168.1.53:32400)
 
 ## Architecture
 
@@ -151,14 +159,21 @@ pi-cluster/
         │   ├── ingress.yaml               # status.lab.mtgibbs.dev
         │   ├── external-secret.yaml       # Uptime Kuma password from 1Password
         │   ├── autokuma-deployment.yaml   # AutoKuma for GitOps monitors
+        │   ├── autokuma-pvc.yaml          # AutoKuma persistent storage (prevents duplicate monitors)
         │   └── autokuma-monitors.yaml     # ConfigMap with monitor definitions
-        └── homepage/
+        ├── homepage/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml
+        │   ├── deployment.yaml            # Homepage with initContainer + emptyDir
+        │   ├── service.yaml
+        │   ├── ingress.yaml               # home.lab.mtgibbs.dev
+        │   └── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
+        └── external-services/
             ├── kustomization.yaml
             ├── namespace.yaml
-            ├── deployment.yaml            # Homepage with initContainer + emptyDir
-            ├── service.yaml
-            ├── ingress.yaml               # home.lab.mtgibbs.dev
-            └── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
+            ├── unifi.yaml                 # Unifi Controller (192.168.1.30:8443, HTTPS backend)
+            ├── synology.yaml              # Synology NAS (192.168.1.60:5000)
+            └── plex.yaml                  # Plex Media Server (192.168.1.53:32400)
 ```
 
 ## Flux Dependency Chain
@@ -166,15 +181,16 @@ pi-cluster/
 Kustomizations are applied in order via `dependsOn`:
 
 ```
-1. external-secrets        → Installs ESO operator + CRDs
-2. external-secrets-config → Creates ClusterSecretStore (needs CRDs)
-3. ingress                 → nginx-ingress controller
-4. cert-manager            → Installs cert-manager CRDs + controllers
-5. cert-manager-config     → Creates ClusterIssuers + Cloudflare secret (needs cert-manager + ESO)
-6. pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
-7. monitoring              → kube-prometheus-stack + Grafana (needs secrets, ingress, certs)
-8. uptime-kuma             → Status page (needs secrets, ingress, certs)
-9. homepage                → Unified dashboard (needs ingress, certs)
+1.  external-secrets        → Installs ESO operator + CRDs
+2.  external-secrets-config → Creates ClusterSecretStore (needs CRDs)
+3.  ingress                 → nginx-ingress controller
+4.  cert-manager            → Installs cert-manager CRDs + controllers
+5.  cert-manager-config     → Creates ClusterIssuers + Cloudflare secret (needs cert-manager + ESO)
+6.  pihole                  → Creates ExternalSecret + workloads (needs SecretStore)
+7.  monitoring              → kube-prometheus-stack + Grafana (needs secrets, ingress, certs)
+8.  uptime-kuma             → Status page (needs secrets, ingress, certs)
+9.  homepage                → Unified dashboard (needs ingress, certs)
+10. external-services       → Reverse proxies for home infrastructure (needs ingress, certs)
 ```
 
 ## Key Technical Details
@@ -277,8 +293,12 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
   - `AUTOKUMA__DOCKER__ENABLED=false` (not using Docker source)
   - `AUTOKUMA__ON_DELETE=delete` (monitors removed from ConfigMap are deleted)
 - Credentials synced from 1Password via ExternalSecret
+- **Persistent Storage**: 100Mi PVC mounted at `/data` to store sled database
+  - **Critical**: Prevents duplicate monitor creation on pod restart
+  - Without PVC, AutoKuma forgets which monitors it created and creates duplicates
+  - Uses `strategy: Recreate` (required for ReadWriteOnce PVC)
 
-#### Configured Monitors (8 total)
+#### Configured Monitors (11 total)
 | Monitor | Type | Target |
 |---------|------|--------|
 | Pi-hole DNS | port | 192.168.1.55:53 |
@@ -289,6 +309,9 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
 | K3s API | port | 192.168.1.55:6443 (TCP port check) |
 | Uptime Kuma | http | https://status.lab.mtgibbs.dev/ |
 | Homepage | http | https://home.lab.mtgibbs.dev/ |
+| Unifi Controller | http | https://unifi.lab.mtgibbs.dev/ |
+| Synology NAS | http | https://nas.lab.mtgibbs.dev/ |
+| Plex | http | https://plex.lab.mtgibbs.dev/web/ |
 
 ## Commands Reference
 
@@ -337,6 +360,8 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Sections**:
   - Infrastructure: Pi-hole, Unbound, K3s Cluster
   - Monitoring: Grafana, Uptime Kuma, Prometheus
+  - Network: Unifi Controller
+  - Media & Storage: Synology NAS, Plex
   - System resources widget (CPU, RAM, disk)
   - Bookmarks to GitHub repo and Flux docs
 - **Technical details**:
@@ -345,7 +370,94 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   - Port 3000 exposed via ClusterIP service
   - TLS certificate via Let's Encrypt (cert-manager)
 
+### External Service Reverse Proxies
+- **Namespace**: `external-services`
+- **Purpose**: Provide unified TLS-enabled access to home infrastructure devices
+- **Pattern**: Kubernetes Endpoints + Service without selector
+  - Endpoints resource defines external IP:port
+  - Service (ClusterIP) routes to Endpoints
+  - Ingress adds TLS termination and subdomain routing
+
+#### Configured Services
+| Service | Backend | URL |
+|---------|---------|-----|
+| Unifi Controller | 192.168.1.30:8443 (HTTPS) | https://unifi.lab.mtgibbs.dev |
+| Synology NAS | 192.168.1.60:5000 (HTTP) | https://nas.lab.mtgibbs.dev |
+| Plex Media Server | 192.168.1.53:32400 (HTTP) | https://plex.lab.mtgibbs.dev |
+
+**Special Configuration**:
+- **Unifi**: Requires nginx annotations for HTTPS backend:
+  - `nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"`
+  - `nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"` (self-signed backend cert)
+- All services get Let's Encrypt TLS certificates via cert-manager
+
 ## Future Additions (Backlog)
 
 - **Multi-node** - Add another Pi for HA learning
-- **Automated backups** - Backup strategy for PVCs and cluster state
+
+## Claude Code Extensions
+
+This project includes custom slash commands, skills, and agents to streamline cluster operations.
+
+### Slash Commands (User-Invoked)
+
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| `/flux-status` | Show Flux sync status | "Is everything synced?", "Check flux" |
+| `/deploy` | Commit, push, reconcile | "Deploy this", "Push these changes" |
+| `/test-dns` | Test DNS resolution | "Is DNS working?", "Test pihole" |
+| `/backup-now` | Trigger manual backup | "Backup now", "Run a backup" |
+| `/cluster-health` | Quick health check | "How's the cluster?", "Any issues?" |
+
+### Skills (Auto-Activated by Context)
+
+| Skill | Triggers On | Provides |
+|-------|-------------|----------|
+| `flux-deployment` | Flux issues, deployments, GitOps | Deployment procedures, dependency chain, troubleshooting |
+| `k8s-troubleshooting` | Pod failures, connectivity, errors | Diagnostic commands, common fixes |
+| `secrets-management` | 1Password, ExternalSecrets | ESO setup, secret sync debugging |
+| `add-service` | Adding new apps | Full scaffold templates, checklist |
+
+### Agents (Specialized AI Assistants)
+
+| Agent | Purpose |
+|-------|---------|
+| `cluster-ops` | Infrastructure changes, deployments, troubleshooting |
+
+### How to Leverage These
+
+**For vague requests, Claude will clarify:**
+
+| You Say | Claude May Ask |
+|---------|---------------|
+| "Deploy this" | "Should I run `/deploy` to commit and sync, or do you want me to just reconcile?" |
+| "Something's broken" | "I'll use k8s-troubleshooting - is it a pod issue, DNS, or connectivity?" |
+| "Add a new service" | "I'll use add-service skill. What's the service name, image, and port?" |
+| "Check on things" | "Would you like `/cluster-health` for a quick check or `/flux-status` for GitOps status?" |
+
+**Be specific when you can:**
+
+| Vague | Specific |
+|-------|----------|
+| "Deploy" | "/deploy feat: Add redis cache" |
+| "DNS broken" | "/test-dns google.com" |
+| "Status" | "/flux-status" or "/cluster-health" |
+
+### Directory Structure
+
+```
+.claude/
+├── commands/           # Slash commands (user-invoked)
+│   ├── flux-status.md
+│   ├── deploy.md
+│   ├── test-dns.md
+│   ├── backup-now.md
+│   └── cluster-health.md
+├── skills/             # Skills (auto-activated)
+│   ├── flux-deployment/
+│   ├── k8s-troubleshooting/
+│   ├── secrets-management/
+│   └── add-service/
+└── agents/             # Subagents
+    └── cluster-ops.md
+```
