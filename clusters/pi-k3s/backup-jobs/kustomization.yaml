@@ -3,6 +3,5 @@ kind: Kustomization
 namespace: backup-jobs
 resources:
   - namespace.yaml
-  - nfs-pv.yaml
-  - nfs-pvc.yaml
+  - external-secret.yaml
   - backup-cronjob.yaml

@@ -24,16 +24,24 @@ spec:
                   set -e
 
                   BACKUP_DATE=$(date +%Y-%m-%d)
-                  BACKUP_DIR="/backup/${BACKUP_DATE}"
                   STORAGE_DIR="/storage"
+                  NAS_USER="mtgibbs"
+                  NAS_HOST="192.168.1.60"
+                  NAS_PATH="/volume1/k3s-backups"
+                  SSH_KEY="/ssh/id_ed25519"
 
-                  echo "=== K3s PVC Backup ==="
+                  echo "=== K3s PVC Backup (rsync over SSH) ==="
                   echo "Date: ${BACKUP_DATE}"
-                  echo "Backup destination: ${BACKUP_DIR}"
+                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}"
                   echo ""
 
-                  # Create backup directory
-                  mkdir -p "${BACKUP_DIR}"
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Create backup directory on NAS
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}"
 
                   # PVCs to backup (namespace_pvcname patterns)
                   PVCS="uptime-kuma_uptime-kuma-data uptime-kuma_autokuma-data pihole_pihole-etc pihole_pihole-dnsmasq monitoring_kube-prometheus-grafana"
@@ -51,12 +59,11 @@ spec:
 
                     echo "Source: ${PVC_PATH}"
 
-                    # Create destination directory
-                    DEST_DIR="${BACKUP_DIR}/${PVC}"
-                    mkdir -p "${DEST_DIR}"
-
-                    # Rsync the data
-                    rsync -av --delete "${PVC_PATH}/" "${DEST_DIR}/"
+                    # Rsync to NAS over SSH
+                    rsync -avz --delete \
+                      -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                      "${PVC_PATH}/" \
+                      "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/${PVC}/"
 
                     echo "Completed: ${PVC}"
                     echo ""
@@ -64,22 +71,27 @@ spec:
 
                   # Cleanup old backups (keep last 4)
                   echo "--- Cleaning up old backups ---"
-                  cd /backup
-                  ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} \
+                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf"
 
                   echo ""
                   echo "=== Backup Summary ==="
-                  echo "Backups retained:"
-                  ls -la /backup/
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/"
 
                   echo ""
                   echo "Backup completed successfully!"
+
+                  # Cleanup temp key
+                  rm -f /tmp/id_ed25519
               volumeMounts:
                 - name: k3s-storage
                   mountPath: /storage
                   readOnly: true
-                - name: backup-dest
-                  mountPath: /backup
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
               resources:
                 requests:
                   cpu: 100m
@@ -92,6 +104,7 @@ spec:
               hostPath:
                 path: /var/lib/rancher/k3s/storage
                 type: Directory
-            - name: backup-dest
-              persistentVolumeClaim:
-                claimName: synology-backup
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400

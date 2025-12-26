@@ -182,7 +182,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 11. Backup Jobs - weekly PVC backups to Synology NAS
+# 11. Backup Jobs - weekly PVC backups to Synology NAS via rsync/SSH
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -190,6 +190,7 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
+    - name: external-secrets-config
     - name: pihole
     - name: monitoring
     - name: uptime-kuma
