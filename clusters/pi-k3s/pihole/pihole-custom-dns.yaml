@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-custom-dns
+  namespace: pihole
+data:
+  # Wildcard DNS for home lab services
+  # All *.lab.mtgibbs.dev resolves to the Pi (ingress controller)
+  02-local-dns.conf: |
+    address=/lab.mtgibbs.dev/192.168.1.55

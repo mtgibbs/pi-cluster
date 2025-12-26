@@ -111,6 +111,10 @@ spec:
               mountPath: /etc/pihole
             - name: pihole-dnsmasq
               mountPath: /etc/dnsmasq.d
+            - name: pihole-custom-dns
+              mountPath: /etc/dnsmasq.d/02-local-dns.conf
+              subPath: 02-local-dns.conf
+              readOnly: true
             - name: pihole-config
               mountPath: /etc/pihole-config
               readOnly: true
@@ -142,6 +146,9 @@ spec:
         - name: pihole-dnsmasq
           persistentVolumeClaim:
             claimName: pihole-dnsmasq
+        - name: pihole-custom-dns
+          configMap:
+            name: pihole-custom-dns
         - name: pihole-config
           configMap:
             name: pihole-adlists
