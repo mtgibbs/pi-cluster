@@ -8,5 +8,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - autokuma-pvc.yaml
   - autokuma-monitors.yaml
   - autokuma-deployment.yaml
