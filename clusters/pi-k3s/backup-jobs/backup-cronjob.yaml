@@ -1,0 +1,97 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pvc-backup
+  namespace: backup-jobs
+spec:
+  schedule: "0 2 * * 0"  # Every Sunday at 2:00 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  BACKUP_DIR="/backup/${BACKUP_DATE}"
+                  STORAGE_DIR="/storage"
+
+                  echo "=== K3s PVC Backup ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo "Backup destination: ${BACKUP_DIR}"
+                  echo ""
+
+                  # Create backup directory
+                  mkdir -p "${BACKUP_DIR}"
+
+                  # PVCs to backup (namespace_pvcname patterns)
+                  PVCS="uptime-kuma_uptime-kuma-data uptime-kuma_autokuma-data pihole_pihole-etc pihole_pihole-dnsmasq monitoring_kube-prometheus-grafana"
+
+                  for PVC in ${PVCS}; do
+                    echo "--- Backing up: ${PVC} ---"
+
+                    # Find the PVC directory (pattern: pvc-*_namespace_pvcname)
+                    PVC_PATH=$(find ${STORAGE_DIR} -maxdepth 1 -type d -name "*_${PVC}" 2>/dev/null | head -1)
+
+                    if [ -z "${PVC_PATH}" ]; then
+                      echo "WARNING: PVC directory not found for ${PVC}, skipping"
+                      continue
+                    fi
+
+                    echo "Source: ${PVC_PATH}"
+
+                    # Create destination directory
+                    DEST_DIR="${BACKUP_DIR}/${PVC}"
+                    mkdir -p "${DEST_DIR}"
+
+                    # Rsync the data
+                    rsync -av --delete "${PVC_PATH}/" "${DEST_DIR}/"
+
+                    echo "Completed: ${PVC}"
+                    echo ""
+                  done
+
+                  # Cleanup old backups (keep last 4)
+                  echo "--- Cleaning up old backups ---"
+                  cd /backup
+                  ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf
+
+                  echo ""
+                  echo "=== Backup Summary ==="
+                  echo "Backups retained:"
+                  ls -la /backup/
+
+                  echo ""
+                  echo "Backup completed successfully!"
+              volumeMounts:
+                - name: k3s-storage
+                  mountPath: /storage
+                  readOnly: true
+                - name: backup-dest
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: k3s-storage
+              hostPath:
+                path: /var/lib/rancher/k3s/storage
+                type: Directory
+            - name: backup-dest
+              persistentVolumeClaim:
+                claimName: synology-backup
