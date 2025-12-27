@@ -32,7 +32,7 @@ data:
             description: DNS & Ad Blocking
             widget:
               type: pihole
-              url: http://pihole.pihole.svc.cluster.local
+              url: http://pihole-web.pihole.svc.cluster.local
               version: 6
               key: "{{HOMEPAGE_VAR_PIHOLE_API_KEY}}"
               fields: ["queries", "blocked", "blocked_percent", "gravity"]
