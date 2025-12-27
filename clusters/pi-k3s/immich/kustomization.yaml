@@ -6,4 +6,5 @@ resources:
   - external-secret.yaml
   - nfs-pv.yaml
   - library-pvc.yaml
+  - postgresql.yaml
   - helmrelease.yaml

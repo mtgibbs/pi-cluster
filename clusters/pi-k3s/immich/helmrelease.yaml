@@ -25,34 +25,6 @@ spec:
         name: immich
         namespace: flux-system
   values:
-    # Global image tag
-    image:
-      tag: v1.123.0
-
-    # Environment variables for all components
-    env:
-      TZ: "America/New_York"
-      # Reverse geocoding precision (1 = medium, lower RAM usage)
-      REVERSE_GEOCODING_PRECISION: "1"
-      # Database connection
-      DB_HOSTNAME: immich-postgresql
-      DB_DATABASE_NAME: immich
-      DB_USERNAME: immich
-      DB_PASSWORD:
-        valueFrom:
-          secretKeyRef:
-            name: immich-secret
-            key: DB_PASSWORD
-      # Redis connection
-      REDIS_HOSTNAME: immich-valkey-master
-      REDIS_PORT: "6379"
-      # JWT secret
-      IMMICH_SECRET:
-        valueFrom:
-          secretKeyRef:
-            name: immich-secret
-            key: IMMICH_SECRET
-
     # ========================================
     # Machine Learning - DISABLED for Pi 5
     # ========================================
@@ -63,22 +35,48 @@ spec:
     # Immich Server
     # ========================================
     server:
-      resources:
-        requests:
-          cpu: 100m
-          memory: 512Mi
-        limits:
-          cpu: 2000m
-          memory: 2Gi
-
+      enabled: true
+      controllers:
+        main:
+          containers:
+            main:
+              image:
+                tag: v1.123.0
+              env:
+                TZ: "America/New_York"
+                REVERSE_GEOCODING_PRECISION: "1"
+                # External PostgreSQL connection
+                DB_HOSTNAME: immich-postgresql
+                DB_DATABASE_NAME: immich
+                DB_USERNAME: immich
+                DB_PASSWORD:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-secret
+                      key: DB_PASSWORD
+                # Redis/Valkey connection (built-in valkey)
+                REDIS_HOSTNAME: immich-valkey
+                REDIS_PORT: "6379"
+                # JWT secret for session management
+                IMMICH_SECRET:
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-secret
+                      key: IMMICH_SECRET
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  cpu: 2000m
+                  memory: 2Gi
       ingress:
         main:
           enabled: true
-          ingressClassName: nginx
+          className: nginx
           annotations:
             cert-manager.io/cluster-issuer: "letsencrypt-prod"
             nginx.ingress.kubernetes.io/ssl-redirect: "true"
-            # Allow large file uploads (photos/videos)
             nginx.ingress.kubernetes.io/proxy-body-size: "0"
             nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
             nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
@@ -87,6 +85,8 @@ spec:
               paths:
                 - path: /
                   pathType: Prefix
+                  service:
+                    identifier: main
           tls:
             - hosts:
                 - immich.lab.mtgibbs.dev
@@ -101,49 +101,25 @@ spec:
           existingClaim: immich-library
 
     # ========================================
-    # PostgreSQL
-    # ========================================
-    postgresql:
-      enabled: true
-      image:
-        repository: tensorchord/pgvecto-rs
-        tag: pg16-v0.3.0
-      auth:
-        database: immich
-        username: immich
-        existingSecret: immich-secret
-        secretKeys:
-          userPasswordKey: DB_PASSWORD
-      primary:
-        persistence:
-          enabled: true
-          storageClass: local-path
-          size: 5Gi
-        resources:
-          requests:
-            cpu: 50m
-            memory: 256Mi
-          limits:
-            cpu: 1000m
-            memory: 1Gi
-
-    # ========================================
-    # Redis/Valkey (caching)
+    # Built-in Valkey (Redis replacement)
     # ========================================
     valkey:
       enabled: true
-      architecture: standalone
-      auth:
-        enabled: false
-      master:
-        persistence:
+      controllers:
+        main:
+          containers:
+            main:
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+      persistence:
+        data:
           enabled: true
-          storageClass: local-path
+          type: pvc
           size: 1Gi
-        resources:
-          requests:
-            cpu: 10m
-            memory: 32Mi
-          limits:
-            cpu: 200m
-            memory: 128Mi
+          storageClass: local-path
+          accessMode: ReadWriteOnce

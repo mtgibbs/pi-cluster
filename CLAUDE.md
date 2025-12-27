@@ -202,6 +202,35 @@ Kustomizations are applied in order via `dependsOn`:
 - ExternalSecret: Creates K8s secrets from 1Password items
 - Key format: `item/field` (e.g., `pihole/password`)
 
+### Kustomize Namespace Transformer (IMPORTANT)
+
+**Never use `namespace:` in kustomization.yaml when deploying HelmReleases.**
+
+When you set `namespace: <name>` in a `kustomization.yaml`, Kustomize applies a namespace transformer that overrides ALL resources, ignoring their declared namespaces:
+
+```yaml
+# BAD - This breaks HelmReleases
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: myapp  # <-- Overrides EVERYTHING, including HelmRepository in flux-system
+```
+
+**Why it matters for Flux:**
+- `HelmRepository` must be in `flux-system` (where source-controller runs)
+- `HelmRelease` can be in any namespace, but references `HelmRepository` in `flux-system`
+- If `HelmRepository` gets namespace-transformed, Flux can't find it
+
+**Correct pattern:**
+```yaml
+# GOOD - Let resources declare their own namespaces
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Don't set namespace here - resources have explicit namespaces
+resources:
+  - namespace.yaml      # Creates 'myapp' namespace
+  - helmrelease.yaml    # Contains HelmRepo (flux-system) + HelmRelease (myapp)
+```
+
 ### 1Password Setup
 - Vault: `pi-cluster` (contains `pihole`, `grafana`, `cloudflare` items)
 - Service Account: `pi-cluster-operator` (token in Development - Private vault)
