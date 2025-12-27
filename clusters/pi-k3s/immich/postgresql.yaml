@@ -33,7 +33,8 @@ spec:
     spec:
       containers:
         - name: postgresql
-          image: tensorchord/pgvecto-rs:pg16-v0.3.0
+          # Use official Immich image - vectorchord 0.3.0 works on Pi (0.4.x has jemalloc issues with 16k pages)
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0
           ports:
             - containerPort: 5432
           env:
