@@ -1,0 +1,149 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: immich
+  namespace: flux-system
+spec:
+  interval: 1h
+  type: oci
+  url: oci://ghcr.io/immich-app/immich-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: immich
+      version: "0.9.0"
+      sourceRef:
+        kind: HelmRepository
+        name: immich
+        namespace: flux-system
+  values:
+    # Global image tag
+    image:
+      tag: v1.123.0
+
+    # Environment variables for all components
+    env:
+      TZ: "America/New_York"
+      # Reverse geocoding precision (1 = medium, lower RAM usage)
+      REVERSE_GEOCODING_PRECISION: "1"
+      # Database connection
+      DB_HOSTNAME: immich-postgresql
+      DB_DATABASE_NAME: immich
+      DB_USERNAME: immich
+      DB_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: immich-secret
+            key: DB_PASSWORD
+      # Redis connection
+      REDIS_HOSTNAME: immich-valkey-master
+      REDIS_PORT: "6379"
+      # JWT secret
+      IMMICH_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: immich-secret
+            key: IMMICH_SECRET
+
+    # ========================================
+    # Machine Learning - DISABLED for Pi 5
+    # ========================================
+    machine-learning:
+      enabled: false
+
+    # ========================================
+    # Immich Server
+    # ========================================
+    server:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 2Gi
+
+      ingress:
+        main:
+          enabled: true
+          ingressClassName: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+            nginx.ingress.kubernetes.io/ssl-redirect: "true"
+            # Allow large file uploads (photos/videos)
+            nginx.ingress.kubernetes.io/proxy-body-size: "0"
+            nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+            nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+          hosts:
+            - host: immich.lab.mtgibbs.dev
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - hosts:
+                - immich.lab.mtgibbs.dev
+              secretName: immich-tls
+
+    # ========================================
+    # Photo Library Persistence (NFS)
+    # ========================================
+    immich:
+      persistence:
+        library:
+          existingClaim: immich-library
+
+    # ========================================
+    # PostgreSQL
+    # ========================================
+    postgresql:
+      enabled: true
+      image:
+        repository: tensorchord/pgvecto-rs
+        tag: pg16-v0.3.0
+      auth:
+        database: immich
+        username: immich
+        existingSecret: immich-secret
+        secretKeys:
+          userPasswordKey: DB_PASSWORD
+      primary:
+        persistence:
+          enabled: true
+          storageClass: local-path
+          size: 5Gi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+
+    # ========================================
+    # Redis/Valkey (caching)
+    # ========================================
+    valkey:
+      enabled: true
+      architecture: standalone
+      auth:
+        enabled: false
+      master:
+        persistence:
+          enabled: true
+          storageClass: local-path
+          size: 1Gi
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi

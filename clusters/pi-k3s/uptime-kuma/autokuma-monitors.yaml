@@ -107,3 +107,12 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  immich.json: |
+    {
+      "type": "http",
+      "name": "Immich",
+      "url": "https://immich.lab.mtgibbs.dev/api/server/ping",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

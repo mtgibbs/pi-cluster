@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-library-nfs
+  annotations:
+    # Prevent Flux from deleting this PV
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 192.168.1.60
+    path: /volume1/immich-library
+  mountOptions:
+    - nfsvers=4
+    - hard
+    - intr
+    - rsize=65536
+    - wsize=65536

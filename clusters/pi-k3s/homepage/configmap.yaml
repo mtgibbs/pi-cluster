@@ -77,6 +77,11 @@ data:
             href: https://plex.lab.mtgibbs.dev
             description: Media Server (Pi 3)
             siteMonitor: https://plex.lab.mtgibbs.dev
+        - Immich:
+            icon: immich.png
+            href: https://immich.lab.mtgibbs.dev
+            description: Photo & Video Backup
+            siteMonitor: https://immich.lab.mtgibbs.dev
 
   widgets.yaml: |
     - resources:
