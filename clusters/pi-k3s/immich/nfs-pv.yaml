@@ -16,8 +16,6 @@ spec:
     server: 192.168.1.60
     path: /volume1/immich-library
   mountOptions:
-    - nfsvers=4
+    - nfsvers=3
     - hard
-    - intr
-    - rsize=65536
-    - wsize=65536
+    - nolock
