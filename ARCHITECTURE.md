@@ -2,28 +2,36 @@
 
 ## Overview
 
-A single-node Kubernetes learning cluster running on a Raspberry Pi 5, providing network-wide ad blocking via Pi-hole with privacy-focused recursive DNS resolution via Unbound.
+A 3-node Kubernetes learning cluster running on Raspberry Pi hardware, providing network-wide ad blocking via Pi-hole with privacy-focused recursive DNS resolution via Unbound, plus self-hosted media services and comprehensive monitoring.
 
 ## Hardware
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Raspberry Pi 5                        │
-│                                                         │
-│   CPU: ARM Cortex-A76 (4 cores)                        │
-│   RAM: 8GB                                              │
-│   OS:  Raspberry Pi OS Lite (64-bit, Bookworm)         │
-│   IP:  192.168.1.55 (DHCP reservation)                 │
-│                                                         │
-│   ┌─────────────────────────────────────────────────┐  │
-│   │                 K3s v1.33.6+k3s1                │  │
-│   │                                                 │  │
-│   │  • Lightweight Kubernetes distribution          │  │
-│   │  • Traefik disabled (--disable=traefik)        │  │
-│   │  • Uses local-path storage provisioner         │  │
-│   │  • ServiceLB for LoadBalancer services         │  │
-│   └─────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                           K3s Cluster (3 nodes)                               │
+├───────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌──────────────────────────┐  ┌──────────────────────┐  ┌─────────────────┐│
+│  │  pi-k3s (Master+Worker)  │  │  pi3-worker-1        │  │  pi3-worker-2   ││
+│  │  192.168.1.55            │  │  192.168.1.53        │  │  192.168.1.51   ││
+│  ├──────────────────────────┤  ├──────────────────────┤  ├─────────────────┤│
+│  │ Raspberry Pi 5           │  │ Raspberry Pi 3       │  │ Raspberry Pi 3  ││
+│  │ ARM Cortex-A76 (4 cores) │  │ ARM Cortex-A53       │  │ ARM Cortex-A53  ││
+│  │ RAM: 8GB                 │  │ RAM: 1GB             │  │ RAM: 1GB        ││
+│  │ Pi OS Lite 64-bit        │  │ Pi OS Lite 64-bit    │  │ Pi OS Lite 64   ││
+│  │                          │  │                      │  │                 ││
+│  │ Workloads:               │  │ Workloads:           │  │ Workloads:      ││
+│  │ • Pi-hole (hostNetwork)  │  │ • Unbound DNS        │  │ • Most services ││
+│  │ • Flux controllers       │  │   (nodeSelector)     │  │   schedule here ││
+│  │ • Backup jobs            │  │                      │  │   or on pi-k3s  ││
+│  │ • Most workloads         │  │                      │  │                 ││
+│  └──────────────────────────┘  └──────────────────────┘  └─────────────────┘│
+│                                                                               │
+│  K3s Version: v1.33.6+k3s1                                                   │
+│  • Traefik disabled (--disable=traefik)                                      │
+│  • local-path storage provisioner (hostPath on pi-k3s)                       │
+│  • ServiceLB for LoadBalancer services                                       │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## DNS Architecture
@@ -112,6 +120,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  │                 │  │                 │  │                  │  │  │
 │  │  │ pihole/pihole   │  │ madnuttah/      │  │ ekofr/pihole-    │  │  │
 │  │  │ :latest         │  │ unbound:latest  │  │ exporter:latest  │  │  │
+│  │  │ (on pi-k3s)     │  │ (pi3-worker-1)  │  │                  │  │  │
 │  │  └────────┬────────┘  └────────┬────────┘  └────────┬─────────┘  │  │
 │  │           │                    │                    │            │  │
 │  │  ┌────────▼────────┐  ┌────────▼────────┐  ┌────────▼─────────┐  │  │
@@ -213,6 +222,40 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    jellyfin namespace                             │  │
+│  │                                                                   │  │
+│  │  Jellyfin Media Server                                           │  │
+│  │  • Self-hosted media streaming (Plex alternative)                │  │
+│  │  • NFS PersistentVolume → Synology NAS (192.168.1.60:/volume1/  │  │
+│  │    video)                                                         │  │
+│  │  • Ingress: jellyfin.lab.mtgibbs.dev                            │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                     immich namespace                              │  │
+│  │                                                                   │  │
+│  │  Immich Photo Management (v2.4.1)                                │  │
+│  │  • Self-hosted photo backup and management                       │  │
+│  │  • Deployed via Helm chart (immich-charts v0.10.3)               │  │
+│  │  • NFS storage to Synology NAS for photos                        │  │
+│  │  • PostgreSQL with pgvector extension                            │  │
+│  │  • Valkey (Redis) for caching                                    │  │
+│  │  • Ingress: immich.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                flux-notifications namespace                       │  │
+│  │                                                                   │  │
+│  │  Flux Notification System                                        │  │
+│  │  • Discord Provider with webhook URL from 1Password              │  │
+│  │  • Alert for all Kustomization/HelmRelease events                │  │
+│  │  • Real-time deployment notifications                            │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                  external-services namespace                      │  │
 │  │                                                                   │  │
 │  │  Reverse proxies for external home infrastructure devices        │  │
@@ -224,8 +267,6 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │    → 192.168.1.30:8443 (HTTPS backend)                          │  │
 │  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
 │  │    → 192.168.1.60:5000 (HTTP backend)                           │  │
-│  │  • Plex Media Server - https://plex.lab.mtgibbs.dev              │  │
-│  │    → 192.168.1.53:32400 (HTTP backend)                          │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -371,6 +412,106 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Mounted at /data in AutoKuma container
 - Deployment strategy changed to Recreate (required for RWO PVC)
 
+### 13. Multi-Node Cluster with Heterogeneous Hardware
+
+**Decision**: Expand from single Pi 5 to 3-node cluster (Pi 5 + 2x Pi 3)
+
+**Why**:
+- Learning opportunity for multi-node Kubernetes operations
+- Better resource utilization through workload distribution
+- Foundation for future HA implementations
+
+**How**:
+- Pi 5 remains master + worker (critical infrastructure)
+- Pi 3s added as workers only (1GB RAM each)
+- Strategic nodeSelector placement for specific workloads (Unbound on pi3-worker-1)
+- Backup jobs pinned to pi-k3s (require hostPath access to local-path PVCs)
+
+**Trade-offs**:
+- Increased complexity in workload placement
+- Need to account for Pi 3's limited resources (1GB RAM vs 8GB on Pi 5)
+- local-path storage remains node-specific (no shared storage)
+
+### 14. Jellyfin as Plex Alternative
+
+**Decision**: Deploy Jellyfin instead of expanding Plex usage
+
+**Why**:
+- Open-source with no proprietary restrictions
+- Better privacy (no phone-home to Plex servers)
+- Full control over media server functionality
+- NFS integration with existing Synology NAS storage
+
+**Implementation**:
+- Full GitOps deployment in `jellyfin` namespace
+- NFS PersistentVolume to Synology NAS (`/volume1/video`)
+- Ingress with Let's Encrypt certificate
+- Replaces Plex in Homepage dashboard
+
+**Trade-offs**:
+- UI less polished than Plex
+- Client apps less feature-rich
+- But: no licensing concerns, better long-term maintainability
+
+### 15. Immich v2 Migration Strategy
+
+**Decision**: Two-step upgrade path for Immich (v1.123.0 → v1.132.3 → v2.4.1)
+
+**Why**:
+- Immich v2 introduced major database changes (TypeORM → Kysely migration)
+- Direct upgrade from v1.123.0 would skip critical migration steps
+- Helm chart 0.10.x introduced breaking changes in configuration format
+
+**How**:
+- Step 1: Upgrade to v1.132.3 (last TypeORM version, prepares for migration)
+- Step 2: Upgrade to v2.4.1 (Kysely migration runs automatically)
+- Fixed storage: `IMMICH_MEDIA_LOCATION=/data` (matches PVC mount point)
+- Adjusted for Pi ARM compatibility (postgres with pgvector, NFSv3 for Synology)
+
+**Trade-offs**:
+- Longer migration window with potential for data issues
+- Required manual intervention (couldn't be fully automated)
+- But: data integrity preserved, proper migration path followed
+
+### 16. Flux Discord Notifications
+
+**Decision**: Add Discord webhook integration for Flux deployment events
+
+**Why**:
+- Real-time visibility into GitOps deployments
+- Immediate feedback on successful/failed reconciliations
+- Better observability for changes pushed to GitHub
+
+**Implementation**:
+- Discord Provider in `flux-notifications` namespace
+- Alert resource monitors all Kustomizations and HelmReleases
+- Webhook URL synced from 1Password via ExternalSecret
+- 30s timeout added to accommodate Pi network latency
+
+**Trade-offs**:
+- Adds external dependency (Discord availability)
+- Webhook URL is a secret (requires 1Password ESO setup)
+- But: significantly improves deployment visibility
+
+### 17. Homepage Kubernetes Widget with RBAC
+
+**Decision**: Add Kubernetes cluster metrics widget to Homepage dashboard
+
+**Why**:
+- Real-time visibility into node health (CPU, memory, uptime)
+- Centralized cluster status in unified dashboard
+- Demonstrates multi-node cluster operation
+
+**Implementation**:
+- ServiceAccount with ClusterRole for read-only node metrics access
+- ClusterRoleBinding grants Homepage pod ability to query Kubernetes API
+- Widget configured in ConfigMap to display all 3 nodes
+
+**Trade-offs**:
+- Requires RBAC permissions (security consideration)
+- Adds API calls to Kubernetes control plane
+- But: invaluable for monitoring cluster health at a glance
+
 ## Observability Stack
 
 ```
@@ -450,14 +591,37 @@ pi-cluster/
         │   ├── namespace.yaml            # homepage namespace
         │   ├── deployment.yaml           # Homepage dashboard with initContainer
         │   ├── service.yaml              # ClusterIP service
+        │   ├── serviceaccount.yaml       # RBAC for Kubernetes widget (node metrics)
         │   ├── ingress.yaml              # home.lab.mtgibbs.dev with TLS
         │   ├── configmap.yaml            # Dashboard configuration (settings, services, widgets)
+        │   └── kustomization.yaml
+        ├── jellyfin/
+        │   ├── namespace.yaml            # jellyfin namespace
+        │   ├── pv.yaml                   # NFS PV to Synology NAS (/volume1/video)
+        │   ├── pvc.yaml                  # PersistentVolumeClaim for media
+        │   ├── deployment.yaml           # Jellyfin media server
+        │   ├── service.yaml              # ClusterIP service
+        │   ├── ingress.yaml              # jellyfin.lab.mtgibbs.dev
+        │   └── kustomization.yaml
+        ├── immich/
+        │   ├── namespace.yaml            # immich namespace
+        │   ├── helmrelease.yaml          # Immich Helm chart v0.10.3 (app v2.4.1)
+        │   ├── pv.yaml                   # NFS PV to Synology NAS for photos
+        │   ├── external-secret.yaml      # Database password from 1Password
+        │   └── kustomization.yaml
+        ├── flux-notifications/
+        │   ├── namespace.yaml            # flux-notifications namespace
+        │   ├── discord-provider.yaml     # Discord webhook provider
+        │   ├── discord-alert.yaml        # Alert for Flux events
+        │   ├── external-secret.yaml      # Discord webhook URL from 1Password
+        │   └── kustomization.yaml
+        ├── backup-jobs/
+        │   ├── immich-backup.yaml        # Nightly PVC backup to Synology (pinned to pi-k3s)
         │   └── kustomization.yaml
         └── external-services/
             ├── namespace.yaml            # external-services namespace
             ├── unifi.yaml                # Unifi Controller reverse proxy
             ├── synology.yaml             # Synology NAS reverse proxy
-            ├── plex.yaml                 # Plex Media Server reverse proxy
             └── kustomization.yaml
 ```
 
@@ -474,9 +638,10 @@ pi-cluster/
 | Uptime Kuma | 3001 | TCP | Ingress (status.lab.mtgibbs.dev) |
 | Homepage | 3000 | TCP | Ingress (home.lab.mtgibbs.dev) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
+| Jellyfin | 8096 | TCP | Ingress (jellyfin.lab.mtgibbs.dev) |
+| Immich | 3001 | TCP | Ingress (immich.lab.mtgibbs.dev) |
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
-| Plex Media Server | 32400 | HTTP | External (192.168.1.53) → Ingress (plex.lab.mtgibbs.dev) |
 
 ## Resource Allocations
 
@@ -506,9 +671,10 @@ kubectl -n pihole logs -f deploy/pihole
 # Grafana:     https://grafana.lab.mtgibbs.dev
 # Uptime Kuma: https://status.lab.mtgibbs.dev
 # Pi-hole:     https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
+# Jellyfin:    https://jellyfin.lab.mtgibbs.dev
+# Immich:      https://immich.lab.mtgibbs.dev
 # Unifi:       https://unifi.lab.mtgibbs.dev
 # NAS:         https://nas.lab.mtgibbs.dev
-# Plex:        https://plex.lab.mtgibbs.dev
 
 # Flux commands
 flux get all                              # Check all Flux resources
@@ -550,4 +716,13 @@ This ensures:
 - [x] **Uptime Kuma**: Status page for home services monitoring
 - [x] **GitOps monitor setup**: AutoKuma manages monitors declaratively via ConfigMap
 - [x] **Homepage dashboard**: Unified landing page for all services
-- [ ] **Multi-node**: Add second Pi for HA learning
+- [x] **Multi-node**: 3-node cluster (Pi 5 + 2x Pi 3 workers)
+- [x] **Media services**: Jellyfin media server with NFS storage
+- [x] **Photo management**: Immich v2 for self-hosted photo backup
+- [x] **Deployment notifications**: Discord webhook integration via Flux
+- [x] **Cluster visibility**: Homepage Kubernetes widget with node metrics
+- [ ] **High availability**: Pi-hole failover/redundancy
+- [ ] **Shared storage**: Migrate from local-path to NFS for multi-node PVC access
+- [ ] **Resource quotas**: Namespace-level resource limits
+- [ ] **Network policies**: Pod-to-pod traffic control
+- [ ] **Horizontal Pod Autoscaling**: Auto-scale workloads based on metrics

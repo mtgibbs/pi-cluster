@@ -7,11 +7,20 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 ## Current State
 
 ### Hardware & OS
+
+**Master Node:**
 - Raspberry Pi 5 (8GB RAM)
 - Raspberry Pi OS Lite (64-bit)
 - Hostname: `pi-k3s`
 - Static IP: 192.168.1.55 (DHCP reservation)
 - User: `mtgibbs`
+
+**Worker Nodes:**
+- Raspberry Pi 3 (1GB RAM) - `pi3-worker-1` (192.168.1.53)
+- Raspberry Pi 3 (1GB RAM) - `pi3-worker-2` (192.168.1.51)
+- Both running Raspberry Pi OS Lite (64-bit)
+- SSH keys and K3s node token stored in 1Password
+- Setup documented in `docs/pi-worker-setup.md`
 
 ### Completed Setup
 1. **cgroups enabled** - Added `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt`
@@ -24,8 +33,12 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 8. **cert-manager** - Let's Encrypt certificates via Cloudflare DNS-01 challenge
 9. **Uptime Kuma** - Status page for home services monitoring
 10. **AutoKuma** - GitOps-managed monitors for Uptime Kuma (with persistent storage)
-11. **Homepage** - Unified dashboard for all cluster services
-12. **External Service Proxies** - Reverse proxies for Unifi, Synology, Plex with TLS
+11. **Homepage** - Unified dashboard for all cluster services with Kubernetes widget
+12. **External Service Proxies** - Reverse proxies for Unifi, Synology with TLS
+13. **Jellyfin** - Self-hosted media server with NFS storage from Synology NAS
+14. **Immich** - Self-hosted photo backup and management (upgraded to v2.4.1)
+15. **Discord Notifications** - Flux deployment notifications via Discord webhook
+16. **Multi-node cluster** - Two Pi 3 worker nodes for workload distribution
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -41,20 +54,26 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 - [x] Let's Encrypt certificates via Cloudflare DNS-01 challenge
 - [x] AutoKuma for GitOps-managed monitors
 - [x] Pi-hole ingress (pihole.lab.mtgibbs.dev)
+- [x] Jellyfin media server with NFS storage
+- [x] Immich photo backup (upgraded to v2.4.1)
+- [x] Discord deployment notifications
+- [x] Multi-node cluster (Pi 5 master + 2x Pi 3 workers)
+- [x] Workload distribution across nodes
 
 ### Service URLs
 All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
 
 **Cluster Services:**
-- **Homepage**: https://home.lab.mtgibbs.dev (unified dashboard)
+- **Homepage**: https://home.lab.mtgibbs.dev (unified dashboard with node stats)
 - **Grafana**: https://grafana.lab.mtgibbs.dev
 - **Uptime Kuma**: https://status.lab.mtgibbs.dev
 - **Pi-hole Admin**: https://pihole.lab.mtgibbs.dev (also available via hostNetwork: http://192.168.1.55/admin/)
+- **Jellyfin**: https://jellyfin.lab.mtgibbs.dev (media server)
+- **Immich**: https://immich.lab.mtgibbs.dev (photo backup)
 
 **External Services (Reverse Proxies):**
 - **Unifi Controller**: https://unifi.lab.mtgibbs.dev (192.168.1.30:8443)
 - **Synology NAS**: https://nas.lab.mtgibbs.dev (192.168.1.60:5000)
-- **Plex Media Server**: https://plex.lab.mtgibbs.dev (192.168.1.53:32400)
 
 ## Architecture
 
@@ -68,7 +87,17 @@ All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
                                ┌─────────────────────────────────────┘
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              K3s Cluster                                    │
+│                        K3s Cluster (3 nodes)                                │
+│                                                                             │
+│  ┌────────────────┐   ┌─────────────────┐   ┌─────────────────┐            │
+│  │  pi-k3s (Pi 5) │   │ pi3-worker-1    │   │ pi3-worker-2    │            │
+│  │  192.168.1.55  │   │ 192.168.1.53    │   │ 192.168.1.51    │            │
+│  │  (master+work) │   │ (worker, 1GB)   │   │ (worker, 1GB)   │            │
+│  │                │   │                 │   │                 │            │
+│  │ • Pi-hole      │   │ • Unbound       │   │ • Homepage      │            │
+│  │ • Flux         │   │                 │   │                 │            │
+│  │ • Backups      │   │                 │   │                 │            │
+│  └────────────────┘   └─────────────────┘   └─────────────────┘            │
 │                                                                             │
 │  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐   │
 │  │ External Secrets│────│ 1Password Cloud  │    │ ClusterSecretStore  │   │
@@ -86,6 +115,7 @@ All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
 │  │  ┌──────────┐     ┌──────────┐     ┌─────────────────┐             │   │
 │  │  │ Pi-hole  │────▶│ Unbound  │────▶│ Root DNS Servers│             │   │
 │  │  │ (ads)    │     │ (recursive)    │ (Internet)      │             │   │
+│  │  │ (pi-k3s) │     │(pi3-worker-1)  │ (Internet)      │             │   │
 │  │  └──────────┘     └──────────┘     └─────────────────┘             │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -106,7 +136,8 @@ pi-cluster/
 ├── CLAUDE.md                    # This file (project context)
 ├── kubeconfig                   # Local kubectl config (gitignored)
 ├── docs/
-│   └── external-secrets-1password-sdk.md  # ESO reference
+│   ├── external-secrets-1password-sdk.md  # ESO reference
+│   └── pi-worker-setup.md                 # Worker node setup guide
 ├── scripts/
 │   ├── deploy-all.sh            # Legacy deploy scripts
 │   ├── deploy-monitoring.sh     # (superseded by Flux)
@@ -166,14 +197,36 @@ pi-cluster/
         │   ├── namespace.yaml
         │   ├── deployment.yaml            # Homepage with initContainer + emptyDir
         │   ├── service.yaml
+        │   ├── serviceaccount.yaml        # RBAC for Kubernetes widget
         │   ├── ingress.yaml               # home.lab.mtgibbs.dev
         │   └── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
+        ├── jellyfin/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml
+        │   ├── pv.yaml                    # NFS PV to Synology NAS
+        │   ├── pvc.yaml                   # PersistentVolumeClaim for media
+        │   ├── deployment.yaml            # Jellyfin media server
+        │   ├── service.yaml
+        │   └── ingress.yaml               # jellyfin.lab.mtgibbs.dev
+        ├── immich/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml
+        │   ├── helmrelease.yaml           # Immich Helm chart v0.10.3
+        │   ├── pv.yaml                    # NFS PV to Synology NAS
+        │   └── external-secret.yaml       # Database password from 1Password
+        ├── flux-notifications/
+        │   ├── kustomization.yaml
+        │   ├── discord-provider.yaml      # Discord notification provider
+        │   ├── discord-alert.yaml         # Alert for all Flux events
+        │   └── external-secret.yaml       # Discord webhook URL from 1Password
+        ├── backup-jobs/
+        │   ├── kustomization.yaml
+        │   └── immich-backup.yaml         # Nightly PVC backup to Synology NAS
         └── external-services/
             ├── kustomization.yaml
             ├── namespace.yaml
             ├── unifi.yaml                 # Unifi Controller (192.168.1.30:8443, HTTPS backend)
-            ├── synology.yaml              # Synology NAS (192.168.1.60:5000)
-            └── plex.yaml                  # Plex Media Server (192.168.1.53:32400)
+            └── synology.yaml              # Synology NAS (192.168.1.60:5000)
 ```
 
 ## Flux Dependency Chain
@@ -244,6 +297,8 @@ resources:
 | `grafana` | `admin-user`, `admin-password` | Grafana login |
 | `cloudflare` | `api-token` | Let's Encrypt DNS-01 challenge |
 | `uptime-kuma` | `username`, `password` | Uptime Kuma login + AutoKuma API access |
+| `immich` | `db-password` | Immich PostgreSQL database password |
+| `discord-alerts` | `webhook-url` | Discord webhook for Flux notifications |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -327,7 +382,7 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
   - Without PVC, AutoKuma forgets which monitors it created and creates duplicates
   - Uses `strategy: Recreate` (required for ReadWriteOnce PVC)
 
-#### Configured Monitors (11 total)
+#### Configured Monitors (12 total)
 | Monitor | Type | Target |
 |---------|------|--------|
 | Pi-hole DNS | port | 192.168.1.55:53 |
@@ -338,9 +393,10 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
 | K3s API | port | 192.168.1.55:6443 (TCP port check) |
 | Uptime Kuma | http | https://status.lab.mtgibbs.dev/ |
 | Homepage | http | https://home.lab.mtgibbs.dev/ |
+| Jellyfin | http | https://jellyfin.lab.mtgibbs.dev/ |
+| Immich | http | https://immich.lab.mtgibbs.dev/ |
 | Unifi Controller | http | https://unifi.lab.mtgibbs.dev/ |
 | Synology NAS | http | https://nas.lab.mtgibbs.dev/ |
-| Plex | http | https://plex.lab.mtgibbs.dev/web/ |
 
 ## Commands Reference
 
@@ -389,8 +445,10 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Sections**:
   - Infrastructure: Pi-hole, Unbound, K3s Cluster
   - Monitoring: Grafana, Uptime Kuma, Prometheus
+  - Media: Jellyfin, Immich
   - Network: Unifi Controller
-  - Media & Storage: Synology NAS, Plex
+  - Storage: Synology NAS
+  - **Kubernetes widget**: Real-time node metrics (CPU, memory, uptime for all 3 nodes)
   - System resources widget (CPU, RAM, disk)
   - Bookmarks to GitHub repo and Flux docs
 - **Technical details**:
@@ -398,6 +456,52 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   - Requires `HOMEPAGE_ALLOWED_HOSTS` env var set to ingress hostname
   - Port 3000 exposed via ClusterIP service
   - TLS certificate via Let's Encrypt (cert-manager)
+  - **RBAC**: ServiceAccount with ClusterRole for read-only node metrics access
+    - Enables Kubernetes widget to query cluster API for node stats
+    - ClusterRoleBinding grants necessary permissions
+
+### Jellyfin Media Server
+- **Image**: `jellyfin/jellyfin:latest`
+- **URL**: https://jellyfin.lab.mtgibbs.dev
+- **Purpose**: Self-hosted media streaming server (open-source Plex alternative)
+- **Storage**: NFS PersistentVolume to Synology NAS (`192.168.1.60:/volume1/video`)
+- **Why Jellyfin**: Open-source, no proprietary restrictions, better privacy, no licensing concerns
+- **Configuration**:
+  - Namespace: `jellyfin`
+  - Port: 8096
+  - Ingress with Let's Encrypt TLS certificate
+  - Replaces Plex in Homepage dashboard
+
+### Immich Photo Management
+- **Version**: v2.4.1 (upgraded from v1.123.0)
+- **URL**: https://immich.lab.mtgibbs.dev
+- **Purpose**: Self-hosted photo backup and management (Google Photos alternative)
+- **Deployment**: Helm chart (immich-charts v0.10.3)
+- **Storage**: NFS PersistentVolume to Synology NAS for photo storage
+- **Database**: PostgreSQL with pgvector extension (for ML features)
+- **Cache**: Valkey (Redis fork) for performance
+- **Migration Notes**:
+  - Upgraded via two-step path: v1.123.0 → v1.132.3 → v2.4.1
+  - v1.132.3 was the last TypeORM version before Kysely migration
+  - v2.x introduced major database schema changes
+  - Fixed storage: `IMMICH_MEDIA_LOCATION=/data` (matches PVC mount)
+  - NFSv3 required for Synology NAS compatibility with Pi ARM architecture
+- **CLI Import**: `npx @immich/cli@latest upload --key <api-key> /path/to/photos`
+
+### Discord Deployment Notifications
+- **Namespace**: `flux-notifications`
+- **Provider**: Discord webhook
+- **Purpose**: Real-time notifications for Flux GitOps deployments
+- **Configuration**:
+  - Discord Provider with webhook URL from 1Password (`discord-alerts/webhook-url`)
+  - Alert monitors all Kustomizations and HelmReleases
+  - 30s timeout to accommodate Pi network latency
+  - Notifies on: info, error events (reconciliation success/failure)
+- **Setup**:
+  1. Create Discord webhook in server settings
+  2. Store webhook URL in 1Password (`pi-cluster` vault, `discord-alerts` item)
+  3. ExternalSecret syncs webhook URL to Kubernetes secret
+  4. Flux Provider references secret for webhook URL
 
 ### External Service Reverse Proxies
 - **Namespace**: `external-services`
@@ -412,7 +516,6 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 |---------|---------|-----|
 | Unifi Controller | 192.168.1.30:8443 (HTTPS) | https://unifi.lab.mtgibbs.dev |
 | Synology NAS | 192.168.1.60:5000 (HTTP) | https://nas.lab.mtgibbs.dev |
-| Plex Media Server | 192.168.1.53:32400 (HTTP) | https://plex.lab.mtgibbs.dev |
 
 **Special Configuration**:
 - **Unifi**: Requires nginx annotations for HTTPS backend:
@@ -422,7 +525,11 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 
 ## Future Additions (Backlog)
 
-- **Multi-node** - Add another Pi for HA learning
+- **Pi-hole HA** - Implement failover/redundancy for DNS service
+- **Shared NFS storage** - Migrate from local-path to NFS for multi-node PVC access
+- **Resource quotas** - Namespace-level resource limits and policies
+- **Network policies** - Pod-to-pod traffic segmentation and security
+- **Horizontal Pod Autoscaling** - Auto-scale workloads based on CPU/memory metrics
 
 ## Claude Code Extensions
 
