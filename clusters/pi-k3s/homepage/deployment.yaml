@@ -16,6 +16,8 @@ spec:
         app: homepage
     spec:
       serviceAccountName: homepage
+      nodeSelector:
+        kubernetes.io/hostname: pi-k3s
       initContainers:
         - name: copy-config
           image: busybox:latest
