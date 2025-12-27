@@ -8,6 +8,7 @@ data:
   # Uses __notification_ prefix for AutoKuma notification management
   __notification_discord.json: |
     {
+      "type": "notification",
       "name": "Discord Alerts",
       "active": true,
       "isDefault": true,
