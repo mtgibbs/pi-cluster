@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: homepage
 resources:
   - namespace.yaml
+  - rbac.yaml
   - configmap.yaml
   - deployment.yaml
   - service.yaml

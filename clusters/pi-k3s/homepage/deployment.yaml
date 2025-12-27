@@ -15,6 +15,7 @@ spec:
       labels:
         app: homepage
     spec:
+      serviceAccountName: homepage
       initContainers:
         - name: copy-config
           image: busybox:latest
