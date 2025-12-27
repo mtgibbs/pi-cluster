@@ -1,0 +1,20 @@
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: deployments
+  namespace: flux-system
+spec:
+  providerRef:
+    name: discord
+  eventSeverity: info
+  eventSources:
+    - kind: Kustomization
+      name: '*'
+    - kind: HelmRelease
+      name: '*'
+      namespace: '*'
+  exclusionList:
+    # Filter out noisy transient messages
+    - ".*waiting.*socket.*"
+    - ".*Dependencies do not meet ready condition.*"
+    - ".*HelmChart.*is not ready.*"

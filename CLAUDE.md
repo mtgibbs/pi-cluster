@@ -453,6 +453,17 @@ This project includes custom slash commands, skills, and agents to streamline cl
 |-------|---------|
 | `cluster-ops` | Infrastructure changes, deployments, troubleshooting |
 
+**IMPORTANT: Use `cluster-ops` agent for ALL cluster operations.**
+
+When performing any kubectl, flux, or helm operations, Claude MUST use the `cluster-ops` agent (via the Task tool with `subagent_type: cluster-ops`). This includes:
+- Checking pod status, logs, events
+- Reconciling Flux resources
+- Debugging deployments
+- Verifying PVCs, secrets, ingress
+- Any other cluster introspection or troubleshooting
+
+This ensures consistent kubeconfig usage and proper error handling. Only exception: simple status checks in slash commands (which handle their own kubeconfig).
+
 ### How to Leverage These
 
 **For vague requests, Claude will clarify:**

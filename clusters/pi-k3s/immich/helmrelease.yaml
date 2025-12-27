@@ -45,6 +45,8 @@ spec:
               env:
                 TZ: "America/New_York"
                 REVERSE_GEOCODING_PRECISION: "1"
+                # Store photos on NFS mount instead of default /usr/src/app/upload
+                IMMICH_MEDIA_LOCATION: "/data"
                 # Use pgvector extension (vector 0.8.1 is installed)
                 DB_VECTOR_EXTENSION: pgvector
                 # External PostgreSQL connection

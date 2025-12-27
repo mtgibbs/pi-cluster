@@ -33,7 +33,25 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 3. Ingress controller (nginx)
+# 3. Flux Notifications - Discord alerts for deployments
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-notifications
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/flux-notifications
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 4. Ingress controller (nginx)
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -49,7 +67,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 4. Cert-manager - TLS certificate management
+# 5. Cert-manager - TLS certificate management
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -65,7 +83,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 5. Cert-manager config - ClusterIssuers + Cloudflare secret
+# 6. Cert-manager config - ClusterIssuers + Cloudflare secret
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -84,7 +102,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 6. Pi-hole stack - depends on secrets, ingress, and cert-manager
+# 7. Pi-hole stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -104,7 +122,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 7. Monitoring stack - depends on secrets, ingress, and cert-manager
+# 8. Monitoring stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -124,7 +142,7 @@ spec:
   wait: true
   timeout: 10m
 ---
-# 8. Uptime Kuma - status page for home services
+# 9. Uptime Kuma - status page for home services
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -144,7 +162,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 9. Homepage - unified dashboard for all services
+# 10. Homepage - unified dashboard for all services
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -163,7 +181,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 10. External Services - reverse proxy for Unifi, Synology, Plex
+# 11. External Services - reverse proxy for Unifi, Synology, Plex
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -182,7 +200,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 11. Backup Jobs - weekly PVC backups to Synology NAS via rsync/SSH
+# 12. Backup Jobs - weekly PVC backups to Synology NAS via rsync/SSH
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -203,7 +221,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 12. Immich - self-hosted photo/video backup
+# 13. Immich - self-hosted photo/video backup
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
