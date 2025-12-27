@@ -14,6 +14,9 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          # Must run on pi-k3s where local-path PVCs are stored
+          nodeSelector:
+            kubernetes.io/hostname: pi-k3s
           containers:
             - name: backup
               image: instrumentisto/rsync-ssh:alpine
