@@ -240,3 +240,22 @@ spec:
     name: flux-system
   wait: true
   timeout: 10m
+---
+# 14. Jellyfin - media server
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: jellyfin
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/jellyfin
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

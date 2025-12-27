@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-video-nfs
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-video
+  nfs:
+    server: 192.168.1.60
+    path: /volume/video
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-video
+  namespace: jellyfin
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: nfs-video
+  resources:
+    requests:
+      storage: 1Ti

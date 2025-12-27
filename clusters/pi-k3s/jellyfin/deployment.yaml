@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jellyfin
+  template:
+    metadata:
+      labels:
+        app: jellyfin
+    spec:
+      containers:
+        - name: jellyfin
+          image: jellyfin/jellyfin:latest
+          ports:
+            - containerPort: 8096
+              name: http
+          env:
+            - name: TZ
+              value: "America/New_York"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: video
+              mountPath: /media
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8096
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8096
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: video
+          persistentVolumeClaim:
+            claimName: jellyfin-video
