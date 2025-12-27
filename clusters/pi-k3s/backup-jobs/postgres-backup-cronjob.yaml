@@ -1,0 +1,99 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: backup-jobs
+spec:
+  schedule: "30 2 * * 0"  # Every Sunday at 2:30 AM (after PVC backup starts)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: postgres-backup
+          containers:
+            - name: backup
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  # Install PostgreSQL client
+                  apk add --no-cache postgresql14-client
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  NAS_USER="mtgibbs"
+                  NAS_HOST="192.168.1.60"
+                  NAS_PATH="/volume1/k3s-backups"
+                  SSH_KEY="/ssh/id_ed25519"
+
+                  echo "=== PostgreSQL Backup ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo ""
+
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Create backup directory on NAS
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/postgres"
+
+                  # Backup Immich PostgreSQL
+                  echo "--- Backing up: Immich PostgreSQL ---"
+                  PGPASSWORD="${DB_PASSWORD}" pg_dump \
+                    -h immich-postgresql.immich.svc.cluster.local \
+                    -U immich \
+                    -d immich \
+                    --format=custom \
+                    --compress=9 \
+                    -f /tmp/immich-postgres.dump
+
+                  echo "Dump created: $(ls -lh /tmp/immich-postgres.dump)"
+
+                  # Transfer to NAS
+                  scp -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    /tmp/immich-postgres.dump \
+                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"
+
+                  echo "Transferred to NAS"
+                  echo ""
+
+                  # Verify backup
+                  echo "--- Backup Summary ---"
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -lh ${NAS_PATH}/${BACKUP_DATE}/postgres/"
+
+                  echo ""
+                  echo "PostgreSQL backup completed successfully!"
+
+                  # Cleanup
+                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-db-password
+                      key: password
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400

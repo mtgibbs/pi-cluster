@@ -5,3 +5,5 @@ resources:
   - namespace.yaml
   - external-secret.yaml
   - backup-cronjob.yaml
+  - postgres-backup-secret.yaml
+  - postgres-backup-cronjob.yaml
