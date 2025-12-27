@@ -119,7 +119,7 @@ spec:
       persistence:
         data:
           enabled: true
-          type: pvc
+          type: persistentVolumeClaim
           size: 1Gi
           storageClass: local-path
           accessMode: ReadWriteOnce
