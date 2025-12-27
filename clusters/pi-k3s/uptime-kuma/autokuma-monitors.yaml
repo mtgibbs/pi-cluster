@@ -4,6 +4,15 @@ metadata:
   name: autokuma-monitors
   namespace: uptime-kuma
 data:
+  # Discord notification - referenced by monitors for alerts
+  # Uses __notification_ prefix for AutoKuma notification management
+  __notification_discord.json: |
+    {
+      "name": "Discord Alerts",
+      "type": "discord",
+      "isDefault": true,
+      "discordWebhookUrl": "${DISCORD_WEBHOOK_URL}"
+    }
   # Each file is a separate monitor - filename (without .json) becomes the monitor ID
   pihole-dns.json: |
     {
@@ -98,11 +107,11 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
-  plex.json: |
+  jellyfin.json: |
     {
       "type": "http",
-      "name": "Plex",
-      "url": "https://plex.lab.mtgibbs.dev/",
+      "name": "Jellyfin",
+      "url": "https://jellyfin.lab.mtgibbs.dev/health",
       "interval": 60,
       "retryInterval": 30,
       "maxretries": 3

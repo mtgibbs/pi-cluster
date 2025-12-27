@@ -43,6 +43,11 @@ spec:
               value: "false"
             - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
               value: "true"
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-secret
+                  key: discord-webhook-url
           volumeMounts:
             - name: monitors
               mountPath: /monitors
