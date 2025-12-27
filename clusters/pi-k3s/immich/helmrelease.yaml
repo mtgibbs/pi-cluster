@@ -45,8 +45,8 @@ spec:
               env:
                 TZ: "America/New_York"
                 REVERSE_GEOCODING_PRECISION: "1"
-                # Use VectorChord extension (available in our postgres image)
-                DB_VECTOR_EXTENSION: vectorchord
+                # Use pgvector extension (vector 0.8.1 is installed)
+                DB_VECTOR_EXTENSION: pgvector
                 # External PostgreSQL connection
                 DB_HOSTNAME: immich-postgresql
                 DB_DATABASE_NAME: immich
