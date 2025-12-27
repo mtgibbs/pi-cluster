@@ -38,7 +38,16 @@ spec:
               value: "home.lab.mtgibbs.dev"
           envFrom:
             - secretRef:
-                name: homepage-widgets
+                name: homepage-pihole
+                optional: true
+            - secretRef:
+                name: homepage-jellyfin
+                optional: true
+            - secretRef:
+                name: homepage-immich
+                optional: true
+            - secretRef:
+                name: homepage-unifi
                 optional: true
           ports:
             - containerPort: 3000
