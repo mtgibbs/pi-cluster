@@ -17,6 +17,27 @@ spec:
       labels:
         app: autokuma
     spec:
+      initContainers:
+        - name: envsubst
+          image: bhgedigital/envsubst:latest
+          env:
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-secret
+                  key: discord-webhook-url
+          command:
+            - sh
+            - -c
+            - |
+              for f in /configmap/*.json; do
+                envsubst < "$f" > "/monitors/$(basename $f)"
+              done
+          volumeMounts:
+            - name: configmap
+              mountPath: /configmap
+            - name: monitors-processed
+              mountPath: /monitors
       containers:
         - name: autokuma
           image: ghcr.io/bigboot/autokuma:latest
@@ -49,7 +70,7 @@ spec:
                   name: uptime-kuma-secret
                   key: discord-webhook-url
           volumeMounts:
-            - name: monitors
+            - name: monitors-processed
               mountPath: /monitors
             - name: data
               mountPath: /data
@@ -61,9 +82,11 @@ spec:
               cpu: 100m
               memory: 128Mi
       volumes:
-        - name: monitors
+        - name: configmap
           configMap:
             name: autokuma-monitors
+        - name: monitors-processed
+          emptyDir: {}
         - name: data
           persistentVolumeClaim:
             claimName: autokuma-data
