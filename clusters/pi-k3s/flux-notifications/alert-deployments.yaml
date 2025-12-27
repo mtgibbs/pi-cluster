@@ -12,7 +12,12 @@ spec:
       name: '*'
     - kind: HelmRelease
       name: '*'
-      namespace: '*'
+    - kind: HelmRelease
+      name: '*'
+      namespace: immich
+    - kind: HelmRelease
+      name: '*'
+      namespace: monitoring
   exclusionList:
     # Filter out noisy transient messages
     - ".*waiting.*socket.*"
