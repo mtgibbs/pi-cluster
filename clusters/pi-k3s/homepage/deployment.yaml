@@ -39,6 +39,7 @@ spec:
           envFrom:
             - secretRef:
                 name: homepage-widgets
+                optional: true
           ports:
             - containerPort: 3000
               name: http
