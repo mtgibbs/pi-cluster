@@ -42,12 +42,6 @@ data:
         - K3s Cluster:
             icon: kubernetes.png
             description: 3-Node ARM64 Cluster
-            widget:
-              type: kubernetes
-              cluster:
-                show: true
-                cpu: true
-                memory: true
 
     - Monitoring:
         - Grafana:
