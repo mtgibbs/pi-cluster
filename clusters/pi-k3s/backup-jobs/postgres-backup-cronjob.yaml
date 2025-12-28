@@ -25,7 +25,7 @@ spec:
                   set -e
 
                   # Install PostgreSQL client
-                  apk add --no-cache postgresql14-client
+                  apk add --no-cache postgresql16-client
 
                   BACKUP_DATE=$(date +%Y-%m-%d)
                   NAS_USER="mtgibbs"
