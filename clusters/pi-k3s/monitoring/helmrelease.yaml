@@ -108,10 +108,10 @@ spec:
           repeat_interval: 4h
           receiver: discord
           routes:
-            # Silence Watchdog (heartbeat alert)
+            # Silence noisy/expected alerts
             - receiver: 'null'
               matchers:
-                - alertname = Watchdog
+                - alertname =~ "Watchdog|KubeMemoryOvercommit"
             # Critical alerts get sent immediately
             - receiver: discord
               matchers:
