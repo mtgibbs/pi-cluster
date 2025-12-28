@@ -6,7 +6,8 @@ metadata:
   name: immich-metrics
   namespace: immich
   labels:
-    app.kubernetes.io/name: immich-metrics
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: metrics
     app.kubernetes.io/instance: immich
 spec:
   selector:
@@ -34,7 +35,8 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: immich-metrics
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: metrics
       app.kubernetes.io/instance: immich
   namespaceSelector:
     matchNames:
