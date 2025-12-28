@@ -10,67 +10,65 @@ spec:
   groups:
     - name: immich.rules
       rules:
-        # Alert if job queue is backed up (>100 jobs waiting for 10 minutes)
-        - alert: ImmichJobQueueBacklog
-          expr: immich_jobs_waiting > 100
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Immich job queue backlog detected"
-            description: "{{ $labels.queue_name }} has {{ $value }} jobs waiting for more than 10 minutes"
-
-        # Alert if jobs are failing repeatedly
-        - alert: ImmichJobsFailing
-          expr: rate(immich_jobs_failed_total[5m]) > 0.1
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Immich jobs failing"
-            description: "{{ $labels.queue_name }} is failing at {{ $value | humanize }} jobs/sec"
-
-        # Alert if no uploads for extended period (possible sync issue)
-        - alert: ImmichNoRecentUploads
-          expr: increase(immich_api_requests_total{endpoint="/api/assets", method="POST"}[6h]) == 0
-          for: 1h
-          labels:
-            severity: info
-          annotations:
-            summary: "No Immich uploads in 6+ hours"
-            description: "No new assets have been uploaded to Immich in over 6 hours"
-
-        # Alert if Immich server is down
+        # Alert if Immich metrics endpoint is down
         - alert: ImmichServerDown
-          expr: up{job="immich"} == 0
+          expr: up{job="immich-metrics"} == 0
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: "Immich server is down"
-            description: "Immich metrics endpoint is not responding"
+            description: "Immich metrics endpoint {{ $labels.instance }} is not responding"
 
-        # Alert on high API error rate
-        - alert: ImmichHighErrorRate
+        # Alert if thumbnail generation queue is saturated (active for 10+ minutes)
+        - alert: ImmichThumbnailQueueStuck
+          expr: immich_queues_thumbnail_generation_active > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich thumbnail queue appears stuck"
+            description: "Thumbnail generation has been active for over 10 minutes ({{ $value }} jobs)"
+
+        # Alert if video conversion queue is saturated
+        - alert: ImmichVideoQueueStuck
+          expr: immich_queues_video_conversion_active > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich video conversion queue appears stuck"
+            description: "Video conversion has been active for over 30 minutes ({{ $value }} jobs)"
+
+        # Alert if metadata extraction queue is saturated
+        - alert: ImmichMetadataQueueStuck
+          expr: immich_queues_metadata_extraction_active > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich metadata extraction appears stuck"
+            description: "Metadata extraction has been active for over 15 minutes ({{ $value }} jobs)"
+
+        # Alert if no thumbnails generated recently (possible processing issue)
+        - alert: ImmichNoThumbnailActivity
+          expr: increase(immich_jobs_asset_generate_thumbnails_success_total[6h]) == 0
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "No Immich thumbnail activity in 6+ hours"
+            description: "No thumbnails have been generated in over 6 hours - may indicate no uploads or processing issues"
+
+        # Alert on high database query latency (p99 > 1s)
+        - alert: ImmichDatabaseSlowQueries
           expr: |
-            (
-              sum(rate(immich_api_requests_total{status=~"5.."}[5m]))
-              /
-              sum(rate(immich_api_requests_total[5m]))
-            ) > 0.05
+            histogram_quantile(0.99,
+              sum by (le) (rate(immich_asset_repository_get_by_id_duration_bucket[5m]))
+            ) > 1
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "Immich high error rate"
-            description: "More than 5% of API requests are failing"
-
-        # Alert if database connections are exhausted
-        - alert: ImmichDatabaseConnectionsHigh
-          expr: immich_db_pool_active / immich_db_pool_size > 0.9
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Immich database connections nearly exhausted"
-            description: "{{ $value | humanizePercentage }} of database connections are in use"
+            summary: "Immich database queries are slow"
+            description: "99th percentile asset lookup latency is {{ $value | humanizeDuration }}"
