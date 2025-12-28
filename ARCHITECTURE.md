@@ -215,8 +215,12 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Homepage (gethomepage/homepage)                                 │  │
 │  │  • Unified dashboard for all cluster services                    │  │
 │  │  • Dark theme with system resource widgets                       │  │
+│  │  • Live service widgets (Pi-hole, Immich, Jellyfin, Prometheus) │  │
+│  │  • Kubernetes widget with node metrics                           │  │
 │  │  • GitOps-managed configuration via ConfigMap                    │  │
 │  │  • initContainer copies config to writable emptyDir              │  │
+│  │  • RBAC: ServiceAccount with ClusterRole for API access          │  │
+│  │  • Secrets: 4 ExternalSecrets for widget API keys                │  │
 │  │  • Ingress: home.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
@@ -512,6 +516,73 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Adds API calls to Kubernetes control plane
 - But: invaluable for monitoring cluster health at a glance
 
+### 18. Homepage Live Service Widgets
+
+**Decision**: Add API-integrated widgets for real-time service statistics
+
+**Why**:
+- Unified dashboard shows live cluster health at a glance
+- Reduces need to visit individual service UIs for status checks
+- Demonstrates GitOps secret management with multiple API keys
+
+**Implementation**:
+- Each service widget requires its own API key or credentials
+- Separate ExternalSecret per service for independent auth lifecycle
+- API keys synced from 1Password via ESO to Kubernetes secrets
+- Secrets injected as environment variables using `HOMEPAGE_VAR_*` pattern
+- Homepage ConfigMap references env vars in widget configuration
+
+**Services with Live Widgets**:
+- Pi-hole: queries, blocked count, blocked %, gravity size (v6 API)
+- Immich: photos, videos, storage (API key with server.statistics permission)
+- Jellyfin: library stats, now playing (API key)
+- Prometheus: targets up/down/total (read-only metrics endpoint)
+- Uptime Kuma: service status (requires status page with slug 'home')
+- Unifi: WiFi users, LAN devices, WAN (local account credentials)
+
+**Security Flow**:
+1. API keys stored in 1Password `pi-cluster` vault
+2. ExternalSecret syncs to Kubernetes secret in `homepage` namespace
+3. Secret mounted as env var in Homepage deployment
+4. ConfigMap references env var for widget auth
+5. No secrets exposed in git repository
+
+**Trade-offs**:
+- More complex secret management (4+ separate ExternalSecrets)
+- Requires creating/managing API keys for each service
+- Widget failures are graceful (service tiles still show with siteMonitor fallback)
+- But: significantly better UX and operational visibility
+
+### 19. PostgreSQL Backup Job
+
+**Decision**: Add dedicated PostgreSQL backup job for database-level backups
+
+**Why**:
+- PVC backups capture filesystem state, but database-level backups provide:
+  - Consistent point-in-time snapshots (via pg_dump transactional backup)
+  - Cross-database restore capability (can restore to different cluster)
+  - Easier selective restore (specific tables/schemas)
+- Immich database contains critical metadata (albums, user accounts, sharing, ML embeddings)
+
+**Implementation**:
+- CronJob runs Sundays at 2:30 AM (30 minutes after PVC backup)
+- Uses pg_dump with custom format and compression level 9
+- Connects to PostgreSQL service in cluster (immich-postgresql.immich.svc.cluster.local)
+- Transfers compressed dump to Synology NAS via SCP
+- DB password synced from 1Password via ExternalSecret
+- Pinned to pi-k3s node (same as PVC backup for consistency)
+
+**Backup Strategy**:
+- PVC backup: Full filesystem snapshot (photos, config, data directory)
+- PostgreSQL backup: Database logical backup (metadata, schema, indexes)
+- Together: Complete disaster recovery capability
+
+**Trade-offs**:
+- Duplicates some data (database files exist in both backups)
+- Additional backup window (30 minutes offset)
+- More complex restore procedure (requires both backup types)
+- But: provides defense-in-depth and flexible recovery options
+
 ## Observability Stack
 
 ```
@@ -616,8 +687,10 @@ pi-cluster/
         │   ├── external-secret.yaml      # Discord webhook URL from 1Password
         │   └── kustomization.yaml
         ├── backup-jobs/
-        │   ├── immich-backup.yaml        # Nightly PVC backup to Synology (pinned to pi-k3s)
-        │   └── kustomization.yaml
+        │   ├── kustomization.yaml
+        │   ├── immich-backup.yaml        # Nightly PVC backup to Synology (2:00 AM Sundays)
+        │   ├── postgres-backup-cronjob.yaml  # PostgreSQL backup (2:30 AM Sundays)
+        │   └── postgres-backup-secret.yaml   # ExternalSecret for DB password
         └── external-services/
             ├── namespace.yaml            # external-services namespace
             ├── unifi.yaml                # Unifi Controller reverse proxy
@@ -640,6 +713,7 @@ pi-cluster/
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
 | Jellyfin | 8096 | TCP | Ingress (jellyfin.lab.mtgibbs.dev) |
 | Immich | 3001 | TCP | Ingress (immich.lab.mtgibbs.dev) |
+| Immich PostgreSQL | 5432 | TCP | ClusterIP (internal only, backup job access) |
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
 

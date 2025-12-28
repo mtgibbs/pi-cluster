@@ -197,9 +197,10 @@ pi-cluster/
         │   ├── namespace.yaml
         │   ├── deployment.yaml            # Homepage with initContainer + emptyDir
         │   ├── service.yaml
-        │   ├── serviceaccount.yaml        # RBAC for Kubernetes widget
+        │   ├── rbac.yaml                  # ServiceAccount + ClusterRole for Kubernetes widget
         │   ├── ingress.yaml               # home.lab.mtgibbs.dev
-        │   └── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
+        │   ├── configmap.yaml             # Dashboard config (settings, services, widgets, bookmarks)
+        │   └── external-secret.yaml       # API keys for widget auth (4 separate secrets)
         ├── jellyfin/
         │   ├── kustomization.yaml
         │   ├── namespace.yaml
@@ -221,7 +222,9 @@ pi-cluster/
         │   └── external-secret.yaml       # Discord webhook URL from 1Password
         ├── backup-jobs/
         │   ├── kustomization.yaml
-        │   └── immich-backup.yaml         # Nightly PVC backup to Synology NAS
+        │   ├── immich-backup.yaml         # Nightly PVC backup to Synology NAS (2:00 AM Sundays)
+        │   ├── postgres-backup-cronjob.yaml  # PostgreSQL backup CronJob (2:30 AM Sundays)
+        │   └── postgres-backup-secret.yaml   # ExternalSecret for DB password
         └── external-services/
             ├── kustomization.yaml
             ├── namespace.yaml
@@ -294,10 +297,14 @@ resources:
 | Item | Field | Used By |
 |------|-------|---------|
 | `pihole` | `password` | Pi-hole admin password |
+| `pihole` | `api-key` | Pi-hole v6 API key for Homepage widget |
 | `grafana` | `admin-user`, `admin-password` | Grafana login |
 | `cloudflare` | `api-token` | Let's Encrypt DNS-01 challenge |
 | `uptime-kuma` | `username`, `password` | Uptime Kuma login + AutoKuma API access |
 | `immich` | `db-password` | Immich PostgreSQL database password |
+| `immich` | `api-key` | Immich API key (server.statistics permission) for Homepage widget |
+| `jellyfin` | `api-key` | Jellyfin API key for Homepage widget |
+| `unifi` | `username`, `password` | Unifi local account for Homepage widget |
 | `discord-alerts` | `webhook-url` | Discord webhook for Flux notifications |
 
 ### Pi-hole Config
@@ -443,22 +450,33 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Configuration**: Fully GitOps-managed via ConfigMap
 - **Theme**: Dark theme with clean layout
 - **Sections**:
-  - Infrastructure: Pi-hole, Unbound, K3s Cluster
-  - Monitoring: Grafana, Uptime Kuma, Prometheus
-  - Media: Jellyfin, Immich
-  - Network: Unifi Controller
+  - Infrastructure: Pi-hole (with live stats), Unbound, K3s Cluster
+  - Monitoring: Grafana, Uptime Kuma (with service status), Prometheus (with target stats)
+  - Media: Jellyfin (with library stats), Immich (with photo/video counts)
+  - Network: Unifi Controller (with WiFi/LAN device counts)
   - Storage: Synology NAS
   - **Kubernetes widget**: Real-time node metrics (CPU, memory, uptime for all 3 nodes)
   - System resources widget (CPU, RAM, disk)
   - Bookmarks to GitHub repo and Flux docs
+- **Live Widgets** (API-integrated):
+  - **Pi-hole**: queries, blocked count, blocked %, gravity size (v6 API)
+  - **Immich**: photos, videos, storage (requires API key with server.statistics permission)
+  - **Jellyfin**: library stats, now playing (requires API key)
+  - **Prometheus**: targets up/down/total (read-only metrics endpoint)
+  - **Uptime Kuma**: service status (requires status page with slug 'home')
+  - **Unifi**: WiFi users, LAN devices, WAN stats (requires local account)
 - **Technical details**:
   - Uses initContainer to copy ConfigMap to writable emptyDir (Homepage needs writable config dir)
   - Requires `HOMEPAGE_ALLOWED_HOSTS` env var set to ingress hostname
   - Port 3000 exposed via ClusterIP service
   - TLS certificate via Let's Encrypt (cert-manager)
-  - **RBAC**: ServiceAccount with ClusterRole for read-only node metrics access
+  - **RBAC**: ServiceAccount with ClusterRole for read-only permissions
     - Enables Kubernetes widget to query cluster API for node stats
-    - ClusterRoleBinding grants necessary permissions
+    - ClusterRoleBinding grants permissions: nodes (get/list), ingresses (get/list), deployments (get/list)
+  - **Secrets management**: Each widget has its own ExternalSecret for independent auth
+    - `pihole-api-key`, `immich-api-key`, `jellyfin-api-key`, `unifi-credentials`
+    - API keys passed as env vars via `HOMEPAGE_VAR_*` pattern
+  - **Security**: No secrets in git, only references to 1Password items
 
 ### Jellyfin Media Server
 - **Image**: `jellyfin/jellyfin:latest`
@@ -523,6 +541,48 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   - `nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"` (self-signed backend cert)
 - All services get Let's Encrypt TLS certificates via cert-manager
 
+## Backup Strategy
+
+### PVC Backups (2:00 AM Sundays)
+- **Job**: `immich-backup` CronJob in `backup-jobs` namespace
+- **Source**: Immich PVCs on pi-k3s node (local-path storage)
+- **Destination**: Synology NAS at `/volume1/k3s-backups/{date}/immich/`
+- **Method**: rsync over SSH
+- **Retention**: Manual (stored on NAS)
+
+### PostgreSQL Backups (2:30 AM Sundays)
+- **Job**: `postgres-backup` CronJob in `backup-jobs` namespace
+- **Target**: Immich PostgreSQL database
+- **Format**: pg_dump custom format with compression level 9
+- **Destination**: Synology NAS at `/volume1/k3s-backups/{date}/postgres/`
+- **Credentials**: DB password synced from 1Password via ExternalSecret
+- **Timing**: Runs 30 minutes after PVC backup to avoid I/O conflicts
+
+**Why Both?**
+- **PVC backup**: Captures uploaded photos, app data, configuration (filesystem-level)
+- **PostgreSQL backup**: Captures metadata, user accounts, albums, sharing settings (database-level)
+- Together they provide complete disaster recovery (can restore from either backup type)
+
+## Known Issues
+
+### Immich High CPU Usage
+- **Issue**: Immich causing ~2 CPU cores usage on Pi 5 due to ML job retry loop
+- **Cause**: Machine learning disabled but jobs still queued and retrying
+- **Impact**: High CPU usage, no functional issues
+- **Resolution**: Deferred - ML features not needed, workaround is acceptable
+
+### Dead Pi-hole Blocklists
+- **Issue**: Two dead blocklists (IDs 19, 28) in Pi-hole database
+- **Cause**: Manually added via web UI (not in GitOps ConfigMap)
+- **Impact**: Warning logs, no blocking issues (~900k domains still active)
+- **Resolution**: Deferred - not affecting DNS blocking functionality
+
+### NFS UID/GID Mapping
+- **Issue**: Files created on NFS volumes have incorrect ownership (uid=0, gid=0 instead of uid=568)
+- **Cause**: Synology NFS no_root_squash setting vs application UID expectations
+- **Impact**: Minimal - applications can read/write, but file ownership is incorrect
+- **Resolution**: Deferred - functional workaround exists, proper fix requires Synology NFS reconfiguration
+
 ## Future Additions (Backlog)
 
 - **Pi-hole HA** - Implement failover/redundancy for DNS service
@@ -530,6 +590,8 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Resource quotas** - Namespace-level resource limits and policies
 - **Network policies** - Pod-to-pod traffic segmentation and security
 - **Horizontal Pod Autoscaling** - Auto-scale workloads based on CPU/memory metrics
+- **Immich ML optimization** - Resolve ML job retry loop causing high CPU
+- **Pi-hole blocklist cleanup** - Remove dead lists, ensure all lists in GitOps
 
 ## Claude Code Extensions
 

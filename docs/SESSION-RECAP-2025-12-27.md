@@ -226,3 +226,211 @@ Major cluster expansion from single-node to 3-node multi-Pi deployment, plus sig
 - Created `discord-alerts` item with `webhook-url` field
 - Stored SSH keys for pi3-worker-1, pi3-worker-2
 - Stored K3s node token
+
+---
+
+# Continuation: Homepage Widgets & Backup Enhancement (Later Session)
+
+## Overview
+
+Enhanced Homepage dashboard with live API-integrated widgets for all major services and added PostgreSQL backup infrastructure for comprehensive disaster recovery.
+
+## Completed
+
+### 8. PostgreSQL Backup Job
+
+**What**: Created automated PostgreSQL backup CronJob for Immich database
+
+**Why**:
+- PVC backups capture filesystem state, but database-level backups provide consistent point-in-time snapshots
+- Enables cross-database restore capability and selective recovery
+- Immich database contains critical metadata (albums, user accounts, sharing settings, ML embeddings)
+
+**How**:
+- CronJob scheduled for Sundays at 2:30 AM (30 minutes after PVC backup)
+- Uses `pg_dump` with custom format and compression level 9
+- Connects to `immich-postgresql.immich.svc.cluster.local` in-cluster
+- Transfers compressed dump to Synology NAS at `/volume1/k3s-backups/{date}/postgres/`
+- Database password synced from 1Password via ExternalSecret (`immich/db-password`)
+- Pinned to pi-k3s node with `nodeSelector` (same as PVC backup)
+
+**Files Created**:
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/backup-jobs/postgres-backup-cronjob.yaml`
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/backup-jobs/postgres-backup-secret.yaml`
+
+**Backup Strategy** (Two-Tier):
+- **PVC backup (2:00 AM)**: Captures uploaded photos, app data, configuration (filesystem-level)
+- **PostgreSQL backup (2:30 AM)**: Captures metadata, user accounts, albums, sharing (database-level)
+- Together: Complete disaster recovery with multiple restore options
+
+**Commit**: `feat(backup): Add PostgreSQL backup CronJob for Immich database` (060691b)
+
+---
+
+### 9. Homepage Dashboard - Live Service Widgets
+
+**What**: Added API-integrated widgets for real-time service statistics
+
+**Why**:
+- Unified dashboard shows live cluster health at a glance
+- Reduces need to visit individual service UIs for status checks
+- Demonstrates GitOps secret management with multiple API keys
+- Improves operational visibility
+
+**How**:
+- Split single ExternalSecret into 4 separate ExternalSecrets (one per service)
+- Each secret syncs specific API key/credentials from 1Password
+- Secrets injected as environment variables using `HOMEPAGE_VAR_*` pattern
+- Homepage ConfigMap references env vars in widget configuration
+- Expanded RBAC permissions (nodes, ingresses, deployments for Kubernetes widget)
+
+**Live Widgets Configured**:
+
+| Widget | Data Displayed | Auth Method |
+|--------|----------------|-------------|
+| **Pi-hole** | Queries, blocked %, gravity stats | App password (v6 API) |
+| **Immich** | Photos, videos, storage | API key with `server.statistics` permission |
+| **Jellyfin** | Library stats, now playing | API key |
+| **Prometheus** | Targets up/down/total | Read-only metrics endpoint (no auth) |
+| **Uptime Kuma** | Service status summary | Status page with slug 'home' |
+| **Unifi** | WiFi users, LAN devices, WAN | Local account credentials |
+
+**1Password Items Created**:
+- `pihole/api-key` - Pi-hole v6 app password (Settings > API > App Passwords)
+- `jellyfin/api-key` - Jellyfin API key (Dashboard > API Keys)
+- `immich/api-key` - Immich API key with `server.statistics` permission (User Settings > API Keys)
+- `unifi/username` and `unifi/password` - Unifi local account (avoid SSO account)
+
+**Files Modified**:
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/homepage/configmap.yaml` - Added widget configs
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/homepage/deployment.yaml` - Added `envFrom` for secrets
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/homepage/external-secret.yaml` - Split into 4 secrets
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/homepage/rbac.yaml` - Expanded ClusterRole permissions (renamed from serviceaccount.yaml)
+- `/Users/mtgibbs/dev/pi-cluster/clusters/pi-k3s/homepage/kustomization.yaml` - Updated resource list
+
+**Security Design**:
+```
+1Password (pi-cluster vault)
+    ↓ (TLS, ESO pulls)
+ExternalSecret (homepage namespace)
+    ↓ (creates)
+Kubernetes Secret (encrypted at rest)
+    ↓ (mounted as env var)
+Homepage Pod (HOMEPAGE_VAR_PIHOLE_API_KEY)
+    ↓ (ConfigMap references)
+Widget Configuration ({{HOMEPAGE_VAR_PIHOLE_API_KEY}})
+```
+
+**Key Fixes**:
+- Fixed Pi-hole service name from `pihole` to `pihole-web` (7377013)
+- Fixed Immich secret reference from `secret-key` to `api-key` (9ccc41b)
+- Made K3s and Unbound static tiles (removed broken health checks) (c9af638, 616f1c6)
+- Added `widgets: optional` to deployment for graceful startup without secrets (360ca05)
+- Expanded RBAC to allow Homepage to discover services (ingresses, deployments) (2134cba)
+
+**Commits**:
+- `feat(homepage): Add service widgets with live stats` (6fc5328)
+- `fix(homepage): Make widgets secret optional for graceful startup` (360ca05)
+- `fix(homepage): Split ExternalSecrets for independent widget auth` (18291dd)
+- `fix(homepage): Correct Pi-hole service name to pihole-web` (7377013)
+- `fix(homepage): Expand RBAC for Kubernetes widget discovery` (2134cba)
+- `fix(homepage): Use immich/api-key instead of secret-key` (9ccc41b)
+- `fix(homepage): Remove broken ping check for Unbound` (616f1c6)
+- `fix(homepage): Make K3s a static tile (stats in top widget bar)` (c9af638)
+
+---
+
+## Security Discussion
+
+**Question**: Are secrets secure if they flow through environment variables?
+
+**Answer**: Yes, the security model is sound:
+
+1. **Secrets never in git**: Only references (`pihole/api-key` in ExternalSecret)
+2. **TLS in transit**: 1Password API uses TLS 1.2+
+3. **Encrypted at rest**: Kubernetes secrets encrypted in etcd (K3s default)
+4. **RBAC-protected**: Only Homepage ServiceAccount can read secrets in `homepage` namespace
+5. **No shell exposure**: Env vars not visible in `kubectl logs` or container introspection
+6. **Audit trail**: 1Password logs all API key access
+
+**Attack surface**:
+- Compromised pod could read its own env vars (but already has access to secret data)
+- Better than: hardcoded secrets, secrets in ConfigMaps, secrets in git
+- Alternative (volume mounts) has same security profile, env vars are more convenient
+
+---
+
+## Issues Identified
+
+### Issue 5: Immich High CPU Usage
+- **Symptom**: Immich consuming ~2 CPU cores on Pi 5
+- **Cause**: Machine learning disabled, but queued ML jobs retrying in loop
+- **Impact**: High CPU, no functional issues
+- **Resolution**: Deferred - ML not needed, workaround acceptable
+
+### Issue 6: Dead Pi-hole Blocklists
+- **Symptom**: Warning logs for dead blocklists (IDs 19, 28)
+- **Cause**: Manually added via web UI (not in GitOps ConfigMap)
+- **Impact**: Cosmetic - ~900k domains still active
+- **Resolution**: Deferred - not affecting DNS blocking
+
+### Issue 7: NFS UID/GID Mapping
+- **Symptom**: Files on NFS volumes have uid=0, gid=0 instead of uid=568
+- **Cause**: Synology NFS `no_root_squash` vs application UID expectations
+- **Impact**: Minimal - apps can read/write, just incorrect ownership
+- **Resolution**: Deferred - functional workaround exists
+
+---
+
+## Architecture Updates
+
+### New Components (This Session)
+1. **postgres-backup CronJob** - Database-level backups for disaster recovery
+2. **4 ExternalSecrets** - Per-service API key management for Homepage widgets
+
+### Updated Components (This Session)
+1. **Homepage** - Live widgets for 6 services, expanded RBAC, secret injection
+2. **Backup strategy** - Two-tier approach (PVC + PostgreSQL)
+
+### Dependency Graph (Updated)
+```
+1Password (pi-cluster vault)
+  ├── pihole/api-key → Homepage widget
+  ├── immich/api-key → Homepage widget
+  ├── immich/db-password → PostgreSQL backup job
+  ├── jellyfin/api-key → Homepage widget
+  ├── unifi/username,password → Homepage widget
+  └── (existing secrets: pihole/password, grafana/admin-*, cloudflare/api-token, etc.)
+```
+
+---
+
+## Lessons Learned (This Session)
+
+### GitOps Secret Management
+- Separate ExternalSecrets per concern enable independent secret rotation
+- `HOMEPAGE_VAR_*` pattern provides clean separation between config and secrets
+- Making secrets `optional` in deployment allows graceful degradation
+
+### Service Widget Integration
+- Always test widgets with correct service names (k8s service discovery)
+- Pi-hole v6 requires app passwords, not web UI password
+- Immich API keys need specific permissions (not just any key)
+- Unifi widgets require local account, not SSO accounts
+
+### Backup Strategy
+- Database backups complement filesystem backups (not a replacement)
+- Offset backup windows prevent I/O conflicts on same node
+- ExternalSecrets for DB passwords enable automated backup jobs
+
+---
+
+## Metrics (Combined Session)
+
+- **Total nodes**: 3 (1x Pi 5, 2x Pi 3)
+- **Services deployed**: 14 (Pi-hole, Unbound, Grafana, Prometheus, Uptime Kuma, Homepage, Jellyfin, Immich, Unifi proxy, Synology proxy, cert-manager, ingress, Flux, ESO)
+- **Services with live widgets**: 6 (Pi-hole, Immich, Jellyfin, Prometheus, Uptime Kuma, Unifi)
+- **ExternalSecrets**: 9 (pihole, grafana, cloudflare, uptime-kuma, immich-db, discord, pihole-api, immich-api, jellyfin-api, unifi-creds)
+- **1Password items**: 7 (pihole, grafana, cloudflare, uptime-kuma, immich, jellyfin, unifi, discord-alerts)
+- **Backup jobs**: 2 (PVC backup 2:00 AM, PostgreSQL backup 2:30 AM)
+- **Total commits today**: 38
