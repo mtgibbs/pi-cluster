@@ -57,8 +57,8 @@ spec:
 
                   echo "Dump created: $(ls -lh /tmp/immich-postgres.dump)"
 
-                  # Transfer to NAS
-                  scp -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                  # Transfer to NAS (using rsync - scp SFTP subsystem disabled on NAS)
+                  rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
                     /tmp/immich-postgres.dump \
                     "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"
 
