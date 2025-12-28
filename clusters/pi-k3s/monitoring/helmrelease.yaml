@@ -74,9 +74,54 @@ spec:
                 requests:
                   storage: 5Gi
 
-    # Alertmanager - disable for now
+    # Alertmanager - send alerts to Discord
     alertmanager:
-      enabled: false
+      enabled: true
+      alertmanagerSpec:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: local-path
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 1Gi
+      config:
+        global:
+          resolve_timeout: 5m
+        route:
+          group_by: ['alertname', 'namespace']
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+          receiver: discord
+          routes:
+            # Critical alerts get sent immediately
+            - receiver: discord
+              matchers:
+                - severity = critical
+              group_wait: 10s
+              repeat_interval: 1h
+        receivers:
+          - name: discord
+            discord_configs:
+              - webhook_url_file: /etc/alertmanager/secrets/alertmanager-discord/webhook-url
+                title: '{{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}'
+                message: |
+                  {{ range .Alerts }}
+                  **Status:** {{ .Status | toUpper }}
+                  **Severity:** {{ .Labels.severity }}
+                  **Description:** {{ .Annotations.description }}
+                  {{ end }}
+      secrets:
+        - alertmanager-discord
 
     # Node exporter - lightweight
     nodeExporter:
