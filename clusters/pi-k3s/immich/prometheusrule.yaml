@@ -1,0 +1,76 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: immich-alerts
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  groups:
+    - name: immich.rules
+      rules:
+        # Alert if job queue is backed up (>100 jobs waiting for 10 minutes)
+        - alert: ImmichJobQueueBacklog
+          expr: immich_jobs_waiting > 100
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich job queue backlog detected"
+            description: "{{ $labels.queue_name }} has {{ $value }} jobs waiting for more than 10 minutes"
+
+        # Alert if jobs are failing repeatedly
+        - alert: ImmichJobsFailing
+          expr: rate(immich_jobs_failed_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich jobs failing"
+            description: "{{ $labels.queue_name }} is failing at {{ $value | humanize }} jobs/sec"
+
+        # Alert if no uploads for extended period (possible sync issue)
+        - alert: ImmichNoRecentUploads
+          expr: increase(immich_api_requests_total{endpoint="/api/assets", method="POST"}[6h]) == 0
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "No Immich uploads in 6+ hours"
+            description: "No new assets have been uploaded to Immich in over 6 hours"
+
+        # Alert if Immich server is down
+        - alert: ImmichServerDown
+          expr: up{job="immich"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Immich server is down"
+            description: "Immich metrics endpoint is not responding"
+
+        # Alert on high API error rate
+        - alert: ImmichHighErrorRate
+          expr: |
+            (
+              sum(rate(immich_api_requests_total{status=~"5.."}[5m]))
+              /
+              sum(rate(immich_api_requests_total[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich high error rate"
+            description: "More than 5% of API requests are failing"
+
+        # Alert if database connections are exhausted
+        - alert: ImmichDatabaseConnectionsHigh
+          expr: immich_db_pool_active / immich_db_pool_size > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich database connections nearly exhausted"
+            description: "{{ $value | humanizePercentage }} of database connections are in use"

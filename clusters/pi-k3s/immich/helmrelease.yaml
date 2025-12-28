@@ -47,6 +47,10 @@ spec:
                 REVERSE_GEOCODING_PRECISION: "1"
                 # Store photos on NFS mount instead of default /usr/src/app/upload
                 IMMICH_MEDIA_LOCATION: "/data"
+                # Enable Prometheus metrics
+                IMMICH_TELEMETRY_INCLUDE: "all"
+                IMMICH_API_METRICS_PORT: "8081"
+                IMMICH_MICROSERVICES_METRICS_PORT: "8082"
                 # Use pgvector extension (vector 0.8.1 is installed)
                 DB_VECTOR_EXTENSION: pgvector
                 # External PostgreSQL connection

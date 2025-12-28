@@ -8,3 +8,5 @@ resources:
   - library-pvc.yaml
   - postgresql.yaml
   - helmrelease.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml

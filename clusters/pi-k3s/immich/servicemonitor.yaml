@@ -1,0 +1,50 @@
+---
+# Service to expose metrics ports
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-metrics
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: metrics
+spec:
+  selector:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: server
+  ports:
+    - name: api-metrics
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: microservices-metrics
+      port: 8082
+      targetPort: 8082
+      protocol: TCP
+---
+# ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: immich
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: metrics
+  namespaceSelector:
+    matchNames:
+      - immich
+  endpoints:
+    - port: api-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+    - port: microservices-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
