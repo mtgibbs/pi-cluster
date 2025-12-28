@@ -108,6 +108,10 @@ spec:
           repeat_interval: 4h
           receiver: discord
           routes:
+            # Silence Watchdog (heartbeat alert)
+            - receiver: 'null'
+              matchers:
+                - alertname = Watchdog
             # Critical alerts get sent immediately
             - receiver: discord
               matchers:
@@ -125,6 +129,7 @@ spec:
                   **Severity:** {{ .Labels.severity }}
                   **Description:** {{ .Annotations.description }}
                   {{ end }}
+          - name: 'null'  # Silence receiver
 
     # Node exporter - lightweight
     nodeExporter:
