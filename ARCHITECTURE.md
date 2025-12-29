@@ -164,12 +164,16 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                    monitoring namespace                           │  │
 │  │                                                                   │  │
 │  │  kube-prometheus-stack (Helm)                                    │  │
-│  │  • Prometheus     - metrics collection                           │  │
+│  │  • Prometheus     - metrics collection + alert evaluation        │  │
 │  │  • Grafana        - dashboards & visualization                   │  │
-│  │  • Alertmanager   - alert routing                                │  │
+│  │  • Alertmanager   - alert routing to Discord                     │  │
 │  │  • Node Exporter  - host metrics                                 │  │
 │  │                                                                   │  │
 │  │  Grafana Ingress: grafana.lab.mtgibbs.dev                       │  │
+│  │                                                                   │  │
+│  │  Secrets:                                                         │  │
+│  │  • grafana-admin (Grafana password from 1Password)              │  │
+│  │  • alertmanager-discord-webhook (Discord URL from 1Password)     │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -246,6 +250,12 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • PostgreSQL with pgvector extension                            │  │
 │  │  • Valkey (Redis) for caching                                    │  │
 │  │  • Ingress: immich.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  │  Monitoring:                                                      │  │
+│  │  • Prometheus metrics on :8081 (server), :8082 (microservices)  │  │
+│  │  • ServiceMonitor for automatic scraping                         │  │
+│  │  • PrometheusRule with 6 alerts (queue stuck, slow queries)      │  │
+│  │  • Alerts routed to Discord via Alertmanager                     │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -568,14 +578,20 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - CronJob runs Sundays at 2:30 AM (30 minutes after PVC backup)
 - Uses pg_dump with custom format and compression level 9
 - Connects to PostgreSQL service in cluster (immich-postgresql.immich.svc.cluster.local)
-- Transfers compressed dump to Synology NAS via SCP
+- Transfers compressed dump to Synology NAS via **rsync over SSH** (not scp)
 - DB password synced from 1Password via ExternalSecret
 - Pinned to pi-k3s node (same as PVC backup for consistency)
+- PostgreSQL client: postgresql16-client (Alpine package name)
 
 **Backup Strategy**:
 - PVC backup: Full filesystem snapshot (photos, config, data directory)
 - PostgreSQL backup: Database logical backup (metadata, schema, indexes)
 - Together: Complete disaster recovery capability
+
+**Technical Notes**:
+- rsync chosen over scp because Synology NAS has SFTP subsystem disabled
+- rsync works over plain SSH, provides compression and resume capability
+- Alpine Linux repos updated from PostgreSQL 14 to 16 client
 
 **Trade-offs**:
 - Duplicates some data (database files exist in both backups)
@@ -583,37 +599,129 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - More complex restore procedure (requires both backup types)
 - But: provides defense-in-depth and flexible recovery options
 
+---
+
+### 20. Immich Prometheus Monitoring and Alerting
+
+**Decision**: Enable Prometheus metrics collection and alerting for Immich
+
+**Why**:
+- Immich has background job processing (thumbnails, video transcoding, metadata extraction)
+- Job queue stuck conditions are not visible without metrics
+- Database performance degradation can impact user experience
+- Proactive alerting prevents user-facing issues
+
+**Implementation**:
+- Enabled Immich telemetry: `IMMICH_TELEMETRY_INCLUDE=all`
+- Configured metrics endpoints: port 8081 (server), 8082 (microservices)
+- Created ServiceMonitor to scrape metrics every 30 seconds
+- Created Service with `app.kubernetes.io/component: metrics` label for Prometheus discovery
+- Created PrometheusRule with 6 alerts:
+  1. ImmichServerDown (service unreachable > 1 minute)
+  2. ImmichThumbnailQueueStuck (queue > 500 for 30 minutes)
+  3. ImmichVideoQueueStuck (queue > 50 for 30 minutes)
+  4. ImmichMetadataQueueStuck (queue > 100 for 30 minutes)
+  5. ImmichNoThumbnailActivity (no processing for 6 hours)
+  6. ImmichDatabaseSlowQueries (query duration > 5s for 5 minutes)
+
+**Alert Routing**:
+- Alerts fired to Alertmanager
+- Routed to Discord receiver with 5-minute group interval
+- Resolved alerts also sent for visibility
+
+**Trade-offs**:
+- Additional metrics storage in Prometheus (minimal overhead)
+- Alert tuning required to avoid false positives
+- But: significantly better operational visibility
+
+---
+
+### 21. Alertmanager Discord Integration
+
+**Decision**: Enable Alertmanager in kube-prometheus-stack and route alerts to Discord
+
+**Why**:
+- Prometheus alerts were being evaluated but had no notification destination
+- Discord provides low-friction, real-time notifications
+- Webhook integration is simple and reliable
+- Centralized alerting for all cluster alerts (Kubernetes + application)
+
+**Implementation**:
+- Enabled `alertmanager.enabled: true` in kube-prometheus-stack HelmRelease
+- Configured Discord receiver in `alertmanager.config.receivers`
+- Used Flux `valuesFrom` to inject webhook URL from Kubernetes secret
+- ExternalSecret syncs webhook URL from 1Password (`alertmanager/discord-alerts-webhook-url`)
+- Default route sends all alerts to Discord receiver
+- 5-minute group interval to batch related alerts
+- Silenced noisy alerts: Watchdog (intentional heartbeat), KubeMemoryOvercommit (expected behavior)
+
+**Message Format**:
+```
+[SEVERITY] Alert: ALERTNAME
+Instance: INSTANCE
+Description: DESCRIPTION
+```
+
+**Security**:
+- Webhook URL never committed to git
+- Stored in 1Password, synced via ESO
+- Injected at Helm chart deployment time via Flux valuesFrom
+
+**Trade-offs**:
+- External dependency on Discord availability
+- Webhook URL is a secret (requires 1Password setup)
+- Alert fatigue if not properly silenced/tuned
+- But: immediate visibility into cluster health issues
+
 ## Observability Stack
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Monitoring Flow                                 │
-│                                                                         │
-│  ┌──────────────┐     scrapes      ┌──────────────┐                    │
-│  │ pihole-      │ ◄──────────────  │  Prometheus  │                    │
-│  │ exporter     │    /metrics      │              │                    │
-│  │ :9617        │    (30s)         │  • Stores    │                    │
-│  └──────────────┘                  │    metrics   │                    │
-│                                    │  • Runs      │                    │
-│  ┌──────────────┐     scrapes      │    queries   │                    │
-│  │ node-        │ ◄──────────────  │              │                    │
-│  │ exporter     │    /metrics      └───────┬──────┘                    │
-│  │ :9100        │                          │                           │
-│  └──────────────┘                          │ PromQL queries            │
-│                                            ▼                           │
-│                                    ┌──────────────┐                    │
-│                                    │   Grafana    │                    │
-│                                    │              │                    │
-│                                    │  • Dashboards│                    │
-│                                    │  • Alerts    │                    │
-│                                    │  • :3000     │                    │
-│                                    └──────────────┘                    │
-└─────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     Monitoring + Alerting Flow                             │
+│                                                                            │
+│  ┌──────────────┐     scrapes      ┌────────────────────────────┐         │
+│  │ pihole-      │ ◄──────────────  │      Prometheus            │         │
+│  │ exporter     │    /metrics      │                            │         │
+│  │ :9617        │    (30s)         │ • Stores metrics           │         │
+│  └──────────────┘                  │ • Evaluates rules          │         │
+│                                    │ • Fires alerts             │         │
+│  ┌──────────────┐     scrapes      │                            │         │
+│  │ immich-      │ ◄──────────────  │ ServiceMonitors:           │         │
+│  │ metrics      │    /metrics      │ • pihole-exporter          │         │
+│  │ :8081, :8082 │    (30s)         │ • immich-metrics           │         │
+│  └──────────────┘                  │ • node-exporter            │         │
+│                                    └──────┬───────────┬─────────┘         │
+│  ┌──────────────┐     scrapes            │           │                   │
+│  │ node-        │ ◄──────────────────────┘           │                   │
+│  │ exporter     │    /metrics                        │ Alert events      │
+│  │ :9100        │                                    ▼                   │
+│  └──────────────┘                         ┌────────────────────────────┐  │
+│                                           │     Alertmanager           │  │
+│       PromQL queries                      │                            │  │
+│            │                              │ • Routes alerts            │  │
+│            ▼                              │ • Groups notifications     │  │
+│   ┌──────────────┐                       │ • Silences (Watchdog,      │  │
+│   │   Grafana    │                       │   KubeMemoryOvercommit)    │  │
+│   │              │                       │                            │  │
+│   │ • Dashboards │                       │ Discord receiver:          │  │
+│   │ • Alerts     │                       │ • Webhook from 1Password   │  │
+│   │ • :3000      │                       │ • 5min group interval      │  │
+│   └──────────────┘                       └──────────┬─────────────────┘  │
+│                                                     │                    │
+│                                                     │ HTTP POST          │
+│                                                     ▼                    │
+│                                          ┌────────────────────────────┐  │
+│                                          │   Discord Channel          │  │
+│                                          │                            │  │
+│                                          │ • Real-time notifications  │  │
+│                                          │ • Alert + recovery msgs    │  │
+│                                          └────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Pi-hole Metrics Available
+### Available Metrics and Alerts
 
-Via ServiceMonitor → pihole-exporter:
+**Pi-hole Metrics** (via pihole-exporter):
 - `pihole_domains_being_blocked` - Total blocklist size
 - `pihole_dns_queries_today` - Query count
 - `pihole_ads_blocked_today` - Blocked count
@@ -621,6 +729,29 @@ Via ServiceMonitor → pihole-exporter:
 - `pihole_unique_domains` - Unique domains queried
 - `pihole_queries_forwarded` - Queries sent to Unbound
 - `pihole_queries_cached` - Cache hit count
+
+**Immich Metrics** (via native Prometheus endpoint):
+- `immich_server_thumbnail_queue_size` - Photos waiting for thumbnail generation
+- `immich_server_video_conversion_queue_size` - Videos waiting for transcoding
+- `immich_server_metadata_extraction_queue_size` - Files waiting for metadata extraction
+- `immich_server_processing_duration_seconds` - Time spent processing jobs
+
+**Immich Alerts** (PrometheusRule):
+| Alert | Condition | Duration | Severity |
+|-------|-----------|----------|----------|
+| ImmichServerDown | Service unreachable | 1 minute | warning |
+| ImmichThumbnailQueueStuck | Queue > 500 | 30 minutes | warning |
+| ImmichVideoQueueStuck | Queue > 50 | 30 minutes | warning |
+| ImmichMetadataQueueStuck | Queue > 100 | 30 minutes | warning |
+| ImmichNoThumbnailActivity | No processing | 6 hours | warning |
+| ImmichDatabaseSlowQueries | Query > 5s | 5 minutes | warning |
+
+**Alerting Pipeline**:
+1. Prometheus evaluates PrometheusRules every 30 seconds
+2. Firing alerts sent to Alertmanager
+3. Alertmanager routes to Discord receiver (5-minute group interval)
+4. Discord webhook sends formatted message to channel
+5. Resolved alerts also sent to Discord
 
 ## File Structure
 
@@ -647,9 +778,10 @@ pi-cluster/
         │   ├── pihole-exporter.yaml # Prometheus exporter
         │   └── external-secret.yaml # Password from 1Password
         ├── monitoring/
-        │   ├── helmrelease.yaml     # kube-prometheus-stack
+        │   ├── kustomization.yaml
+        │   ├── helmrelease.yaml     # kube-prometheus-stack (Alertmanager enabled)
         │   ├── ingress.yaml         # Grafana Ingress
-        │   └── external-secret.yaml # Grafana password from 1Password
+        │   └── external-secret.yaml # Grafana password + Discord webhook from 1Password
         ├── uptime-kuma/
         │   ├── deployment.yaml           # Uptime Kuma v2
         │   ├── pvc.yaml                  # Persistent storage
@@ -676,8 +808,10 @@ pi-cluster/
         │   └── kustomization.yaml
         ├── immich/
         │   ├── namespace.yaml            # immich namespace
-        │   ├── helmrelease.yaml          # Immich Helm chart v0.10.3 (app v2.4.1)
+        │   ├── helmrelease.yaml          # Immich Helm chart v0.10.3 (telemetry enabled)
         │   ├── pv.yaml                   # NFS PV to Synology NAS for photos
+        │   ├── servicemonitor.yaml       # Prometheus scraping config
+        │   ├── prometheusrule.yaml       # Alert definitions (6 alerts)
         │   ├── external-secret.yaml      # Database password from 1Password
         │   └── kustomization.yaml
         ├── flux-notifications/
@@ -711,8 +845,11 @@ pi-cluster/
 | Uptime Kuma | 3001 | TCP | Ingress (status.lab.mtgibbs.dev) |
 | Homepage | 3000 | TCP | Ingress (home.lab.mtgibbs.dev) |
 | Prometheus | 9090 | TCP | ClusterIP (port-forward to access) |
+| Alertmanager | 9093 | TCP | ClusterIP (port-forward to access) |
 | Jellyfin | 8096 | TCP | Ingress (jellyfin.lab.mtgibbs.dev) |
 | Immich | 3001 | TCP | Ingress (immich.lab.mtgibbs.dev) |
+| Immich Metrics (server) | 8081 | TCP | ClusterIP (Prometheus scrapes) |
+| Immich Metrics (microservices) | 8082 | TCP | ClusterIP (Prometheus scrapes) |
 | Immich PostgreSQL | 5432 | TCP | ClusterIP (internal only, backup job access) |
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |

@@ -178,9 +178,9 @@ pi-cluster/
         │   └── external-secret.yaml   # Syncs password from 1Password
         ├── monitoring/
         │   ├── kustomization.yaml
-        │   ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease
+        │   ├── helmrelease.yaml        # kube-prometheus-stack HelmRelease (Alertmanager enabled)
         │   ├── ingress.yaml            # Grafana Ingress
-        │   └── external-secret.yaml    # Grafana password from 1Password
+        │   └── external-secret.yaml    # Grafana password + Discord webhook from 1Password
         ├── uptime-kuma/
         │   ├── kustomization.yaml
         │   ├── namespace.yaml
@@ -212,8 +212,10 @@ pi-cluster/
         ├── immich/
         │   ├── kustomization.yaml
         │   ├── namespace.yaml
-        │   ├── helmrelease.yaml           # Immich Helm chart v0.10.3
+        │   ├── helmrelease.yaml           # Immich Helm chart v0.10.3 (telemetry enabled)
         │   ├── pv.yaml                    # NFS PV to Synology NAS
+        │   ├── servicemonitor.yaml        # Prometheus scraping config
+        │   ├── prometheusrule.yaml        # Alert definitions (6 alerts)
         │   └── external-secret.yaml       # Database password from 1Password
         ├── flux-notifications/
         │   ├── kustomization.yaml
@@ -306,6 +308,7 @@ resources:
 | `jellyfin` | `api-key` | Jellyfin API key for Homepage widget |
 | `unifi` | `username`, `password` | Unifi local account for Homepage widget |
 | `discord-alerts` | `webhook-url` | Discord webhook for Flux notifications |
+| `alertmanager` | `discord-alerts-webhook-url` | Discord webhook for Prometheus alerts |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -444,6 +447,17 @@ The Pi now uses static DNS (1.1.1.1, 8.8.8.8) configured via NetworkManager. Thi
 ### Monitoring Stack
 kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for Grafana password.
 
+**Alerting Configuration**:
+- **Alertmanager**: Enabled in kube-prometheus-stack
+- **Discord Notifications**: Webhook URL synced from 1Password
+- **Routing**: All alerts sent to Discord receiver with 5-minute group interval
+- **Silenced Alerts**: Watchdog (intentional heartbeat), KubeMemoryOvercommit (expected behavior)
+- **Message Format**: Alert name, severity, instance, and description
+
+**Active PrometheusRules**:
+- Immich: 6 alerts (server down, queue stuck, slow queries, no activity)
+- Default Kubernetes alerts from kube-prometheus-stack (node health, pod failures, etc.)
+
 ### Homepage Dashboard
 - **Image**: `ghcr.io/gethomepage/homepage:latest`
 - **URL**: https://home.lab.mtgibbs.dev
@@ -505,6 +519,10 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   - Fixed storage: `IMMICH_MEDIA_LOCATION=/data` (matches PVC mount)
   - NFSv3 required for Synology NAS compatibility with Pi ARM architecture
 - **CLI Import**: `npx @immich/cli@latest upload --key <api-key> /path/to/photos`
+- **Monitoring**: Prometheus metrics enabled on ports 8081/8082
+  - ServiceMonitor scrapes metrics every 30 seconds
+  - PrometheusRule with 6 alerts (queue stuck, slow queries, no activity)
+  - Alerts routed to Discord via Alertmanager
 
 ### Discord Deployment Notifications
 - **Namespace**: `flux-notifications`
@@ -557,6 +575,8 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Destination**: Synology NAS at `/volume1/k3s-backups/{date}/postgres/`
 - **Credentials**: DB password synced from 1Password via ExternalSecret
 - **Timing**: Runs 30 minutes after PVC backup to avoid I/O conflicts
+- **Transfer Method**: rsync over SSH (replaced scp due to Synology SFTP subsystem disabled)
+- **PostgreSQL Client**: postgresql16-client (Alpine package name updated)
 
 **Why Both?**
 - **PVC backup**: Captures uploaded photos, app data, configuration (filesystem-level)
