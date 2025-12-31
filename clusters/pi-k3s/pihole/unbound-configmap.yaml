@@ -58,4 +58,23 @@ data:
       # Time to live bounds
       cache-min-ttl: 300
       cache-max-ttl: 86400
+
+      # Resilience settings for home networks
+      # More patient with slow authoritative servers
+      outbound-msg-retry: 5
+
+      # Serve stale cache immediately while refreshing in background
+      # This prevents delays when upstream is slow
       serve-expired: yes
+      serve-expired-ttl: 86400
+      serve-expired-client-timeout: 1800
+      serve-expired-reply-ttl: 30
+
+      # TCP fallback for unreliable UDP
+      tcp-upstream: yes
+
+      # Increase buffer sizes for busy resolver
+      outgoing-range: 8192
+      num-queries-per-thread: 4096
+      so-rcvbuf: 4m
+      so-sndbuf: 4m
