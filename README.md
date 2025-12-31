@@ -65,13 +65,25 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 
 ## Hardware
 
+### Master Node
 | Component | Specification |
 |-----------|---------------|
-| Device | Raspberry Pi 5 |
+| Device | Raspberry Pi 5 (pi-k3s) |
 | RAM | 8GB |
+| CPU | ARM Cortex-A76 (4 cores) |
 | Storage | microSD (local-path provisioner) |
 | OS | Raspberry Pi OS Lite (64-bit) / Debian 13 |
 | IP | 192.168.1.55 (static via DHCP reservation) |
+| Role | Master + Worker (control plane + critical workloads) |
+
+### Worker Nodes
+| Component | Specification |
+|-----------|---------------|
+| Device | 2x Raspberry Pi 3 (pi3-worker-1, pi3-worker-2) |
+| RAM | 1GB each |
+| CPU | ARM Cortex-A53 |
+| IPs | 192.168.1.53, 192.168.1.51 |
+| Role | Worker nodes (distributed workloads) |
 
 ## Stack
 
@@ -87,19 +99,24 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Unbound | latest | Recursive DNS resolver |
 | Uptime Kuma | v2.x | Status page for home services |
 | AutoKuma | latest | GitOps-managed monitors for Uptime Kuma |
-| Homepage | latest | Unified dashboard for all services |
+| Homepage | latest | Unified dashboard with live service widgets |
+| Jellyfin | latest | Self-hosted media server (Plex alternative) |
+| Immich | v2.4.1 | Self-hosted photo backup and management |
+| PostgreSQL | 16 | Database for Immich with pgvector extension |
+| Valkey | latest | Redis-compatible cache for Immich |
 
 ## Service URLs
 
 | Service | URL |
 |---------|-----|
-| Homepage | https://home.lab.mtgibbs.dev |
-| Grafana | https://grafana.lab.mtgibbs.dev |
-| Uptime Kuma | https://status.lab.mtgibbs.dev |
+| Homepage (Dashboard) | https://home.lab.mtgibbs.dev |
+| Grafana (Monitoring) | https://grafana.lab.mtgibbs.dev |
+| Uptime Kuma (Status) | https://status.lab.mtgibbs.dev |
 | Pi-hole Admin | https://pihole.lab.mtgibbs.dev |
+| Jellyfin (Media) | https://jellyfin.lab.mtgibbs.dev |
+| Immich (Photos) | https://immich.lab.mtgibbs.dev |
 | Unifi Controller | https://unifi.lab.mtgibbs.dev |
 | Synology NAS | https://nas.lab.mtgibbs.dev |
-| Plex Media Server | https://plex.lab.mtgibbs.dev |
 
 *Note: Services use trusted Let's Encrypt certificates. Requires `*.lab.mtgibbs.dev` DNS configured in Cloudflare.*
 
@@ -346,14 +363,24 @@ kubectl get externalsecrets -A
 kubectl describe externalsecret -n pihole pihole-secret
 ```
 
-## Future Improvements
+## Features Implemented
 
 - [x] Observability stack (Prometheus, Grafana) - deployed via kube-prometheus-stack
 - [x] Ingress controller with TLS (nginx-ingress + cert-manager)
 - [x] Uptime Kuma status page with GitOps-managed monitors (AutoKuma)
-- [x] Homepage dashboard - unified landing page for all services
-- [ ] Multi-node cluster (add another Pi)
-- [ ] Automated backups
+- [x] Homepage dashboard - unified landing page with live service widgets
+- [x] Multi-node cluster - 3 nodes (1x Pi 5, 2x Pi 3)
+- [x] Automated backups - PVC snapshots + PostgreSQL dumps to Synology NAS
+- [x] Discord notifications - Flux deployments + Alertmanager alerts
+- [x] Media services - Jellyfin (streaming) + Immich (photos)
+- [x] Comprehensive monitoring - Immich metrics, PrometheusRules, Discord alerts
+
+## Future Enhancements
+
+- [ ] High availability for critical services (Pi-hole failover)
+- [ ] Shared storage (migrate from local-path to NFS)
+- [ ] Resource quotas and network policies
+- [ ] Horizontal Pod Autoscaling (HPA)
 
 ## License
 

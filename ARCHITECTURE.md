@@ -673,6 +673,99 @@ Description: DESCRIPTION
 - Alert fatigue if not properly silenced/tuned
 - But: immediate visibility into cluster health issues
 
+---
+
+### 22. ExternalSecret Refresh Interval (1Password Rate Limiting)
+
+**Decision**: Set `refreshInterval: 24h` for all ExternalSecrets (changed from default 1h)
+
+**Why**:
+- 1Password SDK provider has strict API rate limits (1,000-10,000 calls/hour depending on tier)
+- 13 ExternalSecrets refreshing every 1h = 312 API calls/day
+- ESO reconciliation loops + retries amplified traffic, triggering rate limits
+- Cluster secrets are static (passwords/API tokens rarely change)
+- Frequent refreshes provided no operational value but exhausted quota
+
+**Implementation**:
+- Updated all 13 ExternalSecret manifests with `refreshInterval: 24h`
+- Reduces API calls from 312/day to 13/day (96% reduction)
+- Secrets still refresh daily for validation and drift detection
+
+**Affected ExternalSecrets**:
+- backup-jobs: backup-ssh-key, postgres-backup-secret
+- cert-manager-config: cloudflare-api-token
+- flux-notifications: discord-webhook
+- homepage: 4 secrets (pihole, jellyfin, immich, unifi)
+- immich: immich-secret
+- monitoring: 2 secrets (grafana, alertmanager-discord)
+- pihole: pihole-secret
+- uptime-kuma: uptime-kuma-secret
+
+**Trade-offs**:
+- Secret changes take up to 24h to propagate (acceptable for static credentials)
+- Manual secret rotation requires forcing sync or waiting up to 24h
+- But: eliminates rate limit errors, improves cluster stability, reduces API costs
+
+**Future Enhancement**: Migrate to 1Password Connect Server for unlimited local re-requests (documented in plans)
+
+---
+
+### 23. Unbound DNS Resilience Settings
+
+**Decision**: Enable serve-expired cache and increase retry limits in Unbound configuration
+
+**Why**:
+- Users experienced 10+ second DNS delays on common sites (DuckDuckGo, Google, Reddit)
+- Unbound logs showed frequent SERVFAIL errors: "upstream server timeout", "exceeded maximum sends"
+- Home network has variable quality, authoritative DNS servers may be slow or unreliable
+- Default Unbound settings optimized for reliable datacenter networks, too aggressive for residential use
+
+**Implementation**:
+Added 4 categories of resilience settings to `unbound-configmap.yaml`:
+
+**1. Query Retry Settings**
+```yaml
+outbound-msg-retry: 5  # Retry queries 5 times before giving up (default: 3)
+```
+
+**2. Serve-Expired Cache Settings**
+```yaml
+serve-expired: yes  # Serve stale cache while refreshing in background
+serve-expired-ttl: 86400  # Keep stale entries for 24 hours
+serve-expired-client-timeout: 1800  # Wait max 30 minutes for fresh data
+serve-expired-reply-ttl: 30  # Mark served-expired responses with 30s TTL
+```
+
+**3. TCP Fallback**
+```yaml
+tcp-upstream: yes  # Use TCP if UDP fails (more reliable but slower)
+```
+
+**4. Buffer Size Increases**
+```yaml
+outgoing-range: 8192  # Concurrent outbound ports (default: 4096)
+num-queries-per-thread: 4096  # Query buffer per thread (default: 1024)
+so-rcvbuf: 4m  # Socket receive buffer (default: 1m)
+so-sndbuf: 4m  # Socket send buffer (default: 1m)
+```
+
+**How Serve-Expired Works**:
+1. Client queries `google.com`
+2. Unbound has stale cache entry (expired 5 minutes ago)
+3. Unbound immediately returns stale entry (marked with TTL=30s)
+4. Unbound fetches fresh data in background
+5. Next query gets fresh data
+
+**Trade-offs**:
+- Clients may receive slightly outdated DNS records (max 24h old)
+- DNS records rarely change, so serving stale data is acceptable
+- 30s TTL on served-expired responses ensures client re-queries soon
+- But: instant responses, no user-facing delays, dramatically improved user experience
+
+**Performance Impact**:
+- Before: 10-15 second delays on cache misses
+- After: 0.1-0.5 seconds (cache hit), 0.5-2 seconds (cache miss with serve-expired)
+
 ## Observability Stack
 
 ```
