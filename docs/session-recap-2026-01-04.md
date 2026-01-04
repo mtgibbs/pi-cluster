@@ -103,6 +103,59 @@ Files created:
 **What**: Updated to Flux v2.7.5 with image automation controllers
 **Changes**: Added 2,247 lines of YAML for image-reflector-controller and image-automation-controller
 
+### 8. Homepage Dashboard Web Section
+
+**What**: Added new "Web" section to Homepage dashboard with 3 services
+**Why**: Provide quick access to both cluster-hosted and external personal websites
+**How**: Updated `clusters/pi-k3s/homepage/configmap.yaml` settings and services
+
+**Services Added**:
+- **Personal Site (Cluster)**: https://site.lab.mtgibbs.dev
+  - siteMonitor widget for uptime/status
+  - Links to cluster-hosted Next.js site
+- **Personal Site (Heroku)**: https://mtgibbs.xyz
+  - siteMonitor widget for production uptime
+  - Links to Heroku-hosted production site
+- **Cloudflare**: https://dash.cloudflare.com
+  - Direct link to Cloudflare dashboard (no widget)
+
+**Layout Changes**:
+- Updated `settings.yaml` to include Web section in layout
+- Web section uses 3-column layout for even spacing
+- Positioned between Monitoring and Media sections
+
+### 9. Homepage Weather Widget Fix
+
+**What**: Fixed weather widget to display Johns Creek, GA weather
+**Why**: Widget was previously showing incorrect location
+**How**: Updated coordinates in `configmap.yaml` widgets section
+
+**Configuration**:
+```yaml
+latitude: 34.0289
+longitude: -84.1986
+units: imperial
+```
+
+### 10. Uptime Kuma Monitor Additions
+
+**What**: Added two new monitors to AutoKuma ConfigMap
+**Why**: Track availability of both cluster and production personal sites
+**How**: Added JSON monitor definitions to `autokuma-monitors.yaml`
+
+**Monitors Added**:
+1. **personal-site-cluster.json**
+   - URL: https://site.lab.mtgibbs.dev/
+   - Type: HTTP (200 OK check)
+   - Interval: 60 seconds
+
+2. **personal-site-heroku.json**
+   - URL: https://mtgibbs.xyz/
+   - Type: HTTP (200 OK check)
+   - Interval: 60 seconds
+
+**Total Monitors**: 14 (up from 12)
+
 ## Architecture Changes
 
 ### New Auto-Deploy Flow
@@ -269,8 +322,11 @@ flux bootstrap github \
 | 94d84df | fix: Update Flux image automation API versions to v1 | image-automation.yaml |
 | a800589 | Add Flux v2.7.5 component manifests | gotk-components.yaml (+2247 lines) |
 | 2b7937f | chore: update mtgibbs-site to ghcr.io/mtgibbs/mtgibbs.xyz:20260104084623 | deployment.yaml (automated commit by Flux) |
+| ea9c191 | feat(homepage): Add Web section with personal sites and Cloudflare | homepage/configmap.yaml |
+| a7c5986 | chore: update mtgibbs-site to ghcr.io/mtgibbs/mtgibbs.xyz:20260104154234 | mtgibbs-site/deployment.yaml (automated commit by Flux) |
+| 29bab17 | feat: Update Homepage weather and add Uptime Kuma monitors | homepage/configmap.yaml, uptime-kuma/autokuma-monitors.yaml |
 
-**Note**: Commit 2b7937f was created automatically by Flux ImageUpdateAutomation, demonstrating the auto-deploy workflow is functioning correctly.
+**Note**: Commits 2b7937f and a7c5986 were created automatically by Flux ImageUpdateAutomation, demonstrating the auto-deploy workflow is functioning correctly (2 automated deployments in one day).
 
 ## New Service URL
 
@@ -362,10 +418,11 @@ flux bootstrap github \
 
 ## Next Steps
 
-### Immediate Follow-Up (Optional)
+### Immediate Follow-Up (COMPLETED)
 
-- [ ] Update Homepage dashboard to include mtgibbs.xyz site
-- [ ] Add Uptime Kuma monitor for site.lab.mtgibbs.dev
+- [x] Update Homepage dashboard to include mtgibbs.xyz site
+- [x] Add Uptime Kuma monitor for site.lab.mtgibbs.dev
+- [x] Add Uptime Kuma monitor for mtgibbs.xyz (production site)
 - [ ] Consider making GHCR package public (avoid imagePullSecrets)
 
 ### Future Enhancements

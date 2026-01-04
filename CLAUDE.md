@@ -4,6 +4,37 @@
 
 Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound, with observability (Grafana/Prometheus), using proper IaC practices. Managed via GitOps (Flux) with secrets from 1Password.
 
+## Security Principles
+
+**IMPORTANT: Never ask the user for secrets, tokens, passwords, or API keys directly.**
+
+As a security-conscious assistant working on this infrastructure project:
+
+1. **Never request secrets in conversation** - Don't ask users to paste tokens, passwords, API keys, or any sensitive credentials into the chat.
+
+2. **Always use 1Password** - When a new secret is needed, instruct the user to:
+   - Create/store the secret in 1Password (`pi-cluster` vault)
+   - Provide the item name and field structure
+   - Example: "Please create a 1Password item called `my-service` with fields `api-key` and `password` in the `pi-cluster` vault"
+
+3. **Use ExternalSecrets for Kubernetes** - Secrets are synced via:
+   - `ClusterSecretStore` named `onepassword` (already configured)
+   - `ExternalSecret` resources that reference 1Password items
+   - Key format: `item-name/field-name` (e.g., `pihole/password`)
+
+4. **Never commit secrets** - All sensitive values stay in 1Password. Git only contains references.
+
+5. **Verify secrets exist, don't view them** - Use commands like:
+   ```bash
+   kubectl get externalsecrets -A  # Check sync status
+   kubectl get secret <name> -o yaml | grep -c "^  [a-z]"  # Count keys, don't show values
+   ```
+
+**When adding new services that need secrets:**
+1. Tell the user what 1Password item/fields to create
+2. Create the ExternalSecret manifest referencing those fields
+3. Reference the resulting K8s secret in deployments
+
 ## Current State
 
 ### Hardware & OS
@@ -408,7 +439,7 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
   - Without PVC, AutoKuma forgets which monitors it created and creates duplicates
   - Uses `strategy: Recreate` (required for ReadWriteOnce PVC)
 
-#### Configured Monitors (12 total)
+#### Configured Monitors (14 total)
 | Monitor | Type | Target |
 |---------|------|--------|
 | Pi-hole DNS | port | 192.168.1.55:53 |
@@ -423,6 +454,8 @@ curl -v https://grafana.lab.mtgibbs.dev 2>&1 | grep issuer
 | Immich | http | https://immich.lab.mtgibbs.dev/ |
 | Unifi Controller | http | https://unifi.lab.mtgibbs.dev/ |
 | Synology NAS | http | https://nas.lab.mtgibbs.dev/ |
+| Personal Site (Cluster) | http | https://site.lab.mtgibbs.dev/ |
+| Personal Site (Heroku) | http | https://mtgibbs.xyz/ |
 
 ## Commands Reference
 
@@ -583,10 +616,12 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Sections**:
   - Infrastructure: Pi-hole (with live stats), Unbound, K3s Cluster
   - Monitoring: Grafana, Uptime Kuma (with service status), Prometheus (with target stats)
+  - Web: Personal Site (Cluster), Personal Site (Heroku), Cloudflare
   - Media: Jellyfin (with library stats), Immich (with photo/video counts)
   - Network: Unifi Controller (with WiFi/LAN device counts)
   - Storage: Synology NAS
   - **Kubernetes widget**: Real-time node metrics (CPU, memory, uptime for all 3 nodes)
+  - **Weather widget**: Johns Creek, GA (34.0289, -84.1986)
   - System resources widget (CPU, RAM, disk)
   - Bookmarks to GitHub repo and Flux docs
 - **Live Widgets** (API-integrated):

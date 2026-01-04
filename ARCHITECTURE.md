@@ -260,6 +260,24 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    mtgibbs-site namespace                         │  │
+│  │                                                                   │  │
+│  │  Personal Website (Next.js)                                      │  │
+│  │  • Auto-deployed via Flux Image Automation                       │  │
+│  │  • Source: github.com/mtgibbs/mtgibbs.xyz                        │  │
+│  │  • Image: ghcr.io/mtgibbs/mtgibbs.xyz (multi-arch ARM64/AMD64)  │  │
+│  │  • Node affinity: prefers Pi 3 workers                          │  │
+│  │  • Ingress: site.lab.mtgibbs.dev                                │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation (flux-system namespace):                  │  │
+│  │  • ImageRepository scans GHCR every 5 minutes                    │  │
+│  │  • ImagePolicy selects newest timestamp tag (YYYYMMDDHHmmss)     │  │
+│  │  • ImageUpdateAutomation updates deployment, commits, pushes     │  │
+│  │  • Full auto-deploy: code push → GHCR → Flux detects → deploys  │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                flux-notifications namespace                       │  │
 │  │                                                                   │  │
 │  │  Flux Notification System                                        │  │
@@ -1027,6 +1045,8 @@ pi-cluster/
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
+| Flux ImageRepository | N/A | N/A | Scans GHCR every 5 minutes |
+| Flux ImageUpdateAutomation | N/A | N/A | Git push to main branch |
 
 ## Resource Allocations
 
@@ -1060,7 +1080,7 @@ kubectl -n pihole logs -f deploy/pihole
 # Immich:         https://immich.lab.mtgibbs.dev
 # Unifi:          https://unifi.lab.mtgibbs.dev
 # NAS:            https://nas.lab.mtgibbs.dev
-# Personal Site:  https://site.lab.mtgibbs.dev
+# Personal Site:  https://site.lab.mtgibbs.dev (auto-deployed from GHCR)
 
 # Flux commands
 flux get all                              # Check all Flux resources
@@ -1108,6 +1128,7 @@ This ensures:
 - [x] **Deployment notifications**: Discord webhook integration via Flux
 - [x] **Cluster visibility**: Homepage Kubernetes widget with node metrics
 - [x] **Flux Image Automation**: Auto-deploy personal website on image push to GHCR
+- [x] **Personal website deployment**: mtgibbs.xyz site with auto-deploy workflow
 - [ ] **High availability**: Pi-hole failover/redundancy
 - [ ] **Shared storage**: Migrate from local-path to NFS for multi-node PVC access
 - [ ] **Resource quotas**: Namespace-level resource limits
