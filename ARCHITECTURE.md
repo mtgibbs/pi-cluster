@@ -283,6 +283,22 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │    → 192.168.1.60:5000 (HTTP backend)                           │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    mtgibbs-site namespace                         │  │
+│  │                                                                   │  │
+│  │  Personal Website (Next.js)                                      │  │
+│  │  • Auto-deployed via Flux Image Automation                       │  │
+│  │  • Image: ghcr.io/mtgibbs/mtgibbs.xyz (multi-arch ARM64/AMD64)  │  │
+│  │  • Node affinity: prefers Pi 3 workers                          │  │
+│  │  • Ingress: site.lab.mtgibbs.dev                                │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation (flux-system namespace):                  │  │
+│  │  • ImageRepository scans GHCR every 5 minutes                    │  │
+│  │  • ImagePolicy selects newest timestamp tag (YYYYMMDDHHmmss)     │  │
+│  │  • ImageUpdateAutomation updates deployment, commits, pushes     │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -710,7 +726,64 @@ Description: DESCRIPTION
 
 ---
 
-### 23. Unbound DNS Resilience Settings
+### 23. Flux Image Automation for Personal Website
+
+**Decision**: Deploy image-reflector-controller and image-automation-controller for automatic image updates
+
+**Why**:
+- Eliminate manual deployment steps (build → push → update YAML → commit → push)
+- Full GitOps workflow for personal projects (code push → auto-deploy within 10 minutes)
+- Demonstrate advanced Flux features in learning cluster
+- Enable continuous deployment for frequently updated services
+
+**Implementation**:
+- **ImageRepository**: Scans `ghcr.io/mtgibbs/mtgibbs.xyz` every 5 minutes for new tags
+- **ImagePolicy**: Filters for timestamp tags matching `^[0-9]{14}$` (YYYYMMDDHHmmss format)
+  - Uses numerical sorting (ascending) to select newest tag
+  - Example tags: `20260104084623`, `20260104123045`
+- **ImageUpdateAutomation**: Updates deployment.yaml with new image tag
+  - Uses Setters strategy with marker comment: `# {"$imagepolicy": "flux-system:mtgibbs-site"}`
+  - Commits changes with message: `chore: update mtgibbs-site to <tag>`
+  - Pushes to main branch using Flux deploy key
+- **RBAC**: Created ServiceAccounts + ClusterRoles for both controllers
+- **Flux Bootstrap**: Re-bootstrapped with `--read-write-key` flag for git push access
+- **GitHub PAT**: Fine-grained token with Contents (read/write) + Administration permissions
+  - Scoped to pi-cluster repository only
+  - 90-day expiration (stored in 1Password: `flux-github-pat`)
+
+**Auto-Deploy Flow**:
+1. Developer pushes to `mater` branch in mtgibbs.xyz repository
+2. GitHub Actions builds multi-arch image (AMD64 + ARM64)
+3. Image pushed to GHCR with timestamp tag (e.g., `20260104084623`)
+4. ImageRepository scans GHCR every 5 minutes, detects new tag
+5. ImagePolicy evaluates new tag as newest (higher number = newer)
+6. ImageUpdateAutomation updates deployment.yaml, commits, pushes
+7. Flux Kustomization reconciles (every 10 minutes), deploys new version
+8. Total time from code push to deployment: ~5-15 minutes
+
+**Trade-offs**:
+- More complex setup (requires write-access deploy key, RBAC, fine-grained PAT)
+- Flux has write access to pi-cluster repo (security consideration)
+- Additional controllers consume ~50Mi memory
+- Tags are timestamps (not semantic versioning), harder to identify changes between versions
+- Must renew GitHub PAT every 90 days
+- But: fully automated deploys, no manual intervention, true GitOps workflow
+
+**Multi-Architecture Builds**:
+- Uses GitHub Actions with `docker/buildx-action` and QEMU emulation
+- Builds for `linux/amd64` and `linux/arm64` platforms
+- ARM64 support required for Raspberry Pi cluster
+- GHCR stores multi-arch manifest (Docker pulls correct platform automatically)
+
+**Timestamp Tag Rationale**:
+- Flux ImagePolicy numerical sorting requires numeric-only tags
+- Git SHAs are alphanumeric (can't be sorted numerically)
+- Timestamps are monotonically increasing (always newer = higher number)
+- Human-readable (can see build time at a glance: `20260104084623` = 2026-01-04 08:46:23 UTC)
+
+---
+
+### 24. Unbound DNS Resilience Settings
 
 **Decision**: Enable serve-expired cache and increase retry limits in Unbound configuration
 
@@ -918,10 +991,17 @@ pi-cluster/
         │   ├── immich-backup.yaml        # Nightly PVC backup to Synology (2:00 AM Sundays)
         │   ├── postgres-backup-cronjob.yaml  # PostgreSQL backup (2:30 AM Sundays)
         │   └── postgres-backup-secret.yaml   # ExternalSecret for DB password
-        └── external-services/
-            ├── namespace.yaml            # external-services namespace
-            ├── unifi.yaml                # Unifi Controller reverse proxy
-            ├── synology.yaml             # Synology NAS reverse proxy
+        ├── external-services/
+        │   ├── namespace.yaml            # external-services namespace
+        │   ├── unifi.yaml                # Unifi Controller reverse proxy
+        │   ├── synology.yaml             # Synology NAS reverse proxy
+        │   └── kustomization.yaml
+        └── mtgibbs-site/
+            ├── namespace.yaml            # mtgibbs-site namespace
+            ├── deployment.yaml           # Next.js app with image automation marker
+            ├── service.yaml              # ClusterIP service
+            ├── ingress.yaml              # site.lab.mtgibbs.dev with TLS
+            ├── image-automation.yaml     # ImageRepository + ImagePolicy + ImageUpdateAutomation
             └── kustomization.yaml
 ```
 
@@ -946,6 +1026,7 @@ pi-cluster/
 | Immich PostgreSQL | 5432 | TCP | ClusterIP (internal only, backup job access) |
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
+| mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
 
 ## Resource Allocations
 
@@ -971,14 +1052,15 @@ kubectl -n pihole logs -f deploy/pihole
 # dig @192.168.1.55 google.com
 
 # Access web UIs (via Ingress with Let's Encrypt certs)
-# Homepage:    https://home.lab.mtgibbs.dev
-# Grafana:     https://grafana.lab.mtgibbs.dev
-# Uptime Kuma: https://status.lab.mtgibbs.dev
-# Pi-hole:     https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
-# Jellyfin:    https://jellyfin.lab.mtgibbs.dev
-# Immich:      https://immich.lab.mtgibbs.dev
-# Unifi:       https://unifi.lab.mtgibbs.dev
-# NAS:         https://nas.lab.mtgibbs.dev
+# Homepage:       https://home.lab.mtgibbs.dev
+# Grafana:        https://grafana.lab.mtgibbs.dev
+# Uptime Kuma:    https://status.lab.mtgibbs.dev
+# Pi-hole:        https://pihole.lab.mtgibbs.dev (or http://192.168.1.55/admin/)
+# Jellyfin:       https://jellyfin.lab.mtgibbs.dev
+# Immich:         https://immich.lab.mtgibbs.dev
+# Unifi:          https://unifi.lab.mtgibbs.dev
+# NAS:            https://nas.lab.mtgibbs.dev
+# Personal Site:  https://site.lab.mtgibbs.dev
 
 # Flux commands
 flux get all                              # Check all Flux resources
@@ -1025,8 +1107,10 @@ This ensures:
 - [x] **Photo management**: Immich v2 for self-hosted photo backup
 - [x] **Deployment notifications**: Discord webhook integration via Flux
 - [x] **Cluster visibility**: Homepage Kubernetes widget with node metrics
+- [x] **Flux Image Automation**: Auto-deploy personal website on image push to GHCR
 - [ ] **High availability**: Pi-hole failover/redundancy
 - [ ] **Shared storage**: Migrate from local-path to NFS for multi-node PVC access
 - [ ] **Resource quotas**: Namespace-level resource limits
 - [ ] **Network policies**: Pod-to-pod traffic control
 - [ ] **Horizontal Pod Autoscaling**: Auto-scale workloads based on metrics
+- [ ] **Progressive delivery**: Flagger for canary/blue-green deployments

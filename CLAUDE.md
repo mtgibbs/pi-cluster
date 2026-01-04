@@ -39,6 +39,8 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 14. **Immich** - Self-hosted photo backup and management (upgraded to v2.4.1)
 15. **Discord Notifications** - Flux deployment notifications via Discord webhook
 16. **Multi-node cluster** - Two Pi 3 worker nodes for workload distribution
+17. **Flux Image Automation** - Auto-deploy personal website from GHCR
+18. **mtgibbs.xyz Personal Site** - Next.js website with auto-deploy on git push
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -70,6 +72,7 @@ All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
 - **Pi-hole Admin**: https://pihole.lab.mtgibbs.dev (also available via hostNetwork: http://192.168.1.55/admin/)
 - **Jellyfin**: https://jellyfin.lab.mtgibbs.dev (media server)
 - **Immich**: https://immich.lab.mtgibbs.dev (photo backup)
+- **Personal Site**: https://site.lab.mtgibbs.dev (mtgibbs.xyz)
 
 **External Services (Reverse Proxies):**
 - **Unifi Controller**: https://unifi.lab.mtgibbs.dev (192.168.1.30:8443)
@@ -227,11 +230,18 @@ pi-cluster/
         │   ├── immich-backup.yaml         # Nightly PVC backup to Synology NAS (2:00 AM Sundays)
         │   ├── postgres-backup-cronjob.yaml  # PostgreSQL backup CronJob (2:30 AM Sundays)
         │   └── postgres-backup-secret.yaml   # ExternalSecret for DB password
-        └── external-services/
+        ├── external-services/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml
+        │   ├── unifi.yaml                 # Unifi Controller (192.168.1.30:8443, HTTPS backend)
+        │   └── synology.yaml              # Synology NAS (192.168.1.60:5000)
+        └── mtgibbs-site/
             ├── kustomization.yaml
             ├── namespace.yaml
-            ├── unifi.yaml                 # Unifi Controller (192.168.1.30:8443, HTTPS backend)
-            └── synology.yaml              # Synology NAS (192.168.1.60:5000)
+            ├── deployment.yaml            # Next.js app with image automation marker
+            ├── service.yaml               # ClusterIP on port 3000
+            ├── ingress.yaml               # site.lab.mtgibbs.dev with TLS
+            └── image-automation.yaml      # ImageRepository + ImagePolicy + ImageUpdateAutomation
 ```
 
 ## Flux Dependency Chain
@@ -249,6 +259,11 @@ Kustomizations are applied in order via `dependsOn`:
 8.  uptime-kuma             → Status page (needs secrets, ingress, certs)
 9.  homepage                → Unified dashboard (needs ingress, certs)
 10. external-services       → Reverse proxies for home infrastructure (needs ingress, certs)
+11. flux-notifications      → Discord deployment notifications (needs ESO)
+12. backup-jobs             → PVC + PostgreSQL backups (needs ESO, workloads)
+13. immich                  → Photo management (needs ESO, ingress, certs)
+14. jellyfin                → Media server (needs ingress, certs)
+15. mtgibbs-site            → Personal website (needs ingress, certs)
 ```
 
 ## Key Technical Details
@@ -309,6 +324,7 @@ resources:
 | `unifi` | `username`, `password` | Unifi local account for Homepage widget |
 | `discord-alerts` | `webhook-url` | Discord webhook for Flux notifications |
 | `alertmanager` | `discord-alerts-webhook-url` | Discord webhook for Prometheus alerts |
+| `flux-github-pat` | `token` | Fine-grained GitHub PAT for Flux image automation (write access) |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -438,6 +454,107 @@ op run --env-file=<(echo 'OP_TOKEN="op://Development - Private/<item-id>/credent
     --namespace=external-secrets \
     --from-literal=token="$OP_TOKEN"'
 ```
+
+### Flux Image Automation
+
+**Purpose**: Automatically update deployment manifests when new images are pushed to container registry
+
+**Components**:
+- **image-reflector-controller**: Scans container registries for new image tags
+- **image-automation-controller**: Updates manifests in git when new images are detected
+
+**Configuration** (`mtgibbs-site` example):
+```yaml
+# ImageRepository - scans GHCR every 5 minutes
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/mtgibbs.xyz
+  interval: 5m0s
+
+# ImagePolicy - selects newest timestamp tag (YYYYMMDDHHmmss)
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: mtgibbs-site
+  filterTags:
+    pattern: '^[0-9]{14}$'  # Timestamp tags only
+  policy:
+    numerical:
+      order: asc  # Higher number = newer
+
+# ImageUpdateAutomation - updates deployment.yaml, commits, pushes
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore: update mtgibbs-site to {{range .Changed.Changes}}{{.NewValue}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./clusters/pi-k3s/mtgibbs-site
+    strategy: Setters
+```
+
+**Deployment Marker** (required for Setters strategy):
+```yaml
+# deployment.yaml
+spec:
+  template:
+    spec:
+      containers:
+        - name: mtgibbs-site
+          image: ghcr.io/mtgibbs/mtgibbs.xyz:20260104084623 # {"$imagepolicy": "flux-system:mtgibbs-site"}
+```
+
+**Auto-Deploy Flow**:
+1. Developer pushes code to `mater` branch in mtgibbs.xyz repository
+2. GitHub Actions builds multi-arch image (AMD64 + ARM64), tags with timestamp
+3. Image pushed to GHCR: `ghcr.io/mtgibbs/mtgibbs.xyz:20260104084623`
+4. ImageRepository scans GHCR every 5 minutes, detects new tag
+5. ImagePolicy evaluates tag (higher timestamp = newer)
+6. ImageUpdateAutomation updates deployment.yaml with new tag
+7. Flux commits + pushes update to pi-cluster repository
+8. Standard Flux Kustomization reconciles deployment (every 10 minutes)
+9. New image deployed to cluster
+
+**Total deployment time**: ~5-15 minutes from code push to live
+
+**GitHub PAT Requirements**:
+- Flux needs write access to push commits (default deploy key is read-only)
+- Re-bootstrap with `--read-write-key` flag
+- Fine-grained PAT with:
+  - Repository: pi-cluster only
+  - Permissions: Contents (read/write), Administration (read/write for deploy keys)
+  - Expiration: 90 days (stored in 1Password: `flux-github-pat`)
+
+**Security Considerations**:
+- Flux has write access to infrastructure repository (potential attack vector)
+- Fine-grained PAT limits blast radius (single repo, specific permissions)
+- Image tags must match policy pattern (prevents arbitrary image injection)
+- Only commits to specified path (`./clusters/pi-k3s/mtgibbs-site`)
 
 ## Known Issues / Future Work
 
