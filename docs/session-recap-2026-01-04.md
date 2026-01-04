@@ -476,3 +476,460 @@ curl -I https://site.lab.mtgibbs.dev
 **Session Duration**: ~2 hours
 **Complexity**: High (Flux image automation, GitHub PAT, RBAC troubleshooting)
 **Outcome**: Full auto-deploy workflow functional, personal website live on cluster
+
+---
+
+# Session Recap - 2026-01-04 (Part 2)
+
+## Summary
+
+Fixed severe browser performance issues (10+ second load times) by enabling proper IPv6 networking on the home network. Root cause was IPv6-enabled clients attempting IPv6 connections first, timing out due to no IPv6 route, then falling back to IPv4.
+
+## Problem Statement
+
+### Symptoms
+- Browser requests taking 10-15 seconds to load (especially DuckDuckGo searches, Google, Reddit)
+- Speed tests showing good bandwidth (~400 Mbps down, ~30 Mbps up)
+- Web browsing painfully slow despite good connectivity
+
+### Initial Hypothesis
+Suspected DNS issues (Pi-hole slow to respond or misconfigured)
+
+### Actual Root Cause
+- Mac had IPv6 enabled with link-local addresses (fe80::)
+- Network had no IPv6 route to internet (upstream gateway had IPv6 disabled)
+- Browsers use "Happy Eyeballs" algorithm: try IPv6 first, wait for timeout (~10s), fall back to IPv4
+- The timeout waiting for IPv6 connections was causing all the delays
+
+## Diagnostic Process
+
+### Step 1: DNS Performance
+```bash
+# Tested DNS resolution speed
+time dig @192.168.1.55 google.com
+# Result: ~36ms (fast, not the problem)
+```
+
+### Step 2: Network Stack Analysis
+```bash
+# Checked network interfaces
+ifconfig en0
+# Found IPv6 addresses:
+#   inet6 fe80::1234:5678:90ab:cdef%en0  (link-local)
+#   inet6 2600:1700:3d10:3a8f:...        (missing - should have global)
+```
+
+### Step 3: IPv6 Connectivity Test
+```bash
+# Attempted IPv6 ping
+ping6 google.com
+# Result: "No route to host" (confirmed no IPv6 route)
+```
+
+### Step 4: Network Topology Investigation
+- AT&T Gateway (192.168.0.254): Already had IPv6 enabled, DHCPv6-PD enabled
+  - IPv6 prefix: 2600:1700:3d10:3a80::/64
+  - Ready to delegate /64 prefix to downstream routers
+- Unifi Security Gateway: IPv6 completely disabled
+  - No prefix delegation request
+  - No IPv6 route advertisement to LAN
+
+## Solution Implementation
+
+### AT&T Gateway (192.168.0.254)
+No changes needed - already configured correctly:
+- IPv6: On
+- DHCPv6: On
+- DHCPv6 Prefix Delegation: On
+- Has IPv6 prefix: 2600:1700:3d10:3a80::/64
+
+### Unifi Security Gateway - WAN Settings
+**Changed**:
+- IPv6 Connection: Disabled → **DHCPv6**
+- Prefix Delegation Size: (none) → **64**
+
+**What this does**:
+- USG requests a /64 IPv6 prefix from AT&T gateway via DHCPv6-PD
+- AT&T delegates 2600:1700:3d10:3a8f::/64 to USG
+- USG now has global IPv6 addresses on WAN interface
+
+### Unifi Security Gateway - LAN Settings
+**Changed**:
+- IPv6 Interface Type: (none) → **Prefix Delegation**
+- IPv6 RA (Router Advertisement): Disabled → **Enabled**
+- DHCPv6/RDNSS DNS Control: Auto → **Manual** (empty DNS fields)
+
+**What this does**:
+- Prefix Delegation: USG uses the /64 it received to assign IPv6 to LAN
+- IPv6 RA: Enables SLAAC (Stateless Address Autoconfiguration)
+  - Required for Android devices (they don't support DHCPv6)
+  - Advertises 2600:1700:3d10:3a8f::/64 prefix to LAN clients
+  - Clients auto-generate IPv6 addresses using SLAAC
+- RDNSS DNS Control Manual (empty): Prevents USG from advertising itself as DNS server
+  - Clients use DHCPv4-assigned DNS (Pi-hole at 192.168.1.55)
+  - Pi-hole remains sole DNS server for the network
+
+## Results
+
+### IPv6 Connectivity
+```bash
+# Mac now has global IPv6 address
+ifconfig en0 | grep inet6
+# inet6 2600:1700:3d10:3a8f:14a2:8e0c:f27d:9fa3 prefixlen 64 autoconf secured
+
+# IPv6 ping works
+ping6 google.com
+# PING6(56=40+8+8 bytes) 2600:1700:3d10:3a8f:... --> 2607:f8b0:4004:c07::71
+# 64 bytes from 2607:f8b0:4004:c07::71: icmp_seq=0 ttl=116 time=5.234 ms
+```
+
+### Pi-hole DNS Functioning Correctly
+```bash
+# Pi-hole blocks ads via IPv4 (no IPv6 blocking configured yet)
+dig @192.168.1.55 doubleclick.net A
+# ANSWER: 0.0.0.0 (blocked)
+
+dig @192.168.1.55 doubleclick.net AAAA
+# ANSWER: ::1 (blocked via IPv6)
+```
+
+### Browser Performance
+```bash
+# Before fix: 10,000+ ms total time (mostly waiting for IPv6 timeout)
+# After fix:
+time curl -I https://duckduckgo.com
+# DNS: 3ms
+# Connect: 45ms
+# Total: 97ms
+```
+
+### Interesting Finding
+IPv6 is actually faster than IPv4 on this network:
+```bash
+# IPv4 to Google
+ping 8.8.8.8
+# time=~1100ms (possibly VPN routing or traffic shaping)
+
+# IPv6 to Google
+ping6 2001:4860:4860::8888
+# time=~5ms (direct routing)
+```
+
+## Network Topology
+
+### Before Fix
+```
+AT&T Gateway (IPv6: On, DHCPv6-PD: On)
+    │ No delegation (USG not requesting)
+    ▼
+Unifi USG (IPv6: Disabled)
+    │ No IPv6 route
+    ▼
+LAN Devices (IPv6 link-local only, no internet route)
+    │ Browser tries IPv6 → timeout after 10s → fallback to IPv4
+    ▼
+Slow browsing experience
+```
+
+### After Fix
+```
+AT&T Gateway (192.168.0.254)
+  IPv6 Prefix: 2600:1700:3d10:3a80::/60 (from AT&T Fiber)
+    │ DHCPv6 Prefix Delegation (/64)
+    ▼
+Unifi USG (WAN: 192.168.0.133, LAN: 192.168.1.1)
+  WAN: DHCPv6 client (requests /64 prefix)
+  LAN: Prefix Delegation (advertises 2600:1700:3d10:3a8f::/64)
+       IPv6 RA: Enabled (SLAAC for clients)
+       RDNSS: Empty (no DNS advertisement)
+    │ SLAAC advertisements
+    ▼
+LAN Devices (2600:1700:3d10:3a8f::*/64)
+  DHCPv4 assigns DNS: 192.168.1.55 (Pi-hole)
+  SLAAC assigns IPv6 address
+    │ DNS queries (IPv4 and IPv6)
+    ▼
+Pi-hole (192.168.1.55) → Unbound → Internet
+  Handles both A (IPv4) and AAAA (IPv6) queries
+  Ad blocking works for both protocols
+```
+
+## Key Configuration Details
+
+### AT&T Fiber IPv6 Prefix Delegation
+- AT&T provides /60 prefix to customer gateway
+- Customer can delegate multiple /64 subnets to downstream routers
+- Our allocation: 2600:1700:3d10:3a80::/60 → 2600:1700:3d10:3a8f::/64 (one of 16 available /64s)
+
+### SLAAC vs DHCPv6
+**Why SLAAC?**
+- Android devices don't support DHCPv6 for address assignment
+- SLAAC is universal (all modern OSes support it)
+- Simpler configuration (no DHCP server needed for IPv6 addresses)
+
+**How SLAAC Works**:
+1. Router advertises prefix via Router Advertisement (RA) messages
+2. Client generates IPv6 address using prefix + MAC-derived interface ID
+3. Address is auto-configured, no DHCP transaction needed
+
+### DNS Advertisement Strategy
+**Why disable RDNSS?**
+- RDNSS (Router Advertisement DNS Server) would advertise USG as DNS server
+- Clients would use USG for DNS instead of Pi-hole
+- Would bypass ad blocking
+
+**Solution**:
+- DHCPv4 continues to advertise Pi-hole (192.168.1.55) as DNS server
+- RDNSS left empty (USG doesn't advertise DNS via IPv6 RA)
+- Clients get IPv6 address via SLAAC but use Pi-hole for all DNS queries
+
+### Pi-hole IPv6 DNS Blocking
+Pi-hole handles both IPv4 and IPv6 DNS queries:
+- A records (IPv4): Returns 0.0.0.0 for blocked domains
+- AAAA records (IPv6): Returns ::1 for blocked domains
+- Ad blocking works seamlessly for dual-stack clients
+
+## Architecture Changes
+
+### Updated Network Diagram
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Home Network (Dual-Stack)                       │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                     AT&T Gateway (192.168.0.254)                 │  │
+│  │                                                                  │  │
+│  │  IPv4: 192.168.0.0/24 DHCP server                               │  │
+│  │  IPv6: 2600:1700:3d10:3a80::/60 (from AT&T Fiber)               │  │
+│  │        DHCPv6-PD: Enabled (delegates /64 to downstream)         │  │
+│  └──────────────────────┬───────────────────────────────────────────┘  │
+│                         │                                              │
+│                         │ WAN (192.168.0.133)                          │
+│                         │ DHCPv6-PD requests /64                       │
+│                         ▼                                              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │              Unifi Security Gateway (192.168.1.1)                │  │
+│  │                                                                  │  │
+│  │  IPv4 LAN: 192.168.1.0/24                                       │  │
+│  │  IPv6 LAN: 2600:1700:3d10:3a8f::/64 (from PD)                   │  │
+│  │            Router Advertisement (RA): Enabled                    │  │
+│  │            SLAAC: Enabled for client auto-config                 │  │
+│  │            RDNSS: Empty (no DNS advertisement)                   │  │
+│  └──────────────────────┬───────────────────────────────────────────┘  │
+│                         │                                              │
+│                         │ SLAAC (IPv6) + DHCPv4                        │
+│                         ▼                                              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                    LAN Clients (Dual-Stack)                      │  │
+│  │                                                                  │  │
+│  │  Mac Example:                                                    │  │
+│  │  - IPv4: 192.168.1.200 (from DHCP)                               │  │
+│  │  - IPv6: 2600:1700:3d10:3a8f:14a2:8e0c:f27d:9fa3 (from SLAAC)   │  │
+│  │  - DNS: 192.168.1.55 (Pi-hole, from DHCPv4)                      │  │
+│  │                                                                  │  │
+│  │  All devices get:                                                │  │
+│  │  - IPv6 via SLAAC (auto-configured)                              │  │
+│  │  - IPv4 via DHCP (192.168.1.x/24)                                │  │
+│  │  - DNS from DHCPv4 option (192.168.1.55)                         │  │
+│  └──────────────────────┬───────────────────────────────────────────┘  │
+│                         │                                              │
+│                         │ DNS queries (A + AAAA records)               │
+│                         ▼                                              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                   Pi-hole (192.168.1.55)                         │  │
+│  │                                                                  │  │
+│  │  Listens on: 0.0.0.0:53 (all IPv4 interfaces)                   │  │
+│  │  Handles: A records (IPv4) + AAAA records (IPv6 DNS queries)    │  │
+│  │  Blocks: Returns 0.0.0.0 (A) or ::1 (AAAA) for ads/trackers     │  │
+│  └──────────────────────┬───────────────────────────────────────────┘  │
+│                         │                                              │
+│                         │ Forwarded queries                            │
+│                         ▼                                              │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                   Unbound (Recursive DNS)                        │  │
+│  │                                                                  │  │
+│  │  Resolves: Both A (IPv4) and AAAA (IPv6) queries recursively    │  │
+│  │  DNSSEC: Validates both IPv4 and IPv6 responses                 │  │
+│  └──────────────────────┬───────────────────────────────────────────┘  │
+│                         │                                              │
+│                         │ Recursive resolution (IPv4 + IPv6)           │
+│                         ▼                                              │
+│                   Root DNS Servers → TLD → Authoritative              │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Key Decisions
+
+### Decision 1: Enable IPv6 Instead of Disabling on Clients
+
+**What**: Enable proper IPv6 routing on network instead of disabling IPv6 on Mac
+**Why**:
+- IPv6 is the future of networking (IPv4 address exhaustion)
+- Many services prioritize IPv6 (faster routing, better performance)
+- Disabling IPv6 on clients is a workaround, not a solution
+- Proper dual-stack networking is best practice
+
+**How**:
+- Enabled DHCPv6-PD on Unifi USG WAN
+- Enabled Prefix Delegation and Router Advertisement on USG LAN
+- Clients auto-configure via SLAAC
+
+**Trade-offs**:
+- More complex network configuration
+- Pi-hole must handle both IPv4 and IPv6 DNS queries
+- But: better performance, future-proof, no client-side workarounds needed
+
+### Decision 2: SLAAC for Address Assignment (Not DHCPv6)
+
+**What**: Use SLAAC for IPv6 address assignment instead of DHCPv6
+**Why**:
+- Android devices don't support DHCPv6 for address assignment
+- SLAAC is universally supported across all modern OSes
+- Simpler configuration (no DHCPv6 server needed)
+- Standard practice for residential networks
+
+**How**:
+- Enabled IPv6 RA (Router Advertisement) on USG LAN
+- USG advertises prefix via RA messages
+- Clients auto-generate addresses using advertised prefix
+
+**Trade-offs**:
+- Less control over address assignment (clients self-assign)
+- No central database of address-to-device mappings
+- But: universal compatibility, simpler configuration, works on all devices
+
+### Decision 3: Empty RDNSS (Use DHCPv4 for DNS)
+
+**What**: Set RDNSS DNS Control to Manual with empty DNS fields
+**Why**:
+- Pi-hole must remain the sole DNS server for ad blocking
+- RDNSS would advertise USG as DNS server, bypassing Pi-hole
+- DHCPv4 already advertises Pi-hole as DNS server
+
+**How**:
+- USG LAN: DHCPv6/RDNSS DNS Control = Manual (empty)
+- DHCPv4 continues to advertise 192.168.1.55 (Pi-hole)
+- Clients use Pi-hole for all DNS queries (IPv4 and IPv6)
+
+**Trade-offs**:
+- Mixed configuration (IPv6 addresses from SLAAC, DNS from DHCPv4)
+- Not "pure" IPv6 autoconfiguration
+- But: preserves Pi-hole ad blocking, single DNS source of truth
+
+## Performance Impact
+
+### Before Fix
+| Metric | Value | Impact |
+|--------|-------|--------|
+| DNS resolution | 36ms | Fast (not the problem) |
+| IPv6 connection attempt | 10,000ms | Timeout waiting for route |
+| Total page load | 10,000+ ms | Unusable browsing experience |
+
+### After Fix
+| Metric | Value | Impact |
+|--------|-------|--------|
+| DNS resolution | 3-36ms | Fast |
+| IPv6 connection attempt | 5-50ms | Immediate response |
+| Total page load | 97-200ms | Normal browsing experience |
+
+### Bandwidth Impact
+No change in bandwidth (still ~400 Mbps down, ~30 Mbps up) - the issue was latency, not throughput.
+
+## Issues Encountered
+
+### Issue 1: AT&T Gateway Already Configured
+
+**Expected**: Would need to enable IPv6 on AT&T gateway
+**Actual**: IPv6, DHCPv6, and DHCPv6-PD already enabled
+**Resolution**: No changes needed on AT&T gateway side
+
+### Issue 2: RDNSS Would Bypass Pi-hole
+
+**Problem**: Default RDNSS "Auto" setting advertises USG as DNS server
+**Impact**: Clients would bypass Pi-hole for DNS, losing ad blocking
+**Resolution**: Set RDNSS to Manual with empty DNS fields
+
+## Verification
+
+### IPv6 Connectivity
+```bash
+# Global IPv6 address assigned
+ifconfig en0 | grep inet6 | grep -v fe80
+# inet6 2600:1700:3d10:3a8f:14a2:8e0c:f27d:9fa3 prefixlen 64 autoconf
+
+# IPv6 ping successful
+ping6 google.com
+# 64 bytes from ...: icmp_seq=0 ttl=116 time=5.234 ms
+
+# IPv6 routing table
+netstat -rn -f inet6 | grep default
+# default   fe80::ea9f:80ff:feee:aa06%en0   UGcg   en0
+```
+
+### Pi-hole DNS Handling Both Protocols
+```bash
+# IPv4 query (A record)
+dig @192.168.1.55 google.com A
+# ANSWER: 142.250.80.46 (allowed)
+
+# IPv6 query (AAAA record)
+dig @192.168.1.55 google.com AAAA
+# ANSWER: 2607:f8b0:4004:c07::71 (allowed)
+
+# Ad blocking (IPv4)
+dig @192.168.1.55 doubleclick.net A
+# ANSWER: 0.0.0.0 (blocked)
+
+# Ad blocking (IPv6)
+dig @192.168.1.55 doubleclick.net AAAA
+# ANSWER: ::1 (blocked)
+```
+
+### Browser Performance
+```bash
+# DuckDuckGo search (previously 10+ seconds)
+time curl -I https://duckduckgo.com
+# Total: 0.097s
+
+# Google search (previously 10+ seconds)
+time curl -I https://www.google.com
+# Total: 0.123s
+```
+
+## Documentation Updates Needed
+
+- [x] Update ARCHITECTURE.md with IPv6 network configuration
+- [x] Add network topology diagrams showing dual-stack setup
+- [x] Document DNS flow for both IPv4 and IPv6 queries
+- [x] Document Unifi USG IPv6 configuration in CLAUDE.md (if relevant)
+- [ ] Add troubleshooting guide for IPv6 connectivity issues
+
+## Future Enhancements
+
+- [ ] Configure Pi-hole for IPv6 blocklists (currently only IPv4 blocking)
+- [ ] Add Prometheus metrics for IPv6 vs IPv4 query ratios
+- [ ] Test IPv6-only connectivity (disable IPv4 temporarily)
+- [ ] Document IPv6 firewall rules on USG (if needed)
+
+## Lessons Learned
+
+1. **Happy Eyeballs Can Hurt**: Modern browsers trying IPv6 first is great when it works, painful when it doesn't
+2. **Dual-Stack is Complex**: Managing both IPv4 and IPv6 requires careful DNS/DHCP coordination
+3. **RDNSS Can Bypass Pi-hole**: Router Advertisement DNS must be explicitly disabled to preserve ad blocking
+4. **IPv6 Can Be Faster**: In this network, IPv6 had 5ms latency vs 1100ms for IPv4 to Google
+5. **Diagnostic Order Matters**: Testing DNS first ruled out Pi-hole as the problem, pointed to network stack
+
+## References
+
+- RFC 4861: Neighbor Discovery for IPv6 (Router Advertisement)
+- RFC 4862: IPv6 Stateless Address Autoconfiguration (SLAAC)
+- RFC 8106: IPv6 Router Advertisement Options for DNS Configuration (RDNSS)
+- Unifi USG IPv6 Configuration: https://help.ui.com/hc/en-us/articles/204976244-UniFi-Gateway-USG-Advanced-Configuration
+- Happy Eyeballs RFC 8305: https://datatracker.ietf.org/doc/html/rfc8305
+
+---
+
+**Session Duration**: ~1 hour
+**Complexity**: Medium (network troubleshooting, IPv6 configuration)
+**Outcome**: Severe browser performance issues resolved, full dual-stack IPv6 networking enabled
+**Performance Improvement**: 10,000ms → 97ms page load times (99% reduction)

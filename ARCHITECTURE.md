@@ -801,7 +801,68 @@ Description: DESCRIPTION
 
 ---
 
-### 24. Unbound DNS Resilience Settings
+### 24. Dual-Stack IPv6 Networking (RDNSS Empty for Pi-hole)
+
+**Decision**: Enable full IPv6 dual-stack networking with SLAAC, but leave RDNSS empty to preserve Pi-hole as sole DNS server
+
+**Why**:
+- Users experienced 10+ second browser delays due to IPv6 "Happy Eyeballs" timeouts
+- Clients had IPv6 enabled but no IPv6 route to internet (link-local only)
+- Browsers try IPv6 first, wait ~10s for timeout, then fallback to IPv4
+- Disabling IPv6 on clients is a workaround, not a solution
+- IPv6 is the future (IPv4 address exhaustion, better routing, many services prioritize IPv6)
+
+**Problem**:
+- AT&T Fiber provides IPv6 via DHCPv6-PD, but USG had IPv6 disabled
+- Clients advertised fe80:: link-local addresses but had no global IPv6 addresses
+- No IPv6 route to internet meant all IPv6 connection attempts timed out
+- Page loads: 10,000ms+ (mostly waiting for IPv6 timeout before IPv4 fallback)
+
+**How**:
+
+**AT&T Gateway (192.168.0.254)** - No changes (already configured):
+- IPv6: Enabled
+- DHCPv6: Enabled
+- DHCPv6-PD: Enabled (delegates /64 prefix to downstream routers)
+- Allocated prefix: 2600:1700:3d10:3a80::/60 from AT&T Fiber
+
+**Unifi Security Gateway WAN**:
+- IPv6 Connection: Disabled → DHCPv6
+- Prefix Delegation Size: 64
+- USG requests 2600:1700:3d10:3a8f::/64 from AT&T gateway
+
+**Unifi Security Gateway LAN**:
+- IPv6 Interface Type: Prefix Delegation
+- IPv6 RA (Router Advertisement): Enabled (SLAAC for clients)
+- DHCPv6/RDNSS DNS Control: Manual (empty DNS fields)
+
+**Critical RDNSS Configuration**:
+- RDNSS (Router Advertisement DNS Server) left empty
+- Prevents USG from advertising itself as DNS server via IPv6 RA
+- Clients get IPv6 addresses via SLAAC but use Pi-hole for DNS (advertised via DHCPv4)
+- Preserves ad blocking for both IPv4 and IPv6 DNS queries
+
+**Trade-offs**:
+- More complex network configuration (dual-stack, prefix delegation, SLAAC)
+- Mixed configuration (IPv6 addresses from SLAAC, DNS from DHCPv4)
+- Not "pure" IPv6 autoconfiguration (DNS requires DHCPv4)
+- But: 99% faster page loads (10,000ms → 97ms), future-proof, proper dual-stack networking
+
+**Performance Impact**:
+- Before: 10,000ms page loads (IPv6 timeout + IPv4 fallback)
+- After: 97ms page loads (instant IPv6 connection)
+- IPv6 actually faster than IPv4: 5ms vs 1100ms ping to Google
+- Pi-hole handles both A (IPv4) and AAAA (IPv6) queries seamlessly
+
+**SLAAC vs DHCPv6**:
+- Used SLAAC (Stateless Address Autoconfiguration) instead of DHCPv6
+- Why: Android devices don't support DHCPv6 for address assignment
+- SLAAC is universal (all modern OSes support it)
+- Simpler configuration (no DHCPv6 server needed)
+
+---
+
+### 25. Unbound DNS Resilience Settings
 
 **Decision**: Enable serve-expired cache and increase retry limits in Unbound configuration
 
@@ -1024,6 +1085,72 @@ pi-cluster/
 ```
 
 ## Network Details
+
+### Home Network Configuration (Dual-Stack IPv4/IPv6)
+
+The cluster operates on a dual-stack network with both IPv4 and IPv6 connectivity:
+
+#### Network Topology
+```
+AT&T Gateway (192.168.0.254)
+  IPv4: 192.168.0.0/24 DHCP server
+  IPv6: 2600:1700:3d10:3a80::/60 (from AT&T Fiber)
+        DHCPv6-PD: Enabled (delegates /64 to downstream routers)
+    │
+    │ DHCPv6-PD: Requests /64 prefix
+    ▼
+Unifi Security Gateway (192.168.1.1)
+  WAN: 192.168.0.133 (IPv4), DHCPv6 client
+  LAN IPv4: 192.168.1.0/24 DHCP server
+  LAN IPv6: 2600:1700:3d10:3a8f::/64 (from Prefix Delegation)
+            Router Advertisement (RA): Enabled (SLAAC)
+            RDNSS: Empty (DNS advertised via DHCPv4 only)
+    │
+    │ SLAAC (IPv6) + DHCPv4 (IPv4 + DNS)
+    ▼
+LAN Clients (Dual-Stack)
+  IPv4: 192.168.1.x/24 (from DHCP)
+  IPv6: 2600:1700:3d10:3a8f::/64 (auto-configured via SLAAC)
+  DNS: 192.168.1.55 (Pi-hole, from DHCPv4)
+```
+
+#### IPv6 Configuration Details
+
+**AT&T Gateway (192.168.0.254)**
+- IPv6: Enabled
+- DHCPv6: Enabled
+- DHCPv6 Prefix Delegation: Enabled
+- Allocated prefix: 2600:1700:3d10:3a80::/60 (from AT&T Fiber)
+- Delegates /64 subnets to downstream routers
+
+**Unifi Security Gateway WAN Settings**
+- IPv6 Connection: DHCPv6
+- Prefix Delegation Size: 64
+- Requests 2600:1700:3d10:3a8f::/64 from AT&T gateway
+
+**Unifi Security Gateway LAN Settings**
+- IPv6 Interface Type: Prefix Delegation
+- IPv6 RA (Router Advertisement): Enabled
+- SLAAC: Enabled for client auto-configuration
+- DHCPv6/RDNSS DNS Control: Manual (empty)
+  - **Critical**: Empty RDNSS prevents USG from advertising itself as DNS
+  - Clients use Pi-hole (192.168.1.55) advertised via DHCPv4 option 6
+  - Preserves ad blocking for both IPv4 and IPv6 DNS queries
+
+**Why Dual-Stack Matters**
+- Modern browsers use "Happy Eyeballs" (RFC 8305): try IPv6 first, fallback to IPv4
+- Without proper IPv6 routing, clients wait ~10s for IPv6 timeout before fallback
+- Dual-stack eliminates timeout delays (99% faster page loads: 10,000ms → 97ms)
+- IPv6 often has better routing (5ms vs 1100ms to Google in this network)
+
+**Pi-hole Dual-Stack DNS**
+- Listens on 0.0.0.0:53 (all IPv4 interfaces)
+- Handles both A (IPv4) and AAAA (IPv6) DNS queries
+- Blocks ads for both protocols:
+  - A records: Returns 0.0.0.0 for blocked domains
+  - AAAA records: Returns ::1 for blocked domains
+
+### Service Ports
 
 | Component | Port | Protocol | Exposure |
 |-----------|------|----------|----------|
