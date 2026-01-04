@@ -259,3 +259,22 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 15. mtgibbs.xyz personal site
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/mtgibbs-site
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

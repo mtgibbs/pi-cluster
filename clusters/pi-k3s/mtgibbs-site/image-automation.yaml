@@ -1,0 +1,49 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/mtgibbs.xyz
+  interval: 5m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: mtgibbs-site
+  filterTags:
+    pattern: '^[0-9]{14}$'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: mtgibbs-site
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore: update mtgibbs-site to {{range .Changed.Changes}}{{.NewValue}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./clusters/pi-k3s/mtgibbs-site
+    strategy: Setters
