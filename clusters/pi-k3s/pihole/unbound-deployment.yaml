@@ -16,7 +16,7 @@ spec:
         app: unbound
     spec:
       nodeSelector:
-        kubernetes.io/hostname: pi3-worker-1
+        kubernetes.io/hostname: pi-k3s
       containers:
         - name: unbound
           image: madnuttah/unbound:latest
