@@ -17,6 +17,9 @@ data:
       Monitoring:
         style: row
         columns: 3
+      Web:
+        style: row
+        columns: 3
       Network:
         style: row
         columns: 2
@@ -65,6 +68,22 @@ data:
               type: prometheus
               url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
               fields: ["targets_up", "targets_down", "targets_total"]
+
+    - Web:
+        - Personal Site (Cluster):
+            icon: mdi-web
+            href: https://site.lab.mtgibbs.dev
+            description: Next.js on Pi K3s
+            siteMonitor: https://site.lab.mtgibbs.dev
+        - Personal Site (Heroku):
+            icon: mdi-cloud
+            href: https://mtgibbs.xyz
+            description: Production on Heroku
+            siteMonitor: https://mtgibbs.xyz
+        - Cloudflare:
+            icon: cloudflare.png
+            href: https://dash.cloudflare.com
+            description: DNS & CDN for mtgibbs.dev
 
     - Network:
         - Unifi Controller:
