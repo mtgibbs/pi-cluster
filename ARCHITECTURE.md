@@ -21,10 +21,12 @@ A 3-node Kubernetes learning cluster running on Raspberry Pi hardware, providing
 │  │ Pi OS Lite 64-bit        │  │ Pi OS Lite 64-bit    │  │ Pi OS Lite 64   ││
 │  │                          │  │                      │  │                 ││
 │  │ Workloads:               │  │ Workloads:           │  │ Workloads:      ││
-│  │ • Pi-hole (hostNetwork)  │  │ • Unbound DNS        │  │ • Most services ││
-│  │ • Flux controllers       │  │   (nodeSelector)     │  │   schedule here ││
-│  │ • Backup jobs            │  │                      │  │   or on pi-k3s  ││
-│  │ • Most workloads         │  │                      │  │                 ││
+│  │ • Pi-hole (hostNetwork)  │  │ • Lightweight apps   │  │ • Homepage      ││
+│  │ • Unbound (nodeSelector) │  │   only               │  │ • Lightweight   ││
+│  │ • Flux controllers       │  │                      │  │   services      ││
+│  │ • Backup jobs            │  │                      │  │                 ││
+│  │ • Immich, Prometheus,    │  │                      │  │                 ││
+│  │   Grafana, Jellyfin      │  │                      │  │                 ││
 │  └──────────────────────────┘  └──────────────────────┘  └─────────────────┘│
 │                                                                               │
 │  K3s Version: v1.33.6+k3s1                                                   │
@@ -225,6 +227,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • initContainer copies config to writable emptyDir              │  │
 │  │  • RBAC: ServiceAccount with ClusterRole for API access          │  │
 │  │  • Secrets: 4 ExternalSecrets for widget API keys                │  │
+│  │  • nodeAffinity: Prefers Pi 3 workers (lightweight service)      │  │
 │  │  • Ingress: home.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
@@ -862,7 +865,142 @@ Description: DESCRIPTION
 
 ---
 
-### 25. Unbound DNS Resilience Settings
+### 25. Unbound Placement on Pi 5 (Not Pi 3 Worker)
+
+**Decision**: Run Unbound on pi-k3s (Pi 5) instead of pi3-worker-1 (Pi 3)
+
+**Why**:
+- Pi 3 hardware insufficient for reliable DNS resolver operations
+- Observed TCP connection failures to authoritative DNS servers on Pi 3
+- DNS resolver is critical infrastructure requiring reliable hardware
+- Pi 5 has significantly better CPU (Cortex-A76 vs A53) and networking capabilities
+
+**Problem on Pi 3**:
+- Frequent SERVFAIL errors in Unbound logs: "tcp connect: Network is unreachable"
+- Upstream server timeouts during TCP connections
+- DNS queries taking 500-10,000ms (should be <100ms)
+- Pi 3's 1GB RAM, older ARM architecture, and network stack unable to handle recursive DNS load
+
+**How**:
+```yaml
+# clusters/pi-k3s/pihole/unbound-deployment.yaml
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-k3s  # Changed from pi3-worker-1
+```
+
+**Performance Impact**:
+- Before (Pi 3): 500-10,000ms for uncached queries, frequent TCP failures
+- After (Pi 5): 21ms for fresh uncached queries, 0-15ms for cached, zero failures
+- Improvement: 99% latency reduction, 100% reliability increase
+
+**Trade-offs**:
+- Adds ~64Mi memory usage to Pi 5 (already at 79% utilization)
+- Both Pi-hole and Unbound on same node (no HA, shared failure domain)
+- But: DNS reliability is non-negotiable, performance issues completely resolved
+
+**Co-location Benefits**:
+- Pi-hole and Unbound on same node eliminates network hop for DNS forwarding
+- Cluster-internal DNS queries stay on-node (slight latency improvement)
+- Simplified troubleshooting (both components on same hardware)
+
+---
+
+### 26. Homepage Placement on Pi 3 Workers
+
+**Decision**: Use nodeAffinity to prefer Pi 3 workers for Homepage deployment
+
+**Why**:
+- Pi 5 at 79% memory utilization needs relief for critical services
+- Homepage is lightweight (~111Mi) with no intensive operations
+- Pi 3 workers suitable for stateless dashboards and web UIs
+- Frees memory on Pi 5 for Unbound, Prometheus, Immich, and other resource-intensive services
+
+**How**:
+```yaml
+# clusters/pi-k3s/homepage/deployment.yaml
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi3-worker-1
+                      - pi3-worker-2
+```
+
+**Why Preference, Not Requirement**:
+- Allows fallback to Pi 5 if Pi 3 workers unavailable
+- Better cluster resilience (not a hard constraint)
+- Homepage is not mission-critical (can tolerate scheduling flexibility)
+
+**Memory Impact**:
+- Pi 5 freed: ~111Mi (79% → ~77% utilization)
+- Pi 3 worker-2 usage: +111Mi (40% → 51% utilization)
+- Net effect: Better distribution, Pi 5 still constrained
+
+**Trade-offs**:
+- Adds scheduling complexity (preference vs hard requirement)
+- Homepage performance identical (not CPU/memory intensive)
+- But: better resource utilization across heterogeneous cluster
+
+---
+
+### 27. Pi 3 Hardware Limitations
+
+**Decision**: Recognize Pi 3 limitations and restrict workload types accordingly
+
+**Why**:
+- Pi 3 has 1GB RAM (vs 8GB on Pi 5)
+- ARM Cortex-A53 architecture (older, slower than Pi 5's Cortex-A76)
+- Network stack and CPU insufficient for reliable infrastructure services
+- Observed failures: TCP connection failures in Unbound, performance degradation
+
+**Suitable Workloads for Pi 3**:
+- Stateless web applications (Homepage, dashboards)
+- Lightweight proxies and services
+- Simple HTTP servers (Next.js sites, static content)
+- Services with <200Mi memory footprint
+
+**Unsuitable Workloads for Pi 3**:
+- DNS resolvers (Unbound - requires reliable TCP stack)
+- Databases (PostgreSQL, Redis - need memory and I/O)
+- Observability stack (Prometheus, Grafana - memory intensive)
+- Media transcoding (Jellyfin - CPU intensive)
+- Machine learning (Immich - CPU and memory intensive)
+
+**Current Workload Distribution**:
+
+**Pi 5 (pi-k3s) - Critical Infrastructure**:
+- Pinned: Pi-hole (hostNetwork), Unbound (nodeSelector), Flux controllers, Backup jobs
+- Heavy: Immich (1.4GB), Prometheus (800Mi), Grafana (695Mi), Jellyfin (466Mi)
+- Memory: 6.3GB / 8GB (79%)
+
+**Pi 3 Workers - Lightweight Services Only**:
+- Preferred: Homepage (~111Mi), mtgibbs-site (~100Mi)
+- Memory: ~500-600Mi / 1GB (50-60%) per node
+
+**Trade-offs**:
+- Pi 3s underutilized by design (can't handle heavy workloads safely)
+- Heterogeneous cluster requires careful workload placement
+- But: better than overloading Pi 3s and experiencing failures
+
+**Future Consideration**:
+- Second Pi 5 would enable HA for DNS and better workload distribution
+- Would eliminate Pi 5 memory constraint (16GB total vs current 8GB)
+- Pi 3s could remain lightweight service runners
+
+---
+
+### 28. Unbound DNS Resilience Settings
 
 **Decision**: Enable serve-expired cache and increase retry limits in Unbound configuration
 

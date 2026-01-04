@@ -52,6 +52,8 @@ As a security-conscious assistant working on this infrastructure project:
 - Both running Raspberry Pi OS Lite (64-bit)
 - SSH keys and K3s node token stored in 1Password
 - Setup documented in `docs/pi-worker-setup.md`
+- **Limitations**: Pi 3 hardware (ARM Cortex-A53, 1GB RAM) unsuitable for DNS resolvers, databases, or resource-intensive services
+- **Best for**: Lightweight stateless apps (Homepage, simple web services)
 
 ### Completed Setup
 1. **cgroups enabled** - Added `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt`
@@ -149,7 +151,7 @@ All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
 │  │  ┌──────────┐     ┌──────────┐     ┌─────────────────┐             │   │
 │  │  │ Pi-hole  │────▶│ Unbound  │────▶│ Root DNS Servers│             │   │
 │  │  │ (ads)    │     │ (recursive)    │ (Internet)      │             │   │
-│  │  │ (pi-k3s) │     │(pi3-worker-1)  │ (Internet)      │             │   │
+│  │  │ (pi-k3s) │     │ (pi-k3s)       │                 │             │   │
 │  │  └──────────┘     └──────────┘     └─────────────────┘             │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -378,6 +380,9 @@ See `docs/pihole-v6-api.md` for full API reference.
 - Port 5335 (non-privileged)
 - Full recursive resolution
 - DNSSEC validation enabled
+- **Node placement**: pi-k3s (Pi 5) via nodeSelector
+  - **Why**: Pi 3 hardware insufficient for reliable DNS operations (TCP connection failures observed)
+  - **Performance**: 21ms uncached queries, 0-15ms cached (vs 500-10,000ms on Pi 3)
 
 ### nginx-ingress Config
 - Uses hostPort 443 (HTTPS only, port 80 is used by Pi-hole's hostNetwork)
@@ -612,6 +617,8 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 - **Image**: `ghcr.io/gethomepage/homepage:latest`
 - **URL**: https://home.lab.mtgibbs.dev
 - **Configuration**: Fully GitOps-managed via ConfigMap
+- **Node placement**: Prefers Pi 3 workers via nodeAffinity
+  - **Why**: Lightweight service (~111Mi), frees memory on Pi 5 for critical infrastructure
 - **Theme**: Dark theme with clean layout
 - **Sections**:
   - Infrastructure: Pi-hole (with live stats), Unbound, K3s Cluster
