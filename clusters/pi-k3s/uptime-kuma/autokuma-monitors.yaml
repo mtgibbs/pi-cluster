@@ -131,3 +131,21 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  personal-site-cluster.json: |
+    {
+      "type": "http",
+      "name": "Personal Site (Cluster)",
+      "url": "https://site.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  personal-site-heroku.json: |
+    {
+      "type": "http",
+      "name": "Personal Site (Heroku)",
+      "url": "https://mtgibbs.xyz/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

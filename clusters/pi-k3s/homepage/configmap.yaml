@@ -143,9 +143,9 @@ data:
           showLabel: true
 
     - openmeteo:
-        label: Home
-        latitude: 40.7128
-        longitude: -74.0060
+        label: Johns Creek
+        latitude: 34.0289
+        longitude: -84.1986
         timezone: America/New_York
         units: imperial
         cache: 5
