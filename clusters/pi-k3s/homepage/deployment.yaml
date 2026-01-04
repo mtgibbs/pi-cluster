@@ -16,6 +16,17 @@ spec:
         app: homepage
     spec:
       serviceAccountName: homepage
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi3-worker-1
+                      - pi3-worker-2
       initContainers:
         - name: copy-config
           image: busybox:latest
