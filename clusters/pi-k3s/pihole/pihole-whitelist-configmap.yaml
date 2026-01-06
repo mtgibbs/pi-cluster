@@ -4,16 +4,68 @@ metadata:
   name: pihole-whitelist
   namespace: pihole
 data:
-  # Domain whitelist for services that get incorrectly blocked
-  # These are added via Pi-hole API in the postStart hook
+  # Domain whitelist for services that get incorrectly blocked by Firebog adlists.
+  # These are added via Pi-hole API in the postStart hook.
+  #
+  # WHY THIS EXISTS:
+  # The Firebog curated blocklists include Microsoft telemetry domains, but Microsoft
+  # bundles telemetry with critical store/licensing functionality. Blocking these
+  # domains breaks Minecraft/Xbox in-game purchases (Minecoins, DLC, etc).
+  #
+  # SYMPTOMS WHEN BLOCKED:
+  # - Minecraft store loads but purchase overlay hangs with spinning dots
+  # - "Ask permission" errors work, but actual purchases never complete
+  # - Xbox Live authentication intermittently fails
+  #
+  # ADDED: 2026-01-05 after debugging Minecraft Minecoin purchase failures
   whitelist.txt: |
-    # === Xbox / Microsoft Store / Minecraft ===
-    # Required for Xbox Live authentication and Minecraft login
-    licensing.mp.microsoft.com
-    purchase.mp.microsoft.com
-    collections.mp.microsoft.com
-    collections.md.mp.microsoft.com
-    displaycatalog.mp.microsoft.com
-    paymentinstruments.mp.microsoft.com
-    xsts.auth.xboxlive.com
-    sisu.xboxlive.com
+    # ============================================================
+    # Xbox / Microsoft Store / Minecraft Whitelist
+    # ============================================================
+    # These domains are required for Xbox Live authentication,
+    # Minecraft login, and in-game purchases (Minecoins, DLC, etc).
+    # Blocked by Firebog lists but essential for store functionality.
+
+    # --- Core Licensing & Store APIs ---
+    # Microsoft's marketplace API endpoints for digital content
+    licensing.mp.microsoft.com      # License validation for purchased content
+    purchase.mp.microsoft.com       # Purchase transaction processing
+    collections.mp.microsoft.com    # User's owned content/entitlements
+    collections.md.mp.microsoft.com # Metadata for owned content
+    displaycatalog.mp.microsoft.com # Store catalog/product listings
+    paymentinstruments.mp.microsoft.com  # Payment method management
+    storesdk.dsx.mp.microsoft.com   # Store SDK for embedded purchases
+    catalog.gamepass.com            # Game Pass catalog (shares infrastructure)
+
+    # --- Xbox Live Authentication ---
+    # Required for Xbox/Microsoft account sign-in within games
+    xsts.auth.xboxlive.com   # Xbox Security Token Service - auth tokens
+    sisu.xboxlive.com        # Xbox sign-in service
+    title.mgt.xboxlive.com   # Game title management/entitlements
+    gold.xboxservices.com    # Xbox Gold/Game Pass subscription status
+
+    # --- Microsoft Account & Login ---
+    # Core Microsoft identity services
+    login.live.com           # PRIMARY LOGIN - blocks cause purchase overlay hang
+    account.live.com         # Account management
+    account.microsoft.com    # Microsoft account portal
+    onedrive.live.com        # Used by Xbox cloud saves
+    api.onedrive.com         # OneDrive API (Xbox integration)
+
+    # --- Purchase Overlay & Commerce ---
+    # These power the actual buy/checkout experience
+    buynow.production.store-web.dynamics.com  # THE PURCHASE POPUP - critical!
+    commerce.microsoft.com   # Commerce backend
+    store-images.s-microsoft.com  # Store product images/thumbnails
+
+    # --- Supporting Microsoft Services ---
+    # Required for full store functionality
+    www.microsoft.com        # Main Microsoft site (redirects, resources)
+    edge.microsoft.com       # Edge browser services (embedded webviews)
+    www.bing.com             # Search/suggestions in store
+    substrate.office.com     # Microsoft 365 substrate (shared auth)
+    clientfd.family.microsoft.com  # Family settings/parental controls
+    fpt.microsoft.com        # Microsoft Frontpage/legacy services
+    nav.smartscreen.microsoft.com  # SmartScreen URL reputation
+    df6.cfp.microsoft.com    # Customer Facing Platform services
+    browser.events.data.microsoft.com  # Telemetry (required for store to function)
