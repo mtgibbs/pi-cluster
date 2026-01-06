@@ -107,6 +107,27 @@ spec:
                         || true
                     fi
 
+                    # Process whitelist entries from ConfigMap
+                    if [ -f /etc/pihole-config/whitelist.txt ]; then
+                      WHITELIST_DOMAINS=""
+                      while IFS= read -r domain; do
+                        [[ -z "$domain" || "$domain" =~ ^# ]] && continue
+                        if [ -z "$WHITELIST_DOMAINS" ]; then
+                          WHITELIST_DOMAINS="\"$domain\""
+                        else
+                          WHITELIST_DOMAINS="$WHITELIST_DOMAINS,\"$domain\""
+                        fi
+                      done < /etc/pihole-config/whitelist.txt
+
+                      # Add all whitelist domains via API (batch add)
+                      if [ -n "$WHITELIST_DOMAINS" ]; then
+                        curl -s -X POST "http://localhost/api/domains/allow/exact?sid=${SID}" \
+                          -H "Content-Type: application/json" \
+                          -d "{\"domain\":[${WHITELIST_DOMAINS}],\"comment\":\"GitOps managed whitelist\"}" \
+                          || true
+                      fi
+                    fi
+
                     # Run gravity update to fetch the lists
                     curl -s -X POST "http://localhost/api/action/gravity?sid=${SID}" || pihole updateGravity
 
@@ -122,7 +143,12 @@ spec:
               subPath: 02-local-dns.conf
               readOnly: true
             - name: pihole-config
-              mountPath: /etc/pihole-config
+              mountPath: /etc/pihole-config/adlists.txt
+              subPath: adlists.txt
+              readOnly: true
+            - name: pihole-whitelist
+              mountPath: /etc/pihole-config/whitelist.txt
+              subPath: whitelist.txt
               readOnly: true
           resources:
             requests:
@@ -158,3 +184,6 @@ spec:
         - name: pihole-config
           configMap:
             name: pihole-adlists
+        - name: pihole-whitelist
+          configMap:
+            name: pihole-whitelist

@@ -6,6 +6,7 @@ resources:
   - unbound-deployment.yaml
   - pihole-pvc.yaml
   - pihole-adlists-configmap.yaml
+  - pihole-whitelist-configmap.yaml
   - pihole-custom-dns.yaml
   - pihole-deployment.yaml
   - pihole-service.yaml

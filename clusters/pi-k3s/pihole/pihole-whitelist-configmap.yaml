@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-whitelist
+  namespace: pihole
+data:
+  # Domain whitelist for services that get incorrectly blocked
+  # These are added via Pi-hole API in the postStart hook
+  whitelist.txt: |
+    # === Xbox / Microsoft Store / Minecraft ===
+    # Required for Xbox Live authentication and Minecraft login
+    licensing.mp.microsoft.com
+    purchase.mp.microsoft.com
+    collections.mp.microsoft.com
+    collections.md.mp.microsoft.com
+    displaycatalog.mp.microsoft.com
+    paymentinstruments.mp.microsoft.com
+    xsts.auth.xboxlive.com
+    sisu.xboxlive.com
