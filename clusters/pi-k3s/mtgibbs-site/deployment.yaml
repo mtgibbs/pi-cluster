@@ -30,6 +30,10 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          envFrom:
+            - secretRef:
+                name: mtgibbs-spotify
+                optional: true
           env:
             - name: NODE_ENV
               value: "production"
