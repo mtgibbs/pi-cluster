@@ -358,6 +358,8 @@ resources:
 | `discord-alerts` | `webhook-url` | Discord webhook for Flux notifications |
 | `alertmanager` | `discord-alerts-webhook-url` | Discord webhook for Prometheus alerts |
 | `flux-github-pat` | `token` | Fine-grained GitHub PAT for Flux image automation (write access) |
+| `mtgibbs-spotify` | `client`, `client-secret`, `refresh-token` | Spotify integration for mtgibbs.xyz |
+| `mtgibbs-github` | `token` | GitHub PAT for mtgibbs.xyz Project Deck (read-only, repo contents) |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access

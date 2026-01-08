@@ -34,6 +34,9 @@ spec:
             - secretRef:
                 name: mtgibbs-spotify
                 optional: true
+            - secretRef:
+                name: mtgibbs-github
+                optional: true
           env:
             - name: NODE_ENV
               value: "production"
