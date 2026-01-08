@@ -26,7 +26,7 @@ spec:
                       - pi3-worker-2
       containers:
         - name: mtgibbs-site
-          image: ghcr.io/mtgibbs/mtgibbs.xyz:20260108042456 # {"$imagepolicy": "flux-system:mtgibbs-site"}
+          image: ghcr.io/mtgibbs/mtgibbs.xyz:20260108042935 # {"$imagepolicy": "flux-system:mtgibbs-site"}
           ports:
             - containerPort: 3000
               name: http
