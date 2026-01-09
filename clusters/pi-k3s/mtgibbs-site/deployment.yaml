@@ -37,6 +37,9 @@ spec:
             - secretRef:
                 name: mtgibbs-github
                 optional: true
+            - secretRef:
+                name: mtgibbs-tracking
+                optional: true
           env:
             - name: NODE_ENV
               value: "production"
