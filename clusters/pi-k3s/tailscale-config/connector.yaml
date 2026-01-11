@@ -11,6 +11,6 @@ spec:
   exitNode: true
   # Tag for ACL rules and auto-approval
   tags:
-    - tag:k8s
+    - tag:k8s-operator
   # Use our ProxyClass settings
   proxyClass: pi-cluster
