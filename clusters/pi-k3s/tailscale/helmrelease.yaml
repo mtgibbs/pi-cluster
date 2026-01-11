@@ -36,6 +36,11 @@ spec:
         secretKeyRef:
           name: operator-oauth
           key: client_secret
-    # Use our ProxyClass for all Tailscale proxies
+    # Operator config
+    operatorConfig:
+      defaultTags:
+        - tag:k8s-operator
+    # Proxy config
     proxyConfig:
       defaultProxyClass: pi-cluster
+      defaultTags: "tag:k8s"
