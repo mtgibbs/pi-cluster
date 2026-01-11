@@ -1,0 +1,16 @@
+# Connector creates an exit node for routing traffic through the cluster
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: pi-cluster-exit
+  namespace: tailscale
+spec:
+  # Hostname shown in Tailscale admin console
+  hostname: pi-cluster-exit
+  # Enable as exit node for full tunnel mode
+  exitNode: true
+  # Tag for ACL rules and auto-approval
+  tags:
+    - tag:k8s
+  # Use our ProxyClass settings
+  proxyClass: pi-cluster

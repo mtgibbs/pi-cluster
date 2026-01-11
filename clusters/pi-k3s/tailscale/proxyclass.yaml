@@ -1,0 +1,19 @@
+# ProxyClass defines settings for Tailscale proxy pods
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: pi-cluster
+spec:
+  statefulSet:
+    pod:
+      # Pin to Pi 5 nodes for better performance
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tailscaleContainer:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi

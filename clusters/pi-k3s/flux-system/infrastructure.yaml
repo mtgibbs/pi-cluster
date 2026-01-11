@@ -122,7 +122,26 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 8. Monitoring stack - depends on secrets, ingress, and cert-manager
+# 8. Tailscale VPN - exit node for mobile ad-blocking
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tailscale
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: pihole
+  interval: 10m
+  path: ./clusters/pi-k3s/tailscale
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 9. Monitoring stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
