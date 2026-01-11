@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pihole
+  name: pihole-secondary
   namespace: pihole
   labels:
-    app: pihole
+    app: pihole-secondary
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: pihole
+      app: pihole-secondary
   template:
     metadata:
       labels:
-        app: pihole
+        app: pihole-secondary
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
-        kubernetes.io/hostname: pi-k3s
+        kubernetes.io/hostname: pi5-worker-1
       containers:
         - name: pihole
           image: pihole/pihole:latest
@@ -47,7 +47,7 @@ spec:
                   name: pihole-secret
                   key: WEBPASSWORD
             - name: PIHOLE_DNS_
-              value: "unbound.pihole.svc.cluster.local#5335"
+              value: "unbound-secondary.pihole.svc.cluster.local#5335"
             - name: DNSSEC
               value: "false"
             - name: REV_SERVER
@@ -82,7 +82,7 @@ spec:
                     fi
 
                     # Configure Unbound as upstream DNS (resolve service to IP)
-                    UNBOUND_IP=$(getent hosts unbound.pihole.svc.cluster.local | awk '{print $1}')
+                    UNBOUND_IP=$(getent hosts unbound-secondary.pihole.svc.cluster.local | awk '{print $1}')
                     if [ -n "$UNBOUND_IP" ]; then
                       curl -s -X PATCH "http://localhost/api/config?sid=${SID}" \
                         -H "Content-Type: application/json" \
@@ -176,10 +176,10 @@ spec:
       volumes:
         - name: pihole-etc
           persistentVolumeClaim:
-            claimName: pihole-etc
+            claimName: pihole-etc-secondary
         - name: pihole-dnsmasq
           persistentVolumeClaim:
-            claimName: pihole-dnsmasq
+            claimName: pihole-dnsmasq-secondary
         - name: pihole-custom-dns
           configMap:
             name: pihole-custom-dns

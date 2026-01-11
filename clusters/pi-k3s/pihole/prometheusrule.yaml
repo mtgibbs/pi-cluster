@@ -1,0 +1,46 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pihole-alerts
+  namespace: pihole
+  labels:
+    release: kube-prometheus
+spec:
+  groups:
+    - name: pihole
+      rules:
+        - alert: PiholePrimaryDown
+          expr: up{job="pihole-exporter"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pi-hole Primary is down"
+            description: "Pi-hole Primary (192.168.1.55) has been unreachable for more than 2 minutes. Secondary Pi-hole should be handling DNS."
+
+        - alert: PiholeSecondaryDown
+          expr: up{job="pihole-exporter-secondary"} == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pi-hole Secondary is down"
+            description: "Pi-hole Secondary (192.168.1.56) has been unreachable for more than 2 minutes. Primary Pi-hole should be handling DNS."
+
+        - alert: PiholeBothDown
+          expr: up{job="pihole-exporter"} == 0 and up{job="pihole-exporter-secondary"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Both Pi-hole instances are down!"
+            description: "Both Primary (192.168.1.55) and Secondary (192.168.1.56) Pi-hole instances are unreachable. DNS is likely failing for the network."
+
+        - alert: PiholeHighBlockRate
+          expr: pihole_ads_percentage_today > 50
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pi-hole blocking more than 50% of queries"
+            description: "Pi-hole is blocking {{ $value }}% of DNS queries. This may indicate a misconfiguration or excessive blocking."
