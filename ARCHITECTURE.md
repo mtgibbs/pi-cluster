@@ -1056,6 +1056,131 @@ so-sndbuf: 4m  # Socket send buffer (default: 1m)
 - Before: 10-15 second delays on cache misses
 - After: 0.1-0.5 seconds (cache hit), 0.5-2 seconds (cache miss with serve-expired)
 
+---
+
+### 29. Tailscale VPN with Subnet Routes for Mobile Ad Blocking
+
+**Decision**: Deploy Tailscale Kubernetes Operator with exit node and subnet route advertising for Pi-hole IPs
+
+**Why**:
+- Enable mobile ad blocking when away from home network
+- Avoid opening router ports (NAT traversal via Tailscale)
+- Provide secure remote access to home network services
+- Support both split tunnel (DNS only) and full tunnel (all traffic) modes
+
+**Problem**:
+- Mobile devices lose ad blocking when on cellular or public WiFi
+- Traditional VPN requires port forwarding (security risk, dynamic IP issues)
+- Pi-hole only accessible on local network (192.168.1.x)
+
+**How**:
+
+**1. Tailscale Operator Deployment**
+- HelmRelease in `tailscale` namespace (chart version 1.92.5)
+- OAuth authentication with minimal scopes (Devices Core + Auth Keys, `tag:k8s-operator` only)
+- Credentials synced from 1Password via ExternalSecret
+
+**2. Exit Node Configuration**
+- Connector CRD with `exitNode: true` (hostname: `pi-cluster-exit`)
+- ProxyClass with arm64 nodeSelector (ensures Pi 5 scheduling)
+- Tagged with `tag:k8s-operator` for ACL policy matching
+
+**3. Subnet Route Advertising (Critical)**
+```yaml
+subnetRouter:
+  advertiseRoutes:
+    - 192.168.1.55/32   # Pi-hole primary (pi-k3s)
+    - 192.168.1.56/32   # Pi-hole secondary (pi5-worker-1)
+```
+
+**Why Subnet Routes**:
+- Exit node provides tunnel, but doesn't automatically route to local IPs
+- Subnet routes advertise specific IPs to Tailscale network mesh
+- DNS queries to Pi-hole IPs are routed through tunnel
+
+**4. Tailscale ACL Policy (Critical)**
+```json
+{
+    "tagOwners": {
+        "tag:k8s-operator": ["autogroup:admin", "autogroup:member"]
+    },
+    "autoApprovers": {
+        "exitNode": ["tag:k8s-operator"],
+        "routes": {
+            "192.168.1.0/24": ["tag:k8s-operator"]
+        }
+    },
+    "grants": [
+        {"src": ["autogroup:member"], "dst": ["autogroup:internet"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]}
+    ]
+}
+```
+
+**Three Required Components**:
+1. Advertise routes in Connector resource (`subnetRouter.advertiseRoutes`)
+2. Approve routes in Tailscale admin console
+3. **Grant access in ACL policy** (often missed, causes DNS failures)
+
+**5. Tailscale Admin DNS Settings**
+- Global nameservers: 192.168.1.55, 192.168.1.56
+- "Use with exit node" enabled (DNS applies when tunnel active)
+- "Override local DNS" enabled (forces all DNS through Pi-hole)
+
+**Implementation**:
+```
+clusters/pi-k3s/
+├── tailscale/
+│   ├── namespace.yaml
+│   ├── external-secret.yaml       # OAuth credentials from 1Password
+│   └── helmrelease.yaml           # Tailscale Operator v1.92.5
+└── tailscale-config/
+    ├── proxyclass.yaml            # arm64 nodeSelector for Pi 5
+    └── connector.yaml             # Exit node + subnet routes
+```
+
+**Flux Dependency Chain**:
+```
+external-secrets → tailscale (needs OAuth secret) → tailscale-config (needs operator CRDs)
+```
+
+**Trade-offs**:
+- More complex setup than simple VPN (OAuth, ACL policy, subnet routes)
+- Requires Tailscale account (free tier supports 3 users, 100 devices)
+- ACL policy management outside of git (currently manual in admin console)
+- Subnet routes must be manually approved in admin console
+- But: zero open ports, NAT traversal works anywhere, reliable WireGuard protocol
+
+**Troubleshooting Gotchas**:
+1. **OAuth "Requested tags are invalid"**: OAuth client has extra scopes/tags beyond `tag:k8s-operator`
+   - Solution: Create new OAuth client with ONLY Devices Core + Auth Keys
+2. **Exit node not visible in app**: Missing `autogroup:internet` grant in ACL
+   - Solution: Add grant to ACL policy
+3. **DNS not resolving**: Subnet routes advertised but ACL doesn't grant access
+   - Solution: Add `{"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]}` grant
+   - This was the critical missing piece in initial deployment
+
+**Security**:
+- Minimal OAuth scopes prevent privilege escalation
+- ACL policy enforces explicit grants (default deny)
+- Subnet routes are /32 (single IP), not /24 (entire subnet)
+- Exit node pod runs as non-root with arm64-specific scheduling
+
+**Performance**:
+- Latency: +20-50ms (WireGuard overhead)
+- Throughput: Limited by home network upload (AT&T Fiber: 20 Mbps typical)
+- Battery impact: Minimal (WireGuard protocol is efficient)
+
+**Use Cases**:
+- **Split Tunnel** (exit node OFF): Only DNS queries to Pi-hole (ad blocking, normal internet speed)
+- **Full Tunnel** (exit node ON): All traffic through home network (privacy + ad blocking, slower speed)
+
+**Future Considerations**:
+- Headscale (self-hosted control plane) if 3-user limit becomes issue
+- Document ACL policy in git (currently only in Tailscale admin console)
+- Add Uptime Kuma monitor for exit node availability
+- Grafana dashboard for Tailscale metrics (if available)
+
 ## Observability Stack
 
 ```

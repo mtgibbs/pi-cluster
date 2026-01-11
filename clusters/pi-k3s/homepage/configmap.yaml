@@ -22,7 +22,7 @@ data:
         columns: 3
       Network:
         style: row
-        columns: 2
+        columns: 3
       Media & Storage:
         style: row
         columns: 2
@@ -44,7 +44,7 @@ data:
             description: Recursive DNS Resolver
         - K3s Cluster:
             icon: kubernetes.png
-            description: 3-Node ARM64 Cluster
+            description: 4-Node ARM64 Cluster
 
     - Monitoring:
         - Grafana:
@@ -96,6 +96,18 @@ data:
               username: "{{HOMEPAGE_VAR_UNIFI_USER}}"
               password: "{{HOMEPAGE_VAR_UNIFI_PASS}}"
               fields: ["wlan_users", "lan_devices", "wan"]
+        - Tailscale:
+            icon: tailscale.png
+            href: https://login.tailscale.com/admin/machines
+            description: VPN & Exit Node
+            widget:
+              type: tailscale
+              deviceid: "{{HOMEPAGE_VAR_TAILSCALE_DEVICE_ID}}"
+              key: "{{HOMEPAGE_VAR_TAILSCALE_API_KEY}}"
+        - Pi-hole Secondary:
+            icon: pi-hole.png
+            href: http://192.168.1.56/admin
+            description: DNS Failover (pi5-worker-1)
 
     - Media & Storage:
         - Synology NAS:
@@ -164,6 +176,13 @@ data:
         - Flux CD:
             - icon: flux-cd.png
               href: https://fluxcd.io/docs/
+    - Network:
+        - Tailscale Admin:
+            - icon: tailscale.png
+              href: https://login.tailscale.com/admin
+        - Tailscale ACLs:
+            - icon: tailscale.png
+              href: https://login.tailscale.com/admin/acls
 
   docker.yaml: |
     # Docker integration disabled - using Kubernetes

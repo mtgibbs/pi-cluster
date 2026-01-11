@@ -60,6 +60,9 @@ spec:
             - secretRef:
                 name: homepage-unifi
                 optional: true
+            - secretRef:
+                name: homepage-tailscale
+                optional: true
           ports:
             - containerPort: 3000
               name: http

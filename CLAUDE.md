@@ -31,9 +31,35 @@ As a security-conscious assistant working on this infrastructure project:
    ```
 
 **When adding new services that need secrets:**
-1. Tell the user what 1Password item/fields to create
+1. **Proactively create the 1Password item** using the CLI (see below) - this prevents typos and makes it easier for the user to find
 2. Create the ExternalSecret manifest referencing those fields
 3. Reference the resulting K8s secret in deployments
+4. Tell the user to fill in the values in 1Password
+
+**Creating 1Password Items via CLI:**
+When a new secret is needed, create a blank "Password" type item in 1Password with the correct structure. The user will then fill in the actual values. This ensures field names match exactly what the ExternalSecret expects.
+
+```bash
+# Create a new item with fields (values left blank for user to fill)
+op item create \
+  --vault "pi-cluster" \
+  --category "Password" \
+  --title "service-name" \
+  --field "label=api-key,type=concealed" \
+  --field "label=password,type=concealed"
+
+# Example for Tailscale:
+op item create \
+  --vault "pi-cluster" \
+  --category "Password" \
+  --title "tailscale" \
+  --field "label=oauth-client-id,type=concealed" \
+  --field "label=oauth-client-secret,type=concealed" \
+  --field "label=api-key,type=concealed" \
+  --field "label=device-id,type=text"
+```
+
+After creating the item, tell the user: "I've created a `service-name` item in 1Password with the required fields. Please fill in the values."
 
 ## Current State
 
@@ -77,6 +103,8 @@ As a security-conscious assistant working on this infrastructure project:
 16. **Multi-node cluster** - 3x Pi 5 + 1x Pi 3 (4 nodes total) for workload distribution
 17. **Flux Image Automation** - Auto-deploy personal website from GHCR
 18. **mtgibbs.xyz Personal Site** - Next.js website with auto-deploy on git push
+19. **Pi-hole HA** - Redundant DNS with two Pi-hole instances on separate Pi 5 nodes
+20. **Tailscale VPN** - Mobile ad blocking via exit node, remote access without open ports
 
 ### Checklist
 - [x] Unbound deployment (recursive DNS resolver)
@@ -97,6 +125,7 @@ As a security-conscious assistant working on this infrastructure project:
 - [x] Discord deployment notifications
 - [x] Multi-node cluster (Pi 5 master + 2x Pi 5 workers + 1x Pi 3 worker)
 - [x] Workload distribution across nodes
+- [x] Tailscale VPN with exit node for mobile ad blocking
 
 ### Service URLs
 All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
@@ -280,6 +309,15 @@ pi-cluster/
         │   ├── namespace.yaml
         │   ├── unifi.yaml                 # Unifi Controller (192.168.1.30:8443, HTTPS backend)
         │   └── synology.yaml              # Synology NAS (192.168.1.60:5000)
+        ├── tailscale/
+        │   ├── kustomization.yaml
+        │   ├── namespace.yaml             # tailscale namespace
+        │   ├── external-secret.yaml       # OAuth credentials from 1Password
+        │   └── helmrelease.yaml           # Tailscale Operator HelmRelease (v1.92.5)
+        ├── tailscale-config/
+        │   ├── kustomization.yaml
+        │   ├── proxyclass.yaml            # ProxyClass for exit node pods (arm64 nodeSelector)
+        │   └── connector.yaml             # Connector CRD for exit node
         └── mtgibbs-site/
             ├── kustomization.yaml
             ├── namespace.yaml
@@ -309,6 +347,8 @@ Kustomizations are applied in order via `dependsOn`:
 13. immich                  → Photo management (needs ESO, ingress, certs)
 14. jellyfin                → Media server (needs ingress, certs)
 15. mtgibbs-site            → Personal website (needs ingress, certs)
+16. tailscale               → Tailscale Operator (needs ESO for OAuth credentials)
+17. tailscale-config        → Connector + ProxyClass CRDs (needs tailscale operator running)
 ```
 
 ## Key Technical Details
@@ -372,6 +412,7 @@ resources:
 | `flux-github-pat` | `token` | Fine-grained GitHub PAT for Flux image automation (write access) |
 | `mtgibbs-spotify` | `client`, `client-secret`, `refresh-token` | Spotify integration for mtgibbs.xyz |
 | `mtgibbs-github` | `token` | GitHub PAT for mtgibbs.xyz Project Deck (read-only, repo contents) |
+| `tailscale` | `oauth-client-id`, `oauth-client-secret` | Tailscale Kubernetes Operator OAuth credentials |
 
 ### Pi-hole Config
 - Uses `hostNetwork: true` for port 53 access
@@ -712,6 +753,136 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   3. ExternalSecret syncs webhook URL to Kubernetes secret
   4. Flux Provider references secret for webhook URL
 
+### Tailscale VPN
+- **Namespace**: `tailscale`
+- **Version**: Operator v1.92.5
+- **Purpose**: Mobile ad blocking via Pi-hole exit node, remote access without opening router ports
+
+#### Architecture
+```
+Phone (Tailscale App)
+    │
+    │ NAT traversal (no open ports)
+    ▼
+Pi K3s Cluster
+    │
+    ├─► Tailscale Operator (manages Connectors, ProxyClasses)
+    │
+    └─► Connector Pod (exit node on Pi 5)
+              │
+              ▼
+         Pi-hole (192.168.1.55:53) → Unbound → Internet
+```
+
+#### Mode Switching
+| Mode | Exit Node | What Happens |
+|------|-----------|--------------|
+| Split Tunnel | OFF | Only DNS queries to Pi-hole (ad blocking) |
+| Full Tunnel | ON | All traffic routes through home network (privacy + ads) |
+
+#### Components
+- **HelmRelease**: Installs Tailscale Kubernetes Operator from `pkgs.tailscale.com/helmcharts`
+- **ExternalSecret**: Syncs OAuth credentials from 1Password
+- **ProxyClass**: Defines pod settings for exit node (arm64 nodeSelector for Pi 5)
+- **Connector**: Creates the exit node with hostname `pi-cluster-exit`
+
+#### OAuth Client Configuration
+The Tailscale Operator requires OAuth credentials with minimal permissions. **Critical**: Only include necessary scopes/tags - extra scopes cause "requested tags are invalid" errors.
+
+**Minimum OAuth Client Settings**:
+- **Devices Core**: Read + Write, Tags: `tag:k8s-operator` only
+- **Auth Keys**: Read + Write, Tags: `tag:k8s-operator` only
+- **No other scopes** (Services, Routes, etc. are not needed)
+
+**Common OAuth Errors**:
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `requested tags [tag:X] are invalid or not permitted` | OAuth client has extra scopes or tags | Create new OAuth client with ONLY Devices Core + Auth Keys, ONLY `tag:k8s-operator` |
+| Exit node not visible in app | Missing `autogroup:internet` grant in ACL | Add grant to ACL policy |
+
+#### Required Tailscale ACL Policy
+```json
+{
+    "tagOwners": {
+        "tag:k8s-operator": ["autogroup:admin", "autogroup:member"]
+    },
+    "autoApprovers": {
+        "exitNode": ["tag:k8s-operator"],
+        "routes": {
+            "192.168.1.0/24": ["tag:k8s-operator"]
+        }
+    },
+    "grants": [
+        {"src": ["autogroup:member"], "dst": ["autogroup:member"], "ip": ["*"]},
+        {"src": ["tag:k8s-operator"], "dst": ["autogroup:member"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["tag:k8s-operator"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["autogroup:internet"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]}
+    ],
+    "ssh": [
+        {"action": "check", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"]}
+    ]
+}
+```
+
+**Critical Requirements**:
+1. **Exit node grant**: `autogroup:internet` allows devices to route traffic through the exit node
+2. **Subnet route grant**: `192.168.1.0/24` grant allows access to advertised subnet routes (Pi-hole IPs)
+3. **Auto-approvers for routes**: Auto-approves subnet routes advertised by `tag:k8s-operator`
+
+**Why Both Are Needed**:
+- Exit node provides NAT traversal and tunnel connectivity
+- Subnet routes advertise specific IPs (192.168.1.55, 192.168.1.56) to the Tailscale network
+- Grants allow clients to access those advertised routes
+- Without subnet route grant, DNS queries to Pi-hole IPs fail (even with tunnel connected)
+
+#### Tailscale Admin DNS Settings
+For ad blocking via Pi-hole:
+1. **Add Nameservers**: `192.168.1.55` and `192.168.1.56` (Pi-hole IPs)
+2. **Enable "Use with exit node"**: DNS applies when exit node is active
+3. **Enable "Override local DNS"**: Forces all DNS through Pi-hole
+4. **Approve Subnet Routes**: Admin console → Machines → pi-cluster-exit → Edit route settings → Approve both routes:
+   - `192.168.1.55/32` (Pi-hole primary)
+   - `192.168.1.56/32` (Pi-hole secondary)
+
+**Critical**: Both subnet routes AND the grant in ACL policy must be configured. Approving routes in admin console is not enough - the ACL grant allows clients to use those routes.
+
+#### Setup Steps
+1. Create Tailscale account (any SSO provider)
+2. Configure ACL tags in admin console (see policy above)
+3. Create OAuth client with minimal scopes (Devices Core + Auth Keys, `tag:k8s-operator` only)
+4. Store credentials in 1Password (`tailscale` item, `oauth-client-id` and `oauth-client-secret` fields)
+5. Deploy via Flux (tailscale → tailscale-config dependency order)
+6. Verify in Tailscale admin: exit node shows as "pi-cluster-exit"
+7. Configure DNS: add Pi-hole as nameserver, enable "Override local DNS"
+8. On phone: install Tailscale app, connect, select exit node for full tunnel
+
+#### Verification Commands
+```bash
+# Check operator running
+kubectl get pods -n tailscale
+
+# Check connector status
+kubectl get connector pi-cluster-exit -n tailscale
+
+# Check exit node pod
+kubectl get pods -n tailscale -l app=ts-pi-cluster-exit
+
+# View operator logs for OAuth issues
+kubectl logs -n tailscale deploy/operator
+```
+
+#### Troubleshooting
+| Issue | Diagnostic | Solution |
+|-------|-----------|----------|
+| Operator pod CrashLoopBackOff | Check logs for OAuth errors | Recreate OAuth client with minimal scopes |
+| Connector not creating pod | `kubectl describe connector` | Check tags match OAuth client |
+| Exit node not in app | Check ACL grants | Add `autogroup:internet` grant |
+| DNS not resolving | Check ACL grants and route approval | Add `192.168.1.0/24` grant to ACL, approve subnet routes in admin console |
+| DNS not blocking ads | Check "Override local DNS" and "Use with exit node" | Enable both in Tailscale admin DNS settings |
+| Exit node shows offline | Check pod logs | Verify OAuth client not revoked |
+| Routes not showing in admin | Check Connector advertiseRoutes | Ensure `subnetRouter.advertiseRoutes` includes Pi-hole IPs |
+
 ### External Service Reverse Proxies
 - **Namespace**: `external-services`
 - **Purpose**: Provide unified TLS-enabled access to home infrastructure devices
@@ -779,7 +950,6 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 ## Future Additions (Backlog)
 
 ### Planned (Ready to Implement)
-- **Tailscale VPN** - Mobile ad blocking via Pi-hole, remote access without open ports
 - **Pi-hole HA** - Two Pi-holes on Pi 5 nodes, GitOps config, router DHCP failover
 - **Cloudflare Tunnels + Loki** - Log aggregation from Heroku, outbound-only tunnel
 - **Windows Remote Access** - RDP/SSH via Tailscale to home workstation
