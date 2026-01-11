@@ -9,6 +9,12 @@ spec:
   hostname: pi-cluster-exit
   # Enable as exit node for full tunnel mode
   exitNode: true
+  # Advertise Pi-hole IPs as subnet routes for DNS
+  # This ensures DNS queries to these IPs route through the tunnel
+  subnetRouter:
+    advertiseRoutes:
+      - 192.168.1.55/32   # Pi-hole primary (pi-k3s)
+      - 192.168.1.56/32   # Pi-hole secondary (pi5-worker-1)
   # Tag for ACL rules and auto-approval
   tags:
     - tag:k8s-operator
