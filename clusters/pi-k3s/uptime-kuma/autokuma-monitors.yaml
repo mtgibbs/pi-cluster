@@ -160,3 +160,44 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  # Status page for Homepage widget - uses __page_ prefix
+  __page_home.json: |
+    {
+      "type": "status-page",
+      "title": "Home Lab Status",
+      "slug": "home",
+      "description": "Pi K3s Cluster Services",
+      "showPoweredBy": false,
+      "publicGroupList": [
+        {
+          "name": "DNS",
+          "weight": 1,
+          "monitorList": ["pihole-dns", "pihole-admin", "unbound-dns"]
+        },
+        {
+          "name": "Infrastructure",
+          "weight": 2,
+          "monitorList": ["k3s-api", "homepage", "uptime-kuma"]
+        },
+        {
+          "name": "Monitoring",
+          "weight": 3,
+          "monitorList": ["grafana", "prometheus"]
+        },
+        {
+          "name": "Network",
+          "weight": 4,
+          "monitorList": ["unifi", "tailscale-exit-node"]
+        },
+        {
+          "name": "Media",
+          "weight": 5,
+          "monitorList": ["jellyfin", "immich", "synology"]
+        },
+        {
+          "name": "Web",
+          "weight": 6,
+          "monitorList": ["personal-site-cluster", "personal-site-heroku"]
+        }
+      ]
+    }
