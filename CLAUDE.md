@@ -39,6 +39,14 @@ As a security-conscious assistant working on this infrastructure project:
 **Creating 1Password Items via CLI:**
 When a new secret is needed, create a blank "Password" type item in 1Password with the correct structure. The user will then fill in the actual values. This ensures field names match exactly what the ExternalSecret expects.
 
+**CRITICAL 1Password Safety Rules:**
+- **ONLY operate on the `pi-cluster` vault** - All other vaults are OFF LIMITS, never read, modify, or reference items in any other vault
+- **NEVER delete 1Password items** - Items may contain values the user has set
+- **NEVER overwrite existing field values** - Use `op item edit` only to ADD new fields, never to modify existing ones
+- **NEVER use `op item delete`** - If an item needs to be removed, ask the user to do it manually
+- **Always check if item exists first** - Use `op item get "item-name" --vault "pi-cluster"` before creating
+- **Only create new items or add new fields to existing items** - Let the user manage the actual secret values
+
 ```bash
 # Create a new item with fields (values left blank for user to fill)
 op item create \
