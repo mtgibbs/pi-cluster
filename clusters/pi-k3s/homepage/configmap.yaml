@@ -11,79 +11,71 @@ data:
     color: slate
     headerStyle: clean
     layout:
-      Infrastructure:
+      DNS:
         style: row
         columns: 3
+      Cluster:
+        style: row
+        columns: 4
+      Network:
+        style: row
+        columns: 2
       Monitoring:
+        style: row
+        columns: 3
+      Media:
         style: row
         columns: 3
       Web:
         style: row
         columns: 3
-      Network:
-        style: row
-        columns: 3
-      Media & Storage:
-        style: row
-        columns: 2
 
   services.yaml: |
-    - Infrastructure:
-        - Pi-hole:
+    - DNS:
+        - Pi-hole (pi-k3s):
             icon: pi-hole.png
             href: https://pihole.lab.mtgibbs.dev
-            description: DNS & Ad Blocking
+            description: Ad Blocking & DNS
             widget:
               type: pihole
               url: http://pihole-web.pihole.svc.cluster.local
               version: 6
               key: "{{HOMEPAGE_VAR_PIHOLE_API_KEY}}"
               fields: ["queries", "blocked", "blocked_percent", "gravity"]
+        - Pi-hole (pi5-worker-1):
+            icon: pi-hole.png
+            href: http://192.168.1.56/admin
+            description: Ad Blocking & DNS
+            widget:
+              type: pihole
+              url: http://192.168.1.56
+              version: 6
+              key: "{{HOMEPAGE_VAR_PIHOLE_SECONDARY_API_KEY}}"
+              fields: ["queries", "blocked", "blocked_percent", "gravity"]
         - Unbound:
             icon: mdi-dns
             description: Recursive DNS Resolver
-        - K3s Cluster:
-            icon: kubernetes.png
-            description: 4-Node ARM64 Cluster
 
-    - Monitoring:
-        - Grafana:
-            icon: grafana.png
-            href: https://grafana.lab.mtgibbs.dev
-            description: Dashboards & Visualization
-            siteMonitor: https://grafana.lab.mtgibbs.dev
-        - Uptime Kuma:
-            icon: uptime-kuma.png
-            href: https://status.lab.mtgibbs.dev
-            description: Status Page
+    - Cluster:
+        - pi-k3s:
+            icon: raspberry-pi.png
+            description: Master Node (Pi 5)
             widget:
-              type: uptimekuma
-              url: http://uptime-kuma.uptime-kuma.svc.cluster.local:3001
-              slug: home
-        - Prometheus:
-            icon: prometheus.png
-            href: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
-            description: Metrics Collection
-            widget:
-              type: prometheus
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
-              fields: ["targets_up", "targets_down", "targets_total"]
-
-    - Web:
-        - Personal Site (Cluster):
-            icon: mdi-web
-            href: https://site.lab.mtgibbs.dev
-            description: Next.js on Pi K3s
-            siteMonitor: https://site.lab.mtgibbs.dev
-        - Personal Site (Heroku):
-            icon: mdi-cloud
-            href: https://mtgibbs.xyz
-            description: Production on Heroku
-            siteMonitor: https://mtgibbs.xyz
-        - Cloudflare:
-            icon: cloudflare.png
-            href: https://dash.cloudflare.com
-            description: DNS & CDN for mtgibbs.dev
+              type: customapi
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=node_uname_info{nodename="pi-k3s"}
+              mappings:
+                - field: status
+                  label: Status
+                  format: text
+        - pi5-worker-1:
+            icon: raspberry-pi.png
+            description: Worker Node (Pi 5)
+        - pi5-worker-2:
+            icon: raspberry-pi.png
+            description: Worker Node (Pi 5)
+        - pi3-worker-2:
+            icon: raspberry-pi.png
+            description: Worker Node (Pi 3)
 
     - Network:
         - Unifi Controller:
@@ -99,26 +91,39 @@ data:
         - Tailscale:
             icon: tailscale.png
             href: https://login.tailscale.com/admin/machines
-            description: VPN & Exit Node
+            description: VPN & Remote Access
             widget:
               type: tailscale
               deviceid: "{{HOMEPAGE_VAR_TAILSCALE_DEVICE_ID}}"
               key: "{{HOMEPAGE_VAR_TAILSCALE_API_KEY}}"
-        - Pi-hole Secondary:
-            icon: pi-hole.png
-            href: http://192.168.1.56/admin
-            description: DNS Failover (pi5-worker-1)
 
-    - Media & Storage:
-        - Synology NAS:
-            icon: synology.png
-            href: https://nas.lab.mtgibbs.dev
-            description: 3TB Redundant Storage
-            siteMonitor: https://nas.lab.mtgibbs.dev
+    - Monitoring:
+        - Grafana:
+            icon: grafana.png
+            href: https://grafana.lab.mtgibbs.dev
+            description: Dashboards & Metrics
+            siteMonitor: https://grafana.lab.mtgibbs.dev
+        - Uptime Kuma:
+            icon: uptime-kuma.png
+            href: https://status.lab.mtgibbs.dev
+            description: Status Page
+            widget:
+              type: uptimekuma
+              url: http://uptime-kuma.uptime-kuma.svc.cluster.local:3001
+              slug: home
+        - Prometheus:
+            icon: prometheus.png
+            description: Metrics Collection
+            widget:
+              type: prometheus
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
+              fields: ["targets_up", "targets_down", "targets_total"]
+
+    - Media:
         - Jellyfin:
             icon: jellyfin.png
             href: https://jellyfin.lab.mtgibbs.dev
-            description: Media Server
+            description: Movies & TV
             widget:
               type: jellyfin
               url: http://jellyfin.jellyfin.svc.cluster.local:8096
@@ -128,13 +133,34 @@ data:
         - Immich:
             icon: immich.png
             href: https://immich.lab.mtgibbs.dev
-            description: Photo & Video Backup
+            description: Photos & Videos
             widget:
               type: immich
               url: http://immich-server.immich.svc.cluster.local:2283
               key: "{{HOMEPAGE_VAR_IMMICH_API_KEY}}"
               version: 2
               fields: ["photos", "videos", "storage"]
+        - Synology NAS:
+            icon: synology.png
+            href: https://nas.lab.mtgibbs.dev
+            description: Storage
+            siteMonitor: https://nas.lab.mtgibbs.dev
+
+    - Web:
+        - Personal Site (Cluster):
+            icon: mdi-web
+            href: https://site.lab.mtgibbs.dev
+            description: Next.js on K3s
+            siteMonitor: https://site.lab.mtgibbs.dev
+        - Personal Site (Heroku):
+            icon: mdi-cloud
+            href: https://mtgibbs.xyz
+            description: Production
+            siteMonitor: https://mtgibbs.xyz
+        - Cloudflare:
+            icon: cloudflare.png
+            href: https://dash.cloudflare.com
+            description: DNS & CDN
 
   widgets.yaml: |
     - search:

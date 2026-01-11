@@ -52,6 +52,9 @@ spec:
                 name: homepage-pihole
                 optional: true
             - secretRef:
+                name: homepage-pihole-secondary
+                optional: true
+            - secretRef:
                 name: homepage-jellyfin
                 optional: true
             - secretRef:
