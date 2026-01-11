@@ -149,3 +149,14 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  tailscale-exit-node.json: |
+    {
+      "type": "dns",
+      "name": "Tailscale Exit Node",
+      "hostname": "ts-pi-cluster-exit-j2trp-0.ts-pi-cluster-exit-j2trp.tailscale.svc.cluster.local",
+      "dns_resolve_server": "10.43.0.10",
+      "dns_resolve_type": "A",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
