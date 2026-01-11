@@ -47,18 +47,21 @@ As a security-conscious assistant working on this infrastructure project:
 - User: `mtgibbs`
 
 **Worker Nodes:**
-- Raspberry Pi 3 (1GB RAM) - `pi3-worker-1` (192.168.1.53)
+- Raspberry Pi 5 (8GB RAM) - `pi5-worker-1` (192.168.1.56)
+- Raspberry Pi 5 (8GB RAM) - `pi5-worker-2` (192.168.1.57)
 - Raspberry Pi 3 (1GB RAM) - `pi3-worker-2` (192.168.1.51)
-- Both running Raspberry Pi OS Lite (64-bit)
+- All running Raspberry Pi OS Lite (64-bit)
 - SSH keys and K3s node token stored in 1Password
 - Setup documented in `docs/pi-worker-setup.md`
-- **Limitations**: Pi 3 hardware (ARM Cortex-A53, 1GB RAM) unsuitable for DNS resolvers, databases, or resource-intensive services
-- **Best for**: Lightweight stateless apps (Homepage, simple web services)
+
+**Node Capabilities:**
+- **Pi 5 nodes (3x)**: Full workloads - DNS, databases, media servers, resource-intensive services
+- **Pi 3 node (1x)**: Lightweight stateless apps only (Homepage, simple web services) - 1GB RAM limitation
 
 ### Completed Setup
 1. **cgroups enabled** - Added `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt`
 2. **Swap disabled** - Masked `systemd-zram-setup@zram0.service`
-3. **k3s installed** - Version v1.33.6+k3s1, installed with `--disable=traefik`
+3. **k3s installed** - Version v1.34.3+k3s1, installed with `--disable=traefik`
 4. **Flux GitOps** - Bootstrapped to GitHub repo, manages all workloads
 5. **External Secrets Operator** - v1.2.0, syncs secrets from 1Password
 6. **Pi-hole + Unbound** - Deployed via Flux with GitOps-managed secrets
@@ -71,7 +74,7 @@ As a security-conscious assistant working on this infrastructure project:
 13. **Jellyfin** - Self-hosted media server with NFS storage from Synology NAS
 14. **Immich** - Self-hosted photo backup and management (upgraded to v2.4.1)
 15. **Discord Notifications** - Flux deployment notifications via Discord webhook
-16. **Multi-node cluster** - Two Pi 3 worker nodes for workload distribution
+16. **Multi-node cluster** - 3x Pi 5 + 1x Pi 3 (4 nodes total) for workload distribution
 17. **Flux Image Automation** - Auto-deploy personal website from GHCR
 18. **mtgibbs.xyz Personal Site** - Next.js website with auto-deploy on git push
 
@@ -92,7 +95,7 @@ As a security-conscious assistant working on this infrastructure project:
 - [x] Jellyfin media server with NFS storage
 - [x] Immich photo backup (upgraded to v2.4.1)
 - [x] Discord deployment notifications
-- [x] Multi-node cluster (Pi 5 master + 2x Pi 3 workers)
+- [x] Multi-node cluster (Pi 5 master + 2x Pi 5 workers + 1x Pi 3 worker)
 - [x] Workload distribution across nodes
 
 ### Service URLs
@@ -123,17 +126,26 @@ All services use subdomain-based routing via `*.lab.mtgibbs.dev`:
                                ┌─────────────────────────────────────┘
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        K3s Cluster (3 nodes)                                │
+│                        K3s Cluster (4 nodes)                                │
 │                                                                             │
 │  ┌────────────────┐   ┌─────────────────┐   ┌─────────────────┐            │
-│  │  pi-k3s (Pi 5) │   │ pi3-worker-1    │   │ pi3-worker-2    │            │
-│  │  192.168.1.55  │   │ 192.168.1.53    │   │ 192.168.1.51    │            │
-│  │  (master+work) │   │ (worker, 1GB)   │   │ (worker, 1GB)   │            │
+│  │  pi-k3s (Pi 5) │   │ pi5-worker-1    │   │ pi5-worker-2    │            │
+│  │  192.168.1.55  │   │ 192.168.1.56    │   │ 192.168.1.57    │            │
+│  │  (master, 8GB) │   │ (worker, 8GB)   │   │ (worker, 8GB)   │            │
 │  │                │   │                 │   │                 │            │
-│  │ • Pi-hole      │   │ • Unbound       │   │ • Homepage      │            │
+│  │ • Pi-hole      │   │ • Workloads     │   │ • Workloads     │            │
 │  │ • Flux         │   │                 │   │                 │            │
 │  │ • Backups      │   │                 │   │                 │            │
 │  └────────────────┘   └─────────────────┘   └─────────────────┘            │
+│                                                                             │
+│  ┌────────────────┐                                                        │
+│  │ pi3-worker-2   │                                                        │
+│  │ 192.168.1.51   │                                                        │
+│  │ (worker, 1GB)  │                                                        │
+│  │                │                                                        │
+│  │ • Homepage     │                                                        │
+│  │ • Lightweight  │                                                        │
+│  └────────────────┘                                                        │
 │                                                                             │
 │  ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐   │
 │  │ External Secrets│────│ 1Password Cloud  │    │ ClusterSecretStore  │   │
@@ -382,7 +394,7 @@ See `docs/pihole-v6-api.md` for full API reference.
 - Port 5335 (non-privileged)
 - Full recursive resolution
 - DNSSEC validation enabled
-- **Node placement**: pi-k3s (Pi 5) via nodeSelector
+- **Node placement**: Pi 5 nodes only via nodeSelector
   - **Why**: Pi 3 hardware insufficient for reliable DNS operations (TCP connection failures observed)
   - **Performance**: 21ms uncached queries, 0-15ms cached (vs 500-10,000ms on Pi 3)
 
@@ -629,7 +641,7 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
   - Media: Jellyfin (with library stats), Immich (with photo/video counts)
   - Network: Unifi Controller (with WiFi/LAN device counts)
   - Storage: Synology NAS
-  - **Kubernetes widget**: Real-time node metrics (CPU, memory, uptime for all 3 nodes)
+  - **Kubernetes widget**: Real-time node metrics (CPU, memory, uptime for all 4 nodes)
   - **Weather widget**: Johns Creek, GA (34.0289, -84.1986)
   - System resources widget (CPU, RAM, disk)
   - Bookmarks to GitHub repo and Flux docs
@@ -766,13 +778,21 @@ kube-prometheus-stack is fully managed via Flux GitOps with ExternalSecret for G
 
 ## Future Additions (Backlog)
 
-- **Pi-hole HA** - Implement failover/redundancy for DNS service
+### Planned (Ready to Implement)
+- **Tailscale VPN** - Mobile ad blocking via Pi-hole, remote access without open ports
+- **Pi-hole HA** - Two Pi-holes on Pi 5 nodes, GitOps config, router DHCP failover
+- **Cloudflare Tunnels + Loki** - Log aggregation from Heroku, outbound-only tunnel
+- **Windows Remote Access** - RDP/SSH via Tailscale to home workstation
+
+### Future Considerations
+- **Headscale** - Self-hosted Tailscale control plane (when 3-user limit is hit)
 - **Shared NFS storage** - Migrate from local-path to NFS for multi-node PVC access
 - **Resource quotas** - Namespace-level resource limits and policies
 - **Network policies** - Pod-to-pod traffic segmentation and security
 - **Horizontal Pod Autoscaling** - Auto-scale workloads based on CPU/memory metrics
 - **Immich ML optimization** - Resolve ML job retry loop causing high CPU
 - **Pi-hole blocklist cleanup** - Remove dead lists, ensure all lists in GitOps
+- **Cluster logs to Loki** - Ship K8s pod logs via Promtail
 
 ## Claude Code Extensions
 

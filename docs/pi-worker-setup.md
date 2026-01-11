@@ -86,11 +86,14 @@ kubectl get nodes
 
 ## Current Cluster Nodes
 
-| Role | Hostname | IP | Hardware |
-|------|----------|-----|----------|
-| Master | pi-k3s | 192.168.1.55 | Pi 5 (8GB) |
-| Worker | pi3-worker-1 | 192.168.1.53 | Pi 3 (1GB) |
-| Worker | pi3-worker-2 | 192.168.1.51 | Pi 3 (1GB) |
+| Role | Hostname | IP | Hardware | K3s Version |
+|------|----------|-----|----------|-------------|
+| Master | pi-k3s | 192.168.1.55 | Pi 5 (8GB) | v1.34.3+k3s1 |
+| Worker | pi5-worker-1 | 192.168.1.56 | Pi 5 (8GB) | v1.34.3+k3s1 |
+| Worker | pi5-worker-2 | 192.168.1.57 | Pi 5 (8GB) | v1.34.3+k3s1 |
+| Worker | pi3-worker-2 | 192.168.1.51 | Pi 3 (1GB) | v1.34.3+k3s1 |
+
+**Note:** pi3-worker-1 was retired on 2026-01-11 during hardware upgrade.
 
 ## Troubleshooting
 
