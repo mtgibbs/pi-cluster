@@ -122,7 +122,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 8. Tailscale VPN - exit node for mobile ad-blocking
+# 8. Tailscale VPN operator - installs operator and CRDs
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -131,7 +131,6 @@ metadata:
 spec:
   dependsOn:
     - name: external-secrets-config
-    - name: pihole
   interval: 10m
   path: ./clusters/pi-k3s/tailscale
   prune: true
@@ -141,7 +140,26 @@ spec:
   wait: true
   timeout: 5m
 ---
-# 9. Monitoring stack - depends on secrets, ingress, and cert-manager
+# 9. Tailscale config - ProxyClass and Connector (needs CRDs from operator)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tailscale-config
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: tailscale
+    - name: pihole
+  interval: 10m
+  path: ./clusters/pi-k3s/tailscale-config
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 10. Monitoring stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
