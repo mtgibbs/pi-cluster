@@ -144,6 +144,10 @@ spec:
               mountPath: /etc/dnsmasq.d/02-local-dns.conf
               subPath: 02-local-dns.conf
               readOnly: true
+            - name: pihole-ipv6-overrides
+              mountPath: /etc/dnsmasq.d/03-ipv6-overrides.conf
+              subPath: 03-ipv6-overrides.conf
+              readOnly: true
             - name: pihole-config
               mountPath: /etc/pihole-config/adlists.txt
               subPath: adlists.txt
@@ -181,6 +185,9 @@ spec:
           persistentVolumeClaim:
             claimName: pihole-dnsmasq-secondary
         - name: pihole-custom-dns
+          configMap:
+            name: pihole-custom-dns
+        - name: pihole-ipv6-overrides
           configMap:
             name: pihole-custom-dns
         - name: pihole-config

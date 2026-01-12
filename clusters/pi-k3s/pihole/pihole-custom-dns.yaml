@@ -8,3 +8,18 @@ data:
   # All *.lab.mtgibbs.dev resolves to the Pi (ingress controller)
   02-local-dns.conf: |
     address=/lab.mtgibbs.dev/192.168.1.55
+  # Block AAAA (IPv6) for domains with broken/slow IPv6 routing
+  # Returns :: (null IPv6) so clients immediately fall back to IPv4
+  # See: docs/known-issues.md for AT&T IPv6 routing problems
+  03-ipv6-overrides.conf: |
+    # Amazon - returns 503 via IPv6
+    address=/amazon.com/::
+    address=/amazon.co.uk/::
+    address=/amazonaws.com/::
+    address=/cloudfront.net/::
+    # MyFitnessPal - 3x slower via IPv6
+    address=/myfitnesspal.com/::
+    # Netflix - 5x slower via IPv6
+    address=/netflix.com/::
+    address=/nflxvideo.net/::
+    address=/nflxso.net/::
