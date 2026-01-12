@@ -23,3 +23,8 @@ data:
     address=/netflix.com/::
     address=/nflxvideo.net/::
     address=/nflxso.net/::
+    # Slack - connectivity issues via IPv6
+    address=/slack.com/::
+    address=/slack-edge.com/::
+    address=/slack-imgs.com/::
+    address=/slack-files.com/::
