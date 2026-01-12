@@ -35,9 +35,10 @@ Before modifying or troubleshooting, **YOU MUST** check if a specialized skill e
 | **Tailscale** | (Exit Node: `pi-cluster-exit`) | `tailscale` | `tailscale-ops` |
 
 ## Hardware Overview
--   **Master**: `pi-k3s` (Pi 5, 8GB) - Critical workloads (DNS, Backup, Flux)
--   **Workers**: `pi5-worker-1/2` (Pi 5, 8GB) - Heavy workloads
--   **Worker**: `pi3-worker-2` (Pi 3, 1GB) - Lightweight only (Homepage)
+-   **Master**: `pi-k3s` (Pi 5, 8GB, 192.168.1.55) - Critical workloads (DNS primary, Backup, Flux)
+-   **Workers**: `pi5-worker-1` (Pi 5, 8GB, 192.168.1.56) - Heavy workloads + Pi-hole HA
+-   **Workers**: `pi5-worker-2` (Pi 5, 8GB, 192.168.1.57) - Heavy workloads
+-   **Worker**: `pi3-worker-2` (Pi 3, 1GB, 192.168.1.51) - Lightweight only (Homepage)
 
 **Architecture Reference**: See `ARCHITECTURE.md` for diagrams and topology.
 

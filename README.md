@@ -58,10 +58,16 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 - Zero secrets committed to git - ever
 
 ### DNS Architecture
-- **Pi-hole**: Blocks ads, trackers, and malware domains
+- **Pi-hole HA**: Dual Pi-hole instances for redundancy (192.168.1.55 primary, 192.168.1.56 secondary)
 - **Unbound**: Full recursive resolution (no Cloudflare/Google dependency)
 - **DNSSEC**: Validated by Unbound
 - **Firebog curated lists**: 25+ blocklists, ~900k domains
+
+### VPN Remote Access
+- **Tailscale Exit Node**: Secure remote access with WireGuard protocol
+- **Subnet Routes**: Advertises Pi-hole IPs for mobile ad blocking
+- **Zero Port Forwarding**: NAT traversal via Tailscale mesh
+- **Split/Full Tunnel**: DNS-only or all traffic routing modes
 
 ## Hardware
 
@@ -77,26 +83,25 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Role | Master + Worker (control plane + critical workloads) |
 
 ### Worker Nodes
-| Component | Specification |
-|-----------|---------------|
-| Device | 2x Raspberry Pi 3 (pi3-worker-1, pi3-worker-2) |
-| RAM | 1GB each |
-| CPU | ARM Cortex-A53 |
-| IPs | 192.168.1.53, 192.168.1.51 |
-| Role | Worker nodes (distributed workloads) |
+| Node | Device | RAM | CPU | IP | Role |
+|------|--------|-----|-----|-----|------|
+| pi5-worker-1 | Raspberry Pi 5 | 8GB | ARM Cortex-A76 (4 cores) | 192.168.1.56 | Heavy workloads + Pi-hole HA |
+| pi5-worker-2 | Raspberry Pi 5 | 8GB | ARM Cortex-A76 (4 cores) | 192.168.1.57 | Heavy workloads |
+| pi3-worker-2 | Raspberry Pi 3 | 1GB | ARM Cortex-A53 | 192.168.1.51 | Lightweight services only |
 
 ## Stack
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| K3s | v1.33.6+k3s1 | Lightweight Kubernetes |
+| K3s | v1.34.3+k3s1 | Lightweight Kubernetes |
 | Flux | v2.x | GitOps operator |
 | External Secrets Operator | 1.2.0 | Secrets sync from 1Password |
 | nginx-ingress | latest | Ingress controller (hostPort 443) |
 | cert-manager | latest | TLS certificates (Let's Encrypt via Cloudflare) |
 | kube-prometheus-stack | latest | Prometheus + Grafana |
-| Pi-hole | latest | DNS-level ad blocking |
+| Pi-hole | latest (v6) | DNS-level ad blocking (HA with 2 instances) |
 | Unbound | latest | Recursive DNS resolver |
+| Tailscale | v1.92.5 | VPN with exit node for mobile ad blocking |
 | Uptime Kuma | v2.x | Status page for home services |
 | AutoKuma | latest | GitOps-managed monitors for Uptime Kuma |
 | Homepage | latest | Unified dashboard with live service widgets |
@@ -115,6 +120,7 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 | Pi-hole Admin | https://pihole.lab.mtgibbs.dev |
 | Jellyfin (Media) | https://jellyfin.lab.mtgibbs.dev |
 | Immich (Photos) | https://immich.lab.mtgibbs.dev |
+| Personal Website | https://site.lab.mtgibbs.dev |
 | Unifi Controller | https://unifi.lab.mtgibbs.dev |
 | Synology NAS | https://nas.lab.mtgibbs.dev |
 
@@ -125,7 +131,7 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 ```
 ├── README.md                 # You are here
 ├── ARCHITECTURE.md           # Detailed architecture documentation
-├── CLAUDE.md                 # Development context and notes
+├── CLAUDE.md                 # Development context and routing instructions
 ├── clusters/
 │   └── pi-k3s/
 │       ├── flux-system/              # Flux bootstrap and orchestration
@@ -139,11 +145,23 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 │       ├── monitoring/               # kube-prometheus-stack + Grafana
 │       ├── uptime-kuma/              # Status page + AutoKuma monitors
 │       ├── homepage/                 # Homepage dashboard (unified landing page)
+│       ├── tailscale/                # Tailscale operator for VPN
+│       ├── tailscale-config/         # Exit node + subnet routes
+│       ├── jellyfin/                 # Media server with NFS storage
+│       ├── immich/                   # Photo management with NFS storage
+│       ├── mtgibbs-site/             # Personal website with Flux auto-deploy
+│       ├── backup-jobs/              # PVC + PostgreSQL backups
+│       ├── flux-notifications/       # Discord deployment notifications
 │       └── external-services/        # Reverse proxies for external home infrastructure
 ├── docs/
+│   ├── flux-gitops.md                # Flux dependency chain reference
+│   ├── known-issues.md               # Current known issues
 │   ├── external-secrets-1password-sdk.md
 │   └── pihole-v6-api.md
-└── scripts/                  # Helper scripts
+├── scripts/                          # Helper scripts
+└── .claude/
+    ├── agents/                       # Sub-agent prompts (cluster-ops, recap-architect)
+    └── skills/                       # Modular knowledge base (11 expert skills)
 ```
 
 ## Pi Configuration
@@ -369,18 +387,22 @@ kubectl describe externalsecret -n pihole pihole-secret
 - [x] Ingress controller with TLS (nginx-ingress + cert-manager)
 - [x] Uptime Kuma status page with GitOps-managed monitors (AutoKuma)
 - [x] Homepage dashboard - unified landing page with live service widgets
-- [x] Multi-node cluster - 3 nodes (1x Pi 5, 2x Pi 3)
+- [x] Multi-node cluster - 4 nodes (3x Pi 5, 1x Pi 3)
 - [x] Automated backups - PVC snapshots + PostgreSQL dumps to Synology NAS
 - [x] Discord notifications - Flux deployments + Alertmanager alerts
 - [x] Media services - Jellyfin (streaming) + Immich (photos)
 - [x] Comprehensive monitoring - Immich metrics, PrometheusRules, Discord alerts
+- [x] Pi-hole HA - Dual Pi-hole instances for DNS redundancy
+- [x] Tailscale VPN - Exit node with subnet routes for mobile ad blocking
+- [x] Flux Image Automation - Auto-deploy personal website from GHCR
+- [x] Modular knowledge base - 11 specialized skills for AI-assisted operations
 
 ## Future Enhancements
 
-- [ ] High availability for critical services (Pi-hole failover)
-- [ ] Shared storage (migrate from local-path to NFS)
+- [ ] Shared storage (migrate remaining workloads from local-path to NFS)
 - [ ] Resource quotas and network policies
 - [ ] Horizontal Pod Autoscaling (HPA)
+- [ ] Automated ACL policy management for Tailscale (currently manual in admin console)
 
 ## License
 

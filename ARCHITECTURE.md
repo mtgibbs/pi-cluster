@@ -2,38 +2,39 @@
 
 ## Overview
 
-A 3-node Kubernetes learning cluster running on Raspberry Pi hardware, providing network-wide ad blocking via Pi-hole with privacy-focused recursive DNS resolution via Unbound, plus self-hosted media services and comprehensive monitoring.
+A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing high-availability network-wide ad blocking via dual Pi-hole instances with privacy-focused recursive DNS resolution via Unbound. Includes Tailscale VPN for mobile ad blocking, self-hosted media services, and comprehensive monitoring with Discord alerting.
 
 ## Hardware
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                           K3s Cluster (3 nodes)                               │
-├───────────────────────────────────────────────────────────────────────────────┤
-│                                                                               │
-│  ┌──────────────────────────┐  ┌──────────────────────┐  ┌─────────────────┐│
-│  │  pi-k3s (Master+Worker)  │  │  pi3-worker-1        │  │  pi3-worker-2   ││
-│  │  192.168.1.55            │  │  192.168.1.53        │  │  192.168.1.51   ││
-│  ├──────────────────────────┤  ├──────────────────────┤  ├─────────────────┤│
-│  │ Raspberry Pi 5           │  │ Raspberry Pi 3       │  │ Raspberry Pi 3  ││
-│  │ ARM Cortex-A76 (4 cores) │  │ ARM Cortex-A53       │  │ ARM Cortex-A53  ││
-│  │ RAM: 8GB                 │  │ RAM: 1GB             │  │ RAM: 1GB        ││
-│  │ Pi OS Lite 64-bit        │  │ Pi OS Lite 64-bit    │  │ Pi OS Lite 64   ││
-│  │                          │  │                      │  │                 ││
-│  │ Workloads:               │  │ Workloads:           │  │ Workloads:      ││
-│  │ • Pi-hole (hostNetwork)  │  │ • Lightweight apps   │  │ • Homepage      ││
-│  │ • Unbound (nodeSelector) │  │   only               │  │ • Lightweight   ││
-│  │ • Flux controllers       │  │                      │  │   services      ││
-│  │ • Backup jobs            │  │                      │  │                 ││
-│  │ • Immich, Prometheus,    │  │                      │  │                 ││
-│  │   Grafana, Jellyfin      │  │                      │  │                 ││
-│  └──────────────────────────┘  └──────────────────────┘  └─────────────────┘│
-│                                                                               │
-│  K3s Version: v1.33.6+k3s1                                                   │
-│  • Traefik disabled (--disable=traefik)                                      │
-│  • local-path storage provisioner (hostPath on pi-k3s)                       │
-│  • ServiceLB for LoadBalancer services                                       │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                               K3s Cluster (4 nodes)                                     │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                         │
+│  ┌──────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐  ┌───────┐│
+│  │  pi-k3s              │  │  pi5-worker-1       │  │  pi5-worker-2       │  │  pi3- ││
+│  │  (Master+Worker)     │  │  192.168.1.56       │  │  192.168.1.57       │  │  work ││
+│  │  192.168.1.55        │  │                     │  │                     │  │  er-2 ││
+│  ├──────────────────────┤  ├─────────────────────┤  ├─────────────────────┤  │  192. ││
+│  │ Raspberry Pi 5       │  │ Raspberry Pi 5      │  │ Raspberry Pi 5      │  │  168. ││
+│  │ Cortex-A76 (4 cores) │  │ Cortex-A76 (4 core) │  │ Cortex-A76 (4 core) │  │  1.51 ││
+│  │ RAM: 8GB             │  │ RAM: 8GB            │  │ RAM: 8GB            │  │       ││
+│  │ Debian 13 (64-bit)   │  │ Debian 13 (64-bit)  │  │ Debian 13 (64-bit)  │  │  Pi 3 ││
+│  │                      │  │                     │  │                     │  │  1GB  ││
+│  │ Workloads:           │  │ Workloads:          │  │ Workloads:          │  │  RAM  ││
+│  │ • Pi-hole primary    │  │ • Pi-hole HA        │  │ • Heavy workloads   │  │       ││
+│  │ • Unbound            │  │   (secondary)       │  │ • Distributed apps  │  │  Lite ││
+│  │ • Flux controllers   │  │ • Heavy workloads   │  │                     │  │  apps ││
+│  │ • Backup jobs        │  │ • Media services    │  │                     │  │  only ││
+│  │ • Critical infra     │  │ • Tailscale exit    │  │                     │  │       ││
+│  │ • Monitoring stack   │  │                     │  │                     │  │       ││
+│  └──────────────────────┘  └─────────────────────┘  └─────────────────────┘  └───────┘│
+│                                                                                         │
+│  K3s Version: v1.34.3+k3s1                                                             │
+│  • Traefik disabled (--disable=traefik)                                                │
+│  • local-path storage provisioner (hostPath on master)                                 │
+│  • ServiceLB for LoadBalancer services                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## DNS Architecture
@@ -210,8 +211,9 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  AutoKuma (bigboot/autokuma)                                     │  │
 │  │  • GitOps-managed monitors via ConfigMap                         │  │
 │  │  • Syncs monitor definitions to Uptime Kuma API                  │  │
-│  │  • Monitors: Pi-hole DNS, Admin, Grafana, Prometheus, Unbound,  │  │
-│  │    K3s API, Uptime Kuma, Homepage (8 total)                      │  │
+│  │  • Monitors: Pi-hole DNS (primary + HA), Admin, Grafana,        │  │
+│  │    Prometheus, Unbound, K3s API, Uptime Kuma, Homepage,          │  │
+│  │    Tailscale Exit Node DNS (10 total)                            │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -221,8 +223,9 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Homepage (gethomepage/homepage)                                 │  │
 │  │  • Unified dashboard for all cluster services                    │  │
 │  │  • Dark theme with system resource widgets                       │  │
-│  │  • Live service widgets (Pi-hole, Immich, Jellyfin, Prometheus) │  │
-│  │  • Kubernetes widget with node metrics                           │  │
+│  │  • Live service widgets (Pi-hole HA, Immich, Jellyfin, Prom,    │  │
+│  │    Tailscale, Unifi)                                             │  │
+│  │  • Kubernetes widget with node metrics (4-node cluster)          │  │
 │  │  • GitOps-managed configuration via ConfigMap                    │  │
 │  │  • initContainer copies config to writable emptyDir              │  │
 │  │  • RBAC: ServiceAccount with ClusterRole for API access          │  │
@@ -302,6 +305,30 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │    → 192.168.1.30:8443 (HTTPS backend)                          │  │
 │  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
 │  │    → 192.168.1.60:5000 (HTTP backend)                           │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    tailscale namespace                            │  │
+│  │                                                                   │  │
+│  │  Tailscale Operator (HelmRelease v1.92.5)                        │  │
+│  │  • Kubernetes operator for Tailscale resources                   │  │
+│  │  • OAuth authentication (minimal scopes: Devices + Auth Keys)    │  │
+│  │  • Credentials synced from 1Password via ExternalSecret          │  │
+│  │                                                                   │  │
+│  │  Tailscale Connector (Exit Node)                                 │  │
+│  │  • Hostname: pi-cluster-exit                                     │  │
+│  │  • Exit node enabled for full tunnel VPN                         │  │
+│  │  • Subnet routes advertised:                                     │  │
+│  │    - 192.168.1.55/32 (Pi-hole primary)                           │  │
+│  │    - 192.168.1.56/32 (Pi-hole secondary)                         │  │
+│  │  • ProxyClass with arm64 nodeSelector (ensures Pi 5 scheduling)  │  │
+│  │  • Tagged with tag:k8s-operator for ACL policy matching          │  │
+│  │                                                                   │  │
+│  │  Use Cases:                                                       │  │
+│  │  • Split Tunnel: DNS-only for mobile ad blocking                 │  │
+│  │  • Full Tunnel: All traffic for privacy + ad blocking            │  │
+│  │  • Zero port forwarding: NAT traversal via WireGuard             │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -980,23 +1007,27 @@ spec:
 **Current Workload Distribution**:
 
 **Pi 5 (pi-k3s) - Critical Infrastructure**:
-- Pinned: Pi-hole (hostNetwork), Unbound (nodeSelector), Flux controllers, Backup jobs
+- Pinned: Pi-hole primary (hostNetwork), Unbound (nodeSelector), Flux controllers, Backup jobs
 - Heavy: Immich (1.4GB), Prometheus (800Mi), Grafana (695Mi), Jellyfin (466Mi)
 - Memory: 6.3GB / 8GB (79%)
 
-**Pi 3 Workers - Lightweight Services Only**:
+**Pi 5 (pi5-worker-1) - HA and Heavy Workloads**:
+- Pinned: Pi-hole secondary (hostNetwork on 192.168.1.56)
+- Heavy: Tailscale exit node, media services, distributed apps
+- Memory: ~60-70% utilization
+
+**Pi 5 (pi5-worker-2) - Heavy Workloads**:
+- Heavy: Distributed applications, compute-intensive services
+- Memory: ~50-60% utilization
+
+**Pi 3 (pi3-worker-2) - Lightweight Services Only**:
 - Preferred: Homepage (~111Mi), mtgibbs-site (~100Mi)
-- Memory: ~500-600Mi / 1GB (50-60%) per node
+- Memory: ~500-600Mi / 1GB (50-60%)
 
 **Trade-offs**:
-- Pi 3s underutilized by design (can't handle heavy workloads safely)
+- Pi 3 underutilized by design (can't handle heavy workloads safely)
 - Heterogeneous cluster requires careful workload placement
-- But: better than overloading Pi 3s and experiencing failures
-
-**Future Consideration**:
-- Second Pi 5 would enable HA for DNS and better workload distribution
-- Would eliminate Pi 5 memory constraint (16GB total vs current 8GB)
-- Pi 3s could remain lightweight service runners
+- But: Pi 5 workers enable HA for DNS and better workload distribution
 
 ---
 
@@ -1178,8 +1209,81 @@ external-secrets → tailscale (needs OAuth secret) → tailscale-config (needs 
 **Future Considerations**:
 - Headscale (self-hosted control plane) if 3-user limit becomes issue
 - Document ACL policy in git (currently only in Tailscale admin console)
-- Add Uptime Kuma monitor for exit node availability
 - Grafana dashboard for Tailscale metrics (if available)
+
+---
+
+### 30. Pi-hole High Availability with Secondary Instance
+
+**Decision**: Deploy secondary Pi-hole instance on pi5-worker-1 (192.168.1.56)
+
+**Why**:
+- Primary Pi-hole restarts cause brief DNS outages for all clients
+- Router DHCP can advertise multiple DNS servers for failover
+- Mobile devices and clients benefit from redundant DNS resolution
+- Hardware expansion (additional Pi 5 workers) makes HA feasible
+- Learning opportunity for HA DNS architecture
+
+**Problem**:
+- Single Pi-hole on pi-k3s means DNS downtime during:
+  - K3s upgrades
+  - Pi-hole configuration changes
+  - Pod restarts (scheduled or crash)
+  - Node maintenance
+- Clients with secondary public DNS (1.1.1.1) would bypass ad blocking
+
+**How**:
+
+**1. Secondary Pi-hole Deployment**
+- Full Pi-hole deployment on pi5-worker-1
+- hostNetwork: true with different node selector
+- Separate PVCs (pihole-etc, pihole-dnsmasq) on worker node
+- Shared configuration via ConfigMap (same adlists)
+- Same password from 1Password (shared ExternalSecret)
+
+**2. Router DHCP Configuration**
+- Primary DNS: 192.168.1.55 (pi-k3s)
+- Secondary DNS: 192.168.1.56 (pi5-worker-1)
+- Clients try primary first, failover to secondary
+
+**3. Unbound Configuration**
+- Single Unbound instance on pi-k3s (shared by both Pi-holes)
+- Both Pi-hole instances forward to unbound.pihole.svc.cluster.local:5335
+- Unbound has DNS resilience settings (serve-expired, TCP fallback)
+
+**4. Monitoring**
+- Uptime Kuma monitors both Pi-hole instances:
+  - DNS resolution test for each IP
+  - Admin UI health check for each instance
+- Homepage dashboard shows stats from both instances
+
+**Implementation**:
+```
+clusters/pi-k3s/pihole/
+├── pihole-deployment.yaml       # Primary (pi-k3s)
+├── pihole-ha-deployment.yaml    # Secondary (pi5-worker-1)
+├── pihole-ha-pvc.yaml           # Separate PVCs for secondary
+├── pihole-adlists-configmap.yaml # Shared adlists
+└── external-secret.yaml         # Shared password
+```
+
+**Trade-offs**:
+- Doubles resource usage for Pi-hole (~256Mi memory × 2)
+- Two instances to maintain (upgrades, config changes)
+- Not true HA (no shared state, separate PVCs)
+- Clients still experience brief delay during primary failover
+- But: significantly improves DNS availability, no single point of failure
+
+**Failover Behavior**:
+- Primary (192.168.1.55) down → Clients failover to secondary (192.168.1.56) in ~1-5 seconds
+- Both instances have same blocklists and configuration
+- Both instances forward to same Unbound resolver
+- Query logs and statistics are separate (not synchronized)
+
+**Unbound as Shared Backend**:
+- Unbound remains single instance (not HA yet)
+- If Unbound down, both Pi-holes fail (shared dependency)
+- Future enhancement: Unbound HA with multiple resolvers
 
 ## Observability Stack
 
@@ -1519,9 +1623,14 @@ This ensures:
 - [x] **Cluster visibility**: Homepage Kubernetes widget with node metrics
 - [x] **Flux Image Automation**: Auto-deploy personal website on image push to GHCR
 - [x] **Personal website deployment**: mtgibbs.xyz site with auto-deploy workflow
-- [ ] **High availability**: Pi-hole failover/redundancy
-- [ ] **Shared storage**: Migrate from local-path to NFS for multi-node PVC access
+- [x] **Pi-hole high availability**: Secondary Pi-hole on pi5-worker-1 for DNS redundancy
+- [x] **Tailscale VPN**: Exit node with subnet routes for mobile ad blocking
+- [x] **Hardware expansion**: 4-node cluster with 3x Pi 5 and 1x Pi 3
+- [x] **Modular knowledge base**: 11 specialized skills for AI-assisted operations
+- [ ] **Unbound HA**: Secondary Unbound instance for complete DNS redundancy
+- [ ] **Shared storage**: Migrate remaining workloads from local-path to NFS
 - [ ] **Resource quotas**: Namespace-level resource limits
 - [ ] **Network policies**: Pod-to-pod traffic control
 - [ ] **Horizontal Pod Autoscaling**: Auto-scale workloads based on metrics
 - [ ] **Progressive delivery**: Flagger for canary/blue-green deployments
+- [ ] **Tailscale ACL automation**: GitOps-managed ACL policy (currently manual)
