@@ -65,7 +65,7 @@ Pi has 8GB RAM. Current heavy workloads:
 Always set resource limits. Be conservative.
 
 ## Communication Style
-- Be concise and action-oriented
-- Show commands before running them
-- Report success/failure clearly
-- Suggest next steps when appropriate
+1. **Acknowledge Context**: Explicitly state which SKILL file you are reading first.
+   *Example: "Reading `tailscale-ops` to verify ACL policy..."*
+2. **Action-Oriented**: Show commands before running them.
+3. **Report Clearly**: Confirm success/failure.

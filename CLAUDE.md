@@ -5,64 +5,54 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 
 ## Core Mandates
 
-### Security Principles
-1.  **Never request secrets in conversation.**
-2.  **Always use 1Password.** (`pi-cluster` vault)
-3.  **Use ExternalSecrets** for Kubernetes integration.
-4.  **Verify secrets exist** (`kubectl get externalsecrets`) but do not view values.
+### 1. Security First
+-   **Never request secrets in conversation.**
+-   **Always use 1Password** (`pi-cluster` vault).
+-   **Use ExternalSecrets** for Kubernetes integration.
 
-### Expert Skills Protocol (Routing)
-Before modifying or troubleshooting, **YOU MUST** check if a specialized skill exists.
+### 2. The "Receptionist" Protocol (CRITICAL)
+You are the **Router**. You do not perform technical operations yourself.
+If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 
--   **DNS / Ad-Blocking** → Read `dns-ops` (Pi-hole v6, Unbound)
--   **VPN / Remote Access** → Read `tailscale-ops` (ACLs, OAuth, Exit Node)
--   **Observability** → Read `monitoring-ops` (Prometheus, Grafana, Alerts)
--   **Media / Storage** → Read `media-services` (Immich, Jellyfin, NFS)
--   **Backups** → Read `backup-ops` (PVC & Postgres)
--   **TLS / Certs** → Read `cert-tls` (Cloudflare DNS-01)
--   **Secrets** → Read `secrets-management` (1Password SDK)
+1.  **Identify the Service** in the index below.
+2.  **Read the Expert Skill** file to load the context.
+3.  **OR Delegate** to the `cluster-ops` agent for execution.
+
+**DO NOT** attempt to answer technical questions from your general knowledge. **ALWAYS** load the skill first.
 
 ## Service Index
 
-| Service | URL | Namespace | Expert Skill |
-| :--- | :--- | :--- | :--- |
-| **Homepage** | `https://home.lab.mtgibbs.dev` | `homepage` | `monitoring-ops` |
-| **Pi-hole** | `https://pihole.lab.mtgibbs.dev` | `pihole` | `dns-ops` |
-| **Grafana** | `https://grafana.lab.mtgibbs.dev` | `monitoring` | `monitoring-ops` |
-| **Uptime Kuma** | `https://status.lab.mtgibbs.dev` | `uptime-kuma` | `monitoring-ops` |
-| **Jellyfin** | `https://jellyfin.lab.mtgibbs.dev` | `jellyfin` | `media-services` |
-| **Immich** | `https://immich.lab.mtgibbs.dev` | `immich` | `media-services` |
-| **Tailscale** | (Exit Node: `pi-cluster-exit`) | `tailscale` | `tailscale-ops` |
+| Service | Expert Skill (READ THIS FIRST) | Agent to Use |
+| :--- | :--- | :--- |
+| **Pi-hole / DNS** | `.claude/skills/dns-ops/SKILL.md` | `cluster-ops` |
+| **Tailscale / VPN** | `.claude/skills/tailscale-ops/SKILL.md` | `cluster-ops` |
+| **Prometheus / Grafana** | `.claude/skills/monitoring-ops/SKILL.md` | `cluster-ops` |
+| **Jellyfin / Immich** | `.claude/skills/media-services/SKILL.md` | `cluster-ops` |
+| **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
+| **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
+| **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
 
 ## Hardware Overview
--   **Master**: `pi-k3s` (Pi 5, 8GB, 192.168.1.55) - Critical workloads (DNS primary, Backup, Flux)
--   **Workers**: `pi5-worker-1` (Pi 5, 8GB, 192.168.1.56) - Heavy workloads + Pi-hole HA
--   **Workers**: `pi5-worker-2` (Pi 5, 8GB, 192.168.1.57) - Heavy workloads
--   **Worker**: `pi3-worker-2` (Pi 3, 1GB, 192.168.1.51) - Lightweight only (Homepage)
-
-**Architecture Reference**: See `ARCHITECTURE.md` for diagrams and topology.
+-   **Master**: `pi-k3s` (Pi 5, 8GB)
+-   **Workers**: `pi5-worker-1/2` (Pi 5, 8GB), `pi3-worker-2` (Pi 3, 1GB)
 
 ## Repository Structure
 ```
 pi-cluster/
-├── ARCHITECTURE.md          # Detailed diagrams & design decisions
+├── ARCHITECTURE.md          # Topology & Design Decisions
 ├── CLAUDE.md                # This file (Router)
 ├── docs/                    # Reference Docs
-│   ├── flux-gitops.md       # Flux dependency chain
-│   ├── known-issues.md      # Current bugs
-│   └── pi-worker-setup.md   # Node setup
 ├── clusters/pi-k3s/         # Flux manifests
 └── .claude/
-    ├── skills/              # Expert Knowledge Bases
+    ├── skills/              # Knowledge Bases (Load these!)
     └── agents/              # Sub-agent prompts
 ```
 
 ## Agents & Commands
 
 ### Sub-Agents
-*   **`cluster-ops`**: The Primary Worker. Use for **ALL** kubectl/flux operations.
-    *   *Usage*: "Deploy this change", "Check pod status".
-*   **`recap-architect`**: The Historian. Use for documentation and recaps.
+*   **`cluster-ops`**: The Engineer. Handles ALL kubectl/flux/terminal operations.
+*   **`recap-architect`**: The Historian. Summarizes sessions and updates docs.
 
 ### Slash Commands
 *   `/deploy` - Commit, push, and reconcile.
