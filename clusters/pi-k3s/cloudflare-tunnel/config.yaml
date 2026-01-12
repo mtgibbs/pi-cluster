@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflare-tunnel
+data:
+  config.yaml: |
+    # Tunnel ingress rules - GitOps managed
+    # Add new routes here, commit, and Flux will deploy
+    ingress:
+      # Log drain for Heroku
+      - hostname: logs.mtgibbs.dev
+        service: http://vector.log-aggregation.svc.cluster.local:8080
+
+      # Personal site (uncomment when ready to migrate from Heroku)
+      # - hostname: mtgibbs.xyz
+      #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000
+      # - hostname: www.mtgibbs.xyz
+      #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000
+
+      # Catch-all (required - returns 404 for unmatched requests)
+      - service: http_status:404

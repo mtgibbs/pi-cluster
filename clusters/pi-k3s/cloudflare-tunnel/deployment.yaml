@@ -26,21 +26,51 @@ spec:
                     operator: In
                     values:
                       - pi3-worker-2
+      initContainers:
+        # Convert tunnel token to credentials.json format
+        - name: create-credentials
+          image: alpine:latest
+          command:
+            - sh
+            - -c
+            - |
+              # Token is base64-encoded JSON with format: {"a":"account","t":"tunnel-id","s":"secret"}
+              # Credentials file needs: {"AccountTag":"account","TunnelID":"tunnel-id","TunnelSecret":"secret"}
+              apk add --no-cache jq
+              TOKEN=$(cat /secrets/token)
+              echo $TOKEN | base64 -d | jq '{
+                AccountTag: .a,
+                TunnelID: .t,
+                TunnelSecret: .s
+              }' > /credentials/credentials.json
+              echo "Credentials file created for tunnel: $(cat /credentials/credentials.json | jq -r .TunnelID)"
+          volumeMounts:
+            - name: tunnel-secret
+              mountPath: /secrets
+            - name: credentials
+              mountPath: /credentials
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:latest
           args:
             - tunnel
-            - --no-autoupdate
+            - --config
+            - /etc/cloudflared/config.yaml
+            - --credentials-file
+            - /etc/cloudflared/credentials.json
             - --metrics
             - "0.0.0.0:2000"
+            - --no-autoupdate
             - run
-          env:
-            - name: TUNNEL_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: cloudflare-tunnel
-                  key: TUNNEL_TOKEN
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: credentials
+              mountPath: /etc/cloudflared/credentials.json
+              subPath: credentials.json
+              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -60,3 +90,15 @@ spec:
               port: 2000
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: tunnel-secret
+          secret:
+            secretName: cloudflare-tunnel
+            items:
+              - key: TUNNEL_TOKEN
+                path: token
+        - name: config
+          configMap:
+            name: cloudflared-config
+        - name: credentials
+          emptyDir: {}
