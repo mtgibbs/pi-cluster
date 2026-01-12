@@ -15,7 +15,7 @@ spec:
       labels:
         app: vector
     spec:
-      # Schedule on Pi 3 worker (lightweight)
+      # Avoid pi3-worker-2 (limited memory)
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -25,7 +25,8 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
-                      - pi3-worker-2
+                      - pi5-worker-1
+                      - pi5-worker-2
       containers:
         - name: vector
           image: timberio/vector:latest-alpine

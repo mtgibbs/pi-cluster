@@ -15,7 +15,7 @@ spec:
       labels:
         app: cloudflared
     spec:
-      # Schedule on Pi 3 worker (lightweight service)
+      # Prefer Pi 5 workers (pi3-worker-2 has limited memory)
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -25,7 +25,8 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
-                      - pi3-worker-2
+                      - pi5-worker-1
+                      - pi5-worker-2
       initContainers:
         # Convert tunnel token to credentials.json format
         - name: create-credentials
