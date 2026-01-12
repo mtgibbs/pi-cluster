@@ -47,15 +47,13 @@ spec:
               cpu: 200m
               memory: 128Mi
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 8686
+            tcpSocket:
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /health
-              port: 8686
+            tcpSocket:
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
