@@ -28,3 +28,5 @@ data:
     address=/slack-edge.com/::
     address=/slack-imgs.com/::
     address=/slack-files.com/::
+    # HBO Max (legacy domain) - times out via IPv6
+    address=/hbomax.com/::
