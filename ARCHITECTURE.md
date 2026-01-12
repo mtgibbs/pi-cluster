@@ -347,6 +347,46 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • ImageUpdateAutomation updates deployment, commits, pushes     │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                 cloudflare-tunnel namespace                       │  │
+│  │                                                                   │  │
+│  │  Cloudflare Tunnel (cloudflared)                                 │  │
+│  │  • External HTTPS ingress via Cloudflare network                 │  │
+│  │  • Public endpoint: logs.mtgibbs.dev                             │  │
+│  │  • Routes to internal services without port forwarding           │  │
+│  │  • Token authentication from 1Password via ExternalSecret        │  │
+│  │  • Init container converts token to credentials.json             │  │
+│  │  • Node affinity: prefers Pi 5 workers                          │  │
+│  │                                                                   │  │
+│  │  Ingress Routes:                                                  │  │
+│  │  • logs.mtgibbs.dev → vector.log-aggregation:8080 (HTTP)        │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                  log-aggregation namespace                        │  │
+│  │                                                                   │  │
+│  │  Log Aggregation Stack (Heroku Log Drain)                        │  │
+│  │                                                                   │  │
+│  │  Vector (Log Processor)                                          │  │
+│  │  • HTTP endpoint for log ingestion (port 8080)                   │  │
+│  │  • Parses Heroku syslog format with VRL transforms              │  │
+│  │  • Extracts structured data: app, dyno, level                   │  │
+│  │  • Routes to Loki with labels for filtering                     │  │
+│  │  • Node affinity: prefers Pi 5 workers                          │  │
+│  │                                                                   │  │
+│  │  Loki (Log Storage)                                              │  │
+│  │  • Single-binary deployment mode                                │  │
+│  │  • Filesystem storage: 10Gi PVC on pi5-worker-2                 │  │
+│  │  • 7-day retention (168h)                                       │  │
+│  │  • Caching disabled for resource constraints                    │  │
+│  │  • Exposed as Grafana datasource                                │  │
+│  │                                                                   │  │
+│  │  Log Flow:                                                        │  │
+│  │  Heroku App → logs.mtgibbs.dev → Vector → Loki → Grafana       │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1213,6 +1253,127 @@ external-secrets → tailscale (needs OAuth secret) → tailscale-config (needs 
 
 ---
 
+### 31. Cloudflare Tunnel for External Log Ingestion
+
+**Decision**: Deploy Cloudflare Tunnel to enable external Heroku log drains without port forwarding
+
+**Why**:
+- Need to receive logs from external Heroku applications
+- No public IP or port forwarding available/desirable
+- Cloudflare Tunnel provides secure HTTPS ingress without exposing cluster directly
+
+**How**:
+- cloudflared deployment in `cloudflare-tunnel` namespace
+- Token authentication from 1Password via ExternalSecret (`cloudflare-tunnel/tunnel-token`)
+- Init container converts base64 token to credentials.json format
+- ConfigMap defines ingress routes: `logs.mtgibbs.dev` → `vector.log-aggregation:8080`
+- CNAME DNS record points to `.cfargotunnel.com` domain
+
+**Implementation**:
+```yaml
+# Init container pattern
+initContainers:
+  - name: create-credentials
+    image: alpine:latest
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache jq
+        TOKEN=$(cat /secrets/token)
+        echo $TOKEN | base64 -d | jq '{
+          AccountTag: .a,
+          TunnelID: .t,
+          TunnelSecret: .s
+        }' > /credentials/credentials.json
+```
+
+**Trade-offs**:
+- Adds dependency on Cloudflare service availability
+- Tunnel token is long-lived (requires manual rotation)
+- But: zero port forwarding, NAT traversal works anywhere, HTTPS encryption
+
+**Troubleshooting**:
+- DNS must point to `.cfargotunnel.com` (not cluster IP)
+- Health probes use `/ready` endpoint on port 2000 (metrics)
+- Tunnel ID required in run command for GitOps-managed tunnels
+
+---
+
+### 32. Log Aggregation with Loki and Vector
+
+**Decision**: Deploy Loki + Vector stack for Heroku application log aggregation
+
+**Why**:
+- Centralized log visibility for external applications
+- Correlation between application logs and cluster metrics in Grafana
+- Long-term log retention for troubleshooting (7 days)
+- Structured log querying with LogQL
+
+**How**:
+
+**Loki**:
+- Single-binary deployment mode (not microservices)
+- Filesystem storage on local-path PVC (10Gi on pi5-worker-2)
+- 7-day retention, no caching (resource constraints)
+- Exposed as Grafana datasource
+
+**Vector**:
+- HTTP endpoint on port 8080 receives Heroku log drain POSTs
+- VRL (Vector Remap Language) transforms parse syslog format
+- Extracts structured data: app name, dyno type, log level
+- Labels logs for Loki filtering
+- Console sink enabled for debugging
+
+**Implementation**:
+```
+Heroku App
+    │ HTTPS POST
+    ▼
+logs.mtgibbs.dev (Cloudflare Tunnel)
+    │ HTTP (internal)
+    ▼
+Vector (VRL transform)
+    │ Parse & label
+    ▼
+Loki (filesystem storage)
+    │ LogQL queries
+    ▼
+Grafana Dashboard
+```
+
+**VRL Transform Example**:
+```yaml
+transforms:
+  parse_heroku:
+    type: remap
+    source: |
+      .source = "heroku"
+      .level = if contains(string!(.message), "error") { "error" } else { "info" }
+      parsed = parse_regex(.message, r'^(?P<timestamp>...) (?P<app>\S+) (?P<dyno>\S+) - (?P<content>.*)$') ?? {}
+      .app = parsed.app ?? "unknown"
+      .dyno = parsed.dyno ?? "unknown"
+```
+
+**Trade-offs**:
+- Single-binary Loki has no horizontal scaling
+- Filesystem storage limits retention capacity
+- No replication (data loss if node fails)
+- But: minimal resource overhead, sufficient for learning cluster
+
+**Resource Requirements**:
+- cloudflared: 10m CPU / 64Mi memory
+- Vector: 50m CPU / 128Mi memory
+- Loki: 100m CPU / 256Mi memory / 10Gi storage
+- Total: ~160m CPU, ~448Mi memory, 10Gi storage
+
+**Monitoring**:
+- Uptime Kuma monitors: Loki HTTP, Vector TCP, Log Drain endpoint
+- Homepage dashboard shows Loki status
+- Discord alerts on failures
+
+---
+
 ### 30. Pi-hole High Availability with Secondary Instance
 
 **Decision**: Deploy secondary Pi-hole instance on pi5-worker-1 (192.168.1.56)
@@ -1442,12 +1603,26 @@ pi-cluster/
         │   ├── unifi.yaml                # Unifi Controller reverse proxy
         │   ├── synology.yaml             # Synology NAS reverse proxy
         │   └── kustomization.yaml
-        └── mtgibbs-site/
-            ├── namespace.yaml            # mtgibbs-site namespace
-            ├── deployment.yaml           # Next.js app with image automation marker
-            ├── service.yaml              # ClusterIP service
-            ├── ingress.yaml              # site.lab.mtgibbs.dev with TLS
-            ├── image-automation.yaml     # ImageRepository + ImagePolicy + ImageUpdateAutomation
+        ├── mtgibbs-site/
+        │   ├── namespace.yaml            # mtgibbs-site namespace
+        │   ├── deployment.yaml           # Next.js app with image automation marker
+        │   ├── service.yaml              # ClusterIP service
+        │   ├── ingress.yaml              # site.lab.mtgibbs.dev with TLS
+        │   ├── image-automation.yaml     # ImageRepository + ImagePolicy + ImageUpdateAutomation
+        │   └── kustomization.yaml
+        ├── cloudflare-tunnel/
+        │   ├── namespace.yaml            # cloudflare-tunnel namespace
+        │   ├── deployment.yaml           # cloudflared with init container for credentials
+        │   ├── service.yaml              # ClusterIP service for tunnel
+        │   ├── configmap.yaml            # Tunnel config with ingress routes
+        │   ├── external-secret.yaml      # Tunnel token from 1Password
+        │   └── kustomization.yaml
+        └── log-aggregation/
+            ├── namespace.yaml            # log-aggregation namespace
+            ├── loki-helmrelease.yaml     # Loki Helm chart (single-binary mode)
+            ├── vector-deployment.yaml    # Vector log processor
+            ├── vector-configmap.yaml     # Vector pipeline config (VRL transforms)
+            ├── vector-service.yaml       # ClusterIP service for log ingestion
             └── kustomization.yaml
 ```
 
@@ -1541,6 +1716,11 @@ LAN Clients (Dual-Stack)
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
 | Flux ImageRepository | N/A | N/A | Scans GHCR every 5 minutes |
 | Flux ImageUpdateAutomation | N/A | N/A | Git push to main branch |
+| cloudflared (Tunnel) | 2000 | TCP | Metrics endpoint for health probes |
+| Vector (Log Processor) | 8080 | TCP | HTTP log ingestion endpoint |
+| Vector API | 8686 | TCP | ClusterIP (health checks) |
+| Loki | 3100 | TCP | ClusterIP (log storage API) |
+| Log Drain Endpoint | 443 | HTTPS | External (logs.mtgibbs.dev via Cloudflare Tunnel) |
 
 ## Resource Allocations
 
@@ -1627,6 +1807,7 @@ This ensures:
 - [x] **Tailscale VPN**: Exit node with subnet routes for mobile ad blocking
 - [x] **Hardware expansion**: 4-node cluster with 3x Pi 5 and 1x Pi 3
 - [x] **Modular knowledge base**: 11 specialized skills for AI-assisted operations
+- [x] **Log aggregation**: Loki + Vector + Cloudflare Tunnel for Heroku log drains
 - [ ] **Unbound HA**: Secondary Unbound instance for complete DNS redundancy
 - [ ] **Shared storage**: Migrate remaining workloads from local-path to NFS
 - [ ] **Resource quotas**: Namespace-level resource limits
