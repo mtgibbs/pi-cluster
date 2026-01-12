@@ -74,6 +74,12 @@ spec:
     gateway:
       enabled: false
 
+    # Disable caching (reduces memory usage on resource-constrained cluster)
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+
     # Disable monitoring for now (reduces resource usage)
     monitoring:
       selfMonitoring:
