@@ -26,6 +26,9 @@ data:
       Media:
         style: row
         columns: 3
+      Logs:
+        style: row
+        columns: 2
       Web:
         style: row
         columns: 3
@@ -145,6 +148,28 @@ data:
             href: https://nas.lab.mtgibbs.dev
             description: Storage
             siteMonitor: https://nas.lab.mtgibbs.dev
+
+    - Logs:
+        - Loki:
+            icon: mdi-database-search
+            href: https://grafana.lab.mtgibbs.dev/explore?orgId=1&left=%7B%22datasource%22:%22Loki%22%7D
+            description: Log Storage
+            widget:
+              type: customapi
+              url: http://loki.log-aggregation.svc.cluster.local:3100/loki/api/v1/index/stats
+              refreshInterval: 60000
+              mappings:
+                - field: streams
+                  label: Streams
+                  format: number
+                - field: chunks
+                  label: Chunks
+                  format: number
+        - Log Drain:
+            icon: mdi-cloud-download
+            href: https://logs.mtgibbs.dev
+            description: Heroku Logs
+            siteMonitor: https://logs.mtgibbs.dev
 
     - Web:
         - Personal Site (Cluster):

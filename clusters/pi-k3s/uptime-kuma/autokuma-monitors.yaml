@@ -160,3 +160,33 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  loki.json: |
+    {
+      "type": "http",
+      "name": "Loki",
+      "url": "http://loki.log-aggregation.svc.cluster.local:3100/ready",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  log-drain.json: |
+    {
+      "type": "http",
+      "name": "Log Drain (Heroku)",
+      "url": "https://logs.mtgibbs.dev/",
+      "method": "POST",
+      "body": "test",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  vector.json: |
+    {
+      "type": "port",
+      "name": "Vector",
+      "hostname": "vector.log-aggregation.svc.cluster.local",
+      "port": 8080,
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
