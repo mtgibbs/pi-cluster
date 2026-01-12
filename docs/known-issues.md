@@ -17,3 +17,19 @@
 - **Cause**: Synology NFS no_root_squash setting vs application UID expectations
 - **Impact**: Minimal - applications can read/write, but file ownership is incorrect
 - **Resolution**: Deferred - functional workaround exists, proper fix requires Synology NFS reconfiguration
+
+### AT&T IPv6 Routing Problems
+- **Issue**: Certain services are slow or broken when accessed via IPv6
+- **Cause**: AT&T Fiber has poor IPv6 peering/routing to some CDNs
+- **Impact**: Slow page loads, timeouts, 503 errors on affected services
+- **Affected Services**: Amazon, Netflix, MyFitnessPal, Slack (see `pihole-custom-dns.yaml`)
+- **Resolution**: Selective IPv6 blocking via Pi-hole dnsmasq config - returns `::` for affected domains, forcing IPv4 fallback
+- **Testing Protocol**: Before adding new domains, verify IPv6 is the cause:
+  ```bash
+  # Check if domain returns AAAA records
+  dig AAAA <domain>
+
+  # Compare IPv4 vs IPv6 response times
+  curl -4 -w "%{time_total}\n" -o /dev/null -s https://<domain>
+  curl -6 -w "%{time_total}\n" -o /dev/null -s https://<domain>
+  ```

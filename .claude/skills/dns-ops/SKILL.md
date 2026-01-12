@@ -47,6 +47,29 @@ Reference: `docs/pihole-v6-api.md`
 The Pi node uses static DNS (`1.1.1.1`, `8.8.8.8`) configured via NetworkManager.
 *   **Why**: Ensures the Pi can pull images (like Pi-hole itself) even if the cluster DNS is down.
 
+## IPv6 Blocking (AT&T Routing Issues)
+
+AT&T Fiber has poor IPv6 routing to some CDNs. We selectively block IPv6 for affected domains.
+
+**Current blocked domains**: See `clusters/pi-k3s/pihole/pihole-custom-dns.yaml`
+
+### IMPORTANT: Test Before Blocking
+
+When a user reports slow/broken connectivity to a service, **DO NOT** immediately add it to the IPv6 block list. First verify IPv6 is the cause:
+
+```bash
+# 1. Check if domain returns AAAA records (if no AAAA, IPv6 isn't the issue)
+dig AAAA <domain>
+
+# 2. Compare IPv4 vs IPv6 response times from a device on the network
+curl -4 -w "IPv4: %{time_total}s\n" -o /dev/null -s https://<domain>
+curl -6 -w "IPv6: %{time_total}s\n" -o /dev/null -s https://<domain>
+
+# 3. If IPv6 is significantly slower (2x+) or times out, add to block list
+```
+
+Only add to the block list after confirming IPv6 is the problem. See `docs/known-issues.md` for details.
+
 ## Troubleshooting
 
 ### Testing Resolution
