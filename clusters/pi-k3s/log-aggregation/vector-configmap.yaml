@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: log-aggregation
+data:
+  vector.yaml: |
+    # Enable API for health checks
+    api:
+      enabled: true
+      address: "0.0.0.0:8686"
+
+    # Vector configuration for Heroku log drain
+    # Receives logs via HTTP, transforms, and sends to Loki
+
+    sources:
+      # Heroku HTTPS log drain endpoint
+      heroku_logs:
+        type: http_server
+        address: "0.0.0.0:8080"
+        encoding: text
+        # Heroku sends logs as syslog-formatted text
+        headers:
+          - Logplex-Drain-Token
+          - Logplex-Frame-Id
+          - Logplex-Msg-Count
+
+    transforms:
+      # Parse and enrich Heroku logs
+      parse_heroku:
+        type: remap
+        inputs:
+          - heroku_logs
+        source: |
+          # Parse syslog-style Heroku log format
+          # Format: <pri>version timestamp hostname appname procid msgid msg
+
+          # Extract app name from path or headers if available
+          .source = "heroku"
+
+          # Try to determine log level from message content
+          .level = if contains(string!(.message), "error") || contains(string!(.message), "Error") || contains(string!(.message), "ERROR") {
+            "error"
+          } else if contains(string!(.message), "warn") || contains(string!(.message), "Warn") || contains(string!(.message), "WARN") {
+            "warn"
+          } else if contains(string!(.message), "debug") || contains(string!(.message), "Debug") || contains(string!(.message), "DEBUG") {
+            "debug"
+          } else {
+            "info"
+          }
+
+          # Extract app name from Heroku log format if present
+          # Heroku logs often contain: app[dyno.type]: message
+          parsed = parse_regex(.message, r'^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+\+\d{2}:\d{2}) (?P<app>\S+) (?P<dyno>\S+) - (?P<content>.*)$') ?? {}
+
+          if exists(parsed.app) {
+            .app = parsed.app
+            .dyno = parsed.dyno
+            .log_message = parsed.content
+          } else {
+            .app = "unknown"
+            .dyno = "unknown"
+            .log_message = .message
+          }
+
+    sinks:
+      # Send to Loki
+      loki:
+        type: loki
+        inputs:
+          - parse_heroku
+        endpoint: http://loki.log-aggregation.svc.cluster.local:3100
+        encoding:
+          codec: text
+        labels:
+          source: "heroku"
+          app: "{{ app }}"
+          dyno: "{{ dyno }}"
+          level: "{{ level }}"
+
+      # Also log to stdout for debugging (can be removed later)
+      console:
+        type: console
+        inputs:
+          - parse_heroku
+        encoding:
+          codec: json

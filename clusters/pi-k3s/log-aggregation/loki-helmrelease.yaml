@@ -1,0 +1,86 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://grafana.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: log-aggregation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: loki
+      version: "6.x"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    # Single binary mode for small clusters
+    deploymentMode: SingleBinary
+
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: filesystem
+      schemaConfig:
+        configs:
+          - from: "2024-01-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+      # Retention settings
+      limits_config:
+        retention_period: 168h  # 7 days
+
+    # Single binary deployment
+    singleBinary:
+      replicas: 1
+      nodeSelector:
+        kubernetes.io/hostname: pi5-worker-2
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClass: local-path
+
+    # Disable distributed components (not needed for single binary)
+    backend:
+      replicas: 0
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+
+    # Disable gateway (access Loki directly)
+    gateway:
+      enabled: false
+
+    # Disable monitoring for now (reduces resource usage)
+    monitoring:
+      selfMonitoring:
+        enabled: false
+      lokiCanary:
+        enabled: false
+
+    # Disable test pod
+    test:
+      enabled: false

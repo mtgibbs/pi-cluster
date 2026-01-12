@@ -333,3 +333,22 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 16. Log aggregation - Loki + Vector for Heroku log drain
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: log-aggregation
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: cloudflare-tunnel
+    - name: monitoring
+  interval: 10m
+  path: ./clusters/pi-k3s/log-aggregation
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 10m

@@ -57,6 +57,13 @@ spec:
         server:
           domain: "grafana.lab.mtgibbs.dev"
           root_url: "https://grafana.lab.mtgibbs.dev"
+      # Additional datasources
+      additionalDataSources:
+        - name: Loki
+          type: loki
+          url: http://loki.log-aggregation.svc.cluster.local:3100
+          access: proxy
+          isDefault: false
 
     # Prometheus settings
     prometheus:
