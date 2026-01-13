@@ -372,3 +372,19 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 18. Ollama - Local LLM server for CARL
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ollama
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/pi-k3s/ollama
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
