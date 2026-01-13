@@ -21,10 +21,8 @@ spec:
               name: http
           envFrom:
             - secretRef:
-                name: carl-canvas-api
+                name: carl-config
           env:
-            - name: OLLAMA_URL
-              value: "http://ollama.ollama.svc.cluster.local:11434"
             - name: OLLAMA_MODEL
               value: "llama3.2:1b"
           resources:
