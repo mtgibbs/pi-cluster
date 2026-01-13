@@ -380,6 +380,8 @@ metadata:
   name: ollama
   namespace: flux-system
 spec:
+  dependsOn:
+    - name: external-secrets-config
   interval: 10m
   path: ./clusters/pi-k3s/ollama
   prune: true
@@ -387,4 +389,4 @@ spec:
     kind: GitRepository
     name: flux-system
   wait: true
-  timeout: 5m
+  timeout: 10m

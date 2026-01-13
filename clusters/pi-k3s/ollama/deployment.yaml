@@ -27,6 +27,28 @@ spec:
       containers:
         - name: ollama
           image: ollama/ollama:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Start Ollama server in background
+              ollama serve &
+              # Wait for server to be ready
+              until curl -s http://localhost:11434/api/tags > /dev/null 2>&1; do
+                echo "Waiting for Ollama server..."
+                sleep 2
+              done
+              echo "Ollama server ready, pulling model: $OLLAMA_MODEL"
+              ollama pull "$OLLAMA_MODEL"
+              echo "Model ready, server running"
+              # Keep container alive
+              wait
+          env:
+            - name: OLLAMA_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: ollama-config
+                  key: OLLAMA_MODEL
           ports:
             - containerPort: 11434
               name: http
