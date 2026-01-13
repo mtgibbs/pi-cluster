@@ -16,9 +16,11 @@ metadata:
 spec:
   imageRepositoryRef:
     name: carl
+  filterTags:
+    pattern: '^[0-9a-f]{7}$'
   policy:
-    semver:
-      range: ">=0.0.0"
+    alphabetical:
+      order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation

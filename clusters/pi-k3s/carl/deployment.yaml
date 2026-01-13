@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: carl
-          image: ghcr.io/mtgibbs/carl:latest # {"$imagepolicy": "flux-system:carl"}
+          image: ghcr.io/mtgibbs/carl:0bad74a # {"$imagepolicy": "flux-system:carl"}
           ports:
             - containerPort: 8080
               name: http
