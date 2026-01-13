@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carl
+  namespace: carl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: carl
+  template:
+    metadata:
+      labels:
+        app: carl
+    spec:
+      containers:
+        - name: carl
+          image: ghcr.io/mtgibbs/carl:latest # {"$imagepolicy": "flux-system:carl"}
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - secretRef:
+                name: carl-canvas-api
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

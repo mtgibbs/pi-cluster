@@ -31,7 +31,7 @@ data:
         columns: 2
       Web:
         style: row
-        columns: 3
+        columns: 4
 
   services.yaml: |
     - DNS:
@@ -186,6 +186,11 @@ data:
             icon: cloudflare.png
             href: https://dash.cloudflare.com
             description: DNS & CDN
+        - CARL:
+            icon: mdi-school
+            href: https://carl.lab.mtgibbs.dev
+            description: Canvas Assignment Reminders
+            siteMonitor: https://carl.lab.mtgibbs.dev
 
   widgets.yaml: |
     - search:
