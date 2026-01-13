@@ -33,16 +33,17 @@ spec:
             - |
               # Start Ollama server in background
               ollama serve &
-              # Wait for server to be ready
-              until curl -s http://localhost:11434/api/tags > /dev/null 2>&1; do
+              SERVER_PID=$!
+              # Wait for server to be ready (ollama list fails until server is up)
+              until ollama list >/dev/null 2>&1; do
                 echo "Waiting for Ollama server..."
                 sleep 2
               done
               echo "Ollama server ready, pulling model: $OLLAMA_MODEL"
               ollama pull "$OLLAMA_MODEL"
-              echo "Model ready, server running"
+              echo "Model pulled, server running"
               # Keep container alive
-              wait
+              wait $SERVER_PID
           env:
             - name: OLLAMA_MODEL
               valueFrom:
