@@ -22,9 +22,6 @@ spec:
           envFrom:
             - secretRef:
                 name: carl-config
-          env:
-            - name: OLLAMA_MODEL
-              value: "llama3.2:1b"
           resources:
             requests:
               cpu: 100m
