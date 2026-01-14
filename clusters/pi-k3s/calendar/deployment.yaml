@@ -33,6 +33,10 @@ spec:
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
               readOnly: true
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
           resources:
             requests:
               cpu: 10m
@@ -62,3 +66,7 @@ spec:
         - name: config
           configMap:
             name: calendar-nginx-config
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
