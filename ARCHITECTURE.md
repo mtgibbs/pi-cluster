@@ -284,6 +284,53 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                        carl namespace                             │  │
+│  │                                                                   │  │
+│  │  CARL (Canvas Assignment Reminder Liaison)                       │  │
+│  │  • REST API server for Canvas LMS integration                    │  │
+│  │  • Sends assignment reminders with LLM-enhanced intent detection │  │
+│  │  • Integrates with Ollama for local inference                    │  │
+│  │  • Image: ghcr.io/mtgibbs/carl:0.3.3 (auto-deployed via Flux)   │  │
+│  │  • Ingress: carl.lab.mtgibbs.dev                                 │  │
+│  │  • Resources: 100m-500m CPU / 128Mi-256Mi memory                 │  │
+│  │                                                                   │  │
+│  │  Configuration:                                                   │  │
+│  │  • ExternalSecret syncs from 1Password CARL item                 │  │
+│  │  • Canvas API credentials (URL + token)                          │  │
+│  │  • Ollama integration config (URL + model)                       │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation:                                          │  │
+│  │  • ImagePolicy tracks semver releases (v*.*.*)                   │  │
+│  │  • Auto-updates deployment on new GHCR pushes                    │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                       ollama namespace                            │  │
+│  │                                                                   │  │
+│  │  Ollama Local LLM Server                                          │  │
+│  │  • Self-hosted language model inference on ARM64                 │  │
+│  │  • Provides LLM capabilities to CARL for intent detection        │  │
+│  │  • Image: ollama/ollama:latest                                   │  │
+│  │  • Service: ollama.ollama.svc.cluster.local:11434                │  │
+│  │  • Resources: 500m-2 CPU / 2-4Gi memory                          │  │
+│  │                                                                   │  │
+│  │  Storage:                                                         │  │
+│  │  • PVC: ollama-models (2Gi) for model cache                      │  │
+│  │  • Persisted to local-path storage on pi5-worker-1               │  │
+│  │                                                                   │  │
+│  │  Startup Process:                                                 │  │
+│  │  • Auto-pulls model from 1Password config (OLLAMA_MODEL)         │  │
+│  │  • Waits for server ready before accepting traffic               │  │
+│  │  • Model name configurable via ExternalSecret                    │  │
+│  │                                                                   │  │
+│  │  Scheduling:                                                      │  │
+│  │  • nodeAffinity: pinned to pi5-worker-1                          │  │
+│  │  • Reason: consistent performance and storage locality           │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                flux-notifications namespace                       │  │
 │  │                                                                   │  │
 │  │  Flux Notification System                                        │  │
@@ -1374,6 +1421,163 @@ transforms:
 
 ---
 
+### 33. CARL - Canvas Assignment Reminder Liaison
+
+**Decision**: Deploy custom Canvas LMS integration service with local LLM inference
+
+**Why**:
+- Automate assignment reminder workflows from Canvas LMS
+- Learning opportunity for building custom Kubernetes applications
+- Demonstrate GitOps workflow with Flux image automation
+- Explore on-cluster LLM inference for AI-enhanced features
+- Practice secrets management with External Secrets Operator
+
+**Problem**:
+- Canvas LMS doesn't provide intelligent reminder notifications
+- Need automated way to send assignment reminders based on due dates
+- Want to enhance reminders with LLM-based intent detection
+- External LLM APIs add cost, latency, and privacy concerns for student data
+
+**How**:
+
+**CARL Service**:
+- Custom REST API server built with Node.js/Express
+- Queries Canvas API for assignment data (courses, assignments, due dates)
+- Integrates with Ollama for LLM-enhanced intent detection
+- Image: `ghcr.io/mtgibbs/carl:0.3.3` (ARM64/AMD64 multi-arch)
+- Ingress: `carl.lab.mtgibbs.dev` with TLS
+- Resources: 100m-500m CPU / 128Mi-256Mi memory
+
+**Configuration via 1Password**:
+- Single ExternalSecret syncs from `CARL` item in `pi-cluster` vault
+- Canvas API credentials: `CANVAS_API_URL`, `CANVAS_API_TOKEN`
+- Ollama integration: `OLLAMA_URL`, `OLLAMA_MODEL`
+- All secrets automatically synced to cluster, no manual intervention
+
+**Flux Image Automation**:
+- ImageRepository scans GHCR every 5 minutes
+- ImagePolicy uses semver pattern: `^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$`
+- ImageUpdateAutomation commits image updates to git
+- Full CI/CD pipeline: code push → GHCR → Flux → deploy
+
+**Implementation**:
+```
+clusters/pi-k3s/carl/
+├── namespace.yaml
+├── deployment.yaml              # CARL app with Ollama integration
+├── service.yaml                 # ClusterIP :8080
+├── ingress.yaml                 # carl.lab.mtgibbs.dev
+├── image-automation.yaml        # Flux ImagePolicy + ImageUpdateAutomation
+├── external-secret.yaml         # Syncs from 1Password CARL item
+└── kustomization.yaml
+```
+
+**Trade-offs**:
+- Custom application requires maintenance and updates
+- Semver tagging adds manual step to release process
+- No automatic patch version bumps on every commit
+- But: full control over features, zero external API costs, learning experience
+
+**Troubleshooting Steps**:
+1. Initial deployment failed with `ErrImagePull` → Made GHCR repo public
+2. Security context errors → Added proper `runAsUser: 1000` configuration
+3. Flux ImagePolicy couldn't parse SHA tags → Switched to semver releases
+
+**Version History**:
+- v0.1.0: Initial deployment with Canvas API integration
+- v0.2.0: Added Ollama integration for LLM features
+- v0.3.0: Moved OLLAMA_MODEL to 1Password
+- v0.3.3: Current stable release
+
+---
+
+### 34. Ollama - On-Cluster LLM Inference for CARL
+
+**Decision**: Deploy Ollama local LLM server on cluster instead of using external API
+
+**Why**:
+- Avoid external LLM API costs and rate limits (OpenAI, Anthropic, etc.)
+- Keep sensitive Canvas/student data within cluster boundary (privacy)
+- Faster inference due to local network latency (no internet round-trip)
+- Learning opportunity for deploying ML/AI workloads on ARM architecture
+- Full control over model selection and configuration
+
+**Problem**:
+- CARL needs LLM capabilities for enhanced intent detection
+- External APIs (OpenAI GPT-4, Claude) cost $0.01-0.10 per request
+- Sending student assignment data to external APIs raises privacy concerns
+- API rate limits could impact reminder delivery reliability
+- Internet latency adds 100-500ms to each LLM request
+
+**How**:
+
+**Ollama Deployment**:
+- Image: `ollama/ollama:latest` (ARM64 compatible)
+- Service: `ollama.ollama.svc.cluster.local:11434` (ClusterIP, internal only)
+- Resources: 500m-2 CPU / 2-4Gi memory
+- Persistent storage: 2Gi PVC for model cache (local-path on pi5-worker-1)
+- Pinned to pi5-worker-1 via nodeAffinity for consistent performance
+
+**Model Auto-Pull on Startup**:
+```bash
+#!/bin/sh
+ollama serve &
+SERVER_PID=$!
+until ollama list >/dev/null 2>&1; do sleep 2; done
+ollama pull "$OLLAMA_MODEL"
+wait $SERVER_PID
+```
+
+**Model Configuration**:
+- Model name stored in 1Password (`OLLAMA_MODEL` field)
+- ExternalSecret syncs to ConfigMap mounted as environment variable
+- Currently using llama3.2 or similar small model for ARM performance
+- Can be changed without redeploying (just update 1Password + restart pod)
+
+**Scheduling Strategy**:
+- Pinned to pi5-worker-1 for several reasons:
+  - Consistent performance (dedicated ARM Cortex-A76 cores)
+  - Storage locality (PVC on same node reduces I/O latency)
+  - Isolates resource-heavy LLM from critical services (Pi-hole on master)
+- Not placed on Pi 3 worker due to limited memory (1GB total)
+
+**Implementation**:
+```
+clusters/pi-k3s/ollama/
+├── namespace.yaml
+├── deployment.yaml              # Ollama server with startup script
+├── service.yaml                 # ClusterIP :11434
+├── pvc.yaml                     # 2Gi for model storage
+├── external-secret.yaml         # OLLAMA_MODEL from 1Password
+└── kustomization.yaml
+```
+
+**Integration with CARL**:
+- CARL sends HTTP POST to `http://ollama.ollama.svc.cluster.local:11434/api/generate`
+- Request includes prompt and model name from config
+- Ollama responds with LLM-generated text for intent detection
+- No external network traffic required
+
+**Trade-offs**:
+- Resource overhead: 2-4GB memory dedicated to Ollama
+- Model storage requires persistent volume (2Gi)
+- Pi 5 ARM performance slower than x86 GPU inference (5-10 seconds vs <1 second)
+- Container start time increased (model pull takes 1-2 minutes on first start)
+- But: zero cost, no rate limits, full privacy, no external dependencies
+
+**Troubleshooting Steps**:
+1. Startup script with `curl` failed DNS resolution → Switched to `ollama list` command
+2. Init container approach didn't work → Server must be running to pull models
+3. Readiness probe delayed to 60s to account for initial model pull
+
+**ARM Performance Considerations**:
+- Pi 5 Cortex-A76 CPU is ~10x slower than x86 GPU for LLM inference
+- Small models (llama3.2, 1B-7B parameters) are acceptable for intent detection
+- Larger models (13B+) would be too slow for interactive use
+- Trade-off accepted: slower inference is fine for non-interactive reminder workflow
+
+---
+
 ### 30. Pi-hole High Availability with Secondary Instance
 
 **Decision**: Deploy secondary Pi-hole instance on pi5-worker-1 (192.168.1.56)
@@ -1610,6 +1814,21 @@ pi-cluster/
         │   ├── ingress.yaml              # site.lab.mtgibbs.dev with TLS
         │   ├── image-automation.yaml     # ImageRepository + ImagePolicy + ImageUpdateAutomation
         │   └── kustomization.yaml
+        ├── carl/
+        │   ├── namespace.yaml            # carl namespace
+        │   ├── deployment.yaml           # CARL API server (ghcr.io/mtgibbs/carl:0.3.3)
+        │   ├── service.yaml              # ClusterIP service
+        │   ├── ingress.yaml              # carl.lab.mtgibbs.dev with TLS
+        │   ├── image-automation.yaml     # ImageRepository + ImagePolicy (semver) + ImageUpdateAutomation
+        │   ├── external-secret.yaml      # Canvas + Ollama config from 1Password
+        │   └── kustomization.yaml
+        ├── ollama/
+        │   ├── namespace.yaml            # ollama namespace
+        │   ├── deployment.yaml           # Ollama LLM server (pinned to pi5-worker-1)
+        │   ├── service.yaml              # ClusterIP service :11434
+        │   ├── pvc.yaml                  # 2Gi for model storage
+        │   ├── external-secret.yaml      # OLLAMA_MODEL from 1Password
+        │   └── kustomization.yaml
         ├── cloudflare-tunnel/
         │   ├── namespace.yaml            # cloudflare-tunnel namespace
         │   ├── deployment.yaml           # cloudflared with init container for credentials
@@ -1714,6 +1933,8 @@ LAN Clients (Dual-Stack)
 | Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
+| CARL | 8080 | TCP | Ingress (carl.lab.mtgibbs.dev) |
+| Ollama | 11434 | TCP | ClusterIP (internal only, CARL access) |
 | Flux ImageRepository | N/A | N/A | Scans GHCR every 5 minutes |
 | Flux ImageUpdateAutomation | N/A | N/A | Git push to main branch |
 | cloudflared (Tunnel) | 2000 | TCP | Metrics endpoint for health probes |
@@ -1755,6 +1976,7 @@ kubectl -n pihole logs -f deploy/pihole
 # Unifi:          https://unifi.lab.mtgibbs.dev
 # NAS:            https://nas.lab.mtgibbs.dev
 # Personal Site:  https://site.lab.mtgibbs.dev (auto-deployed from GHCR)
+# CARL:           https://carl.lab.mtgibbs.dev (Canvas Assignment Reminder Liaison)
 
 # Flux commands
 flux get all                              # Check all Flux resources
@@ -1808,6 +2030,8 @@ This ensures:
 - [x] **Hardware expansion**: 4-node cluster with 3x Pi 5 and 1x Pi 3
 - [x] **Modular knowledge base**: 11 specialized skills for AI-assisted operations
 - [x] **Log aggregation**: Loki + Vector + Cloudflare Tunnel for Heroku log drains
+- [x] **CARL deployment**: Canvas Assignment Reminder Liaison with LLM integration
+- [x] **On-cluster LLM**: Ollama local inference server for AI-enhanced features
 - [ ] **Unbound HA**: Secondary Unbound instance for complete DNS redundancy
 - [ ] **Shared storage**: Migrate remaining workloads from local-path to NFS
 - [ ] **Resource quotas**: Namespace-level resource limits

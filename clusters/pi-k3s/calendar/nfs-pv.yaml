@@ -9,6 +9,9 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-calendar
+  mountOptions:
+    - nfsvers=4
+    - hard
   nfs:
     server: 192.168.1.60
     path: /volume1/cluster/calendar
