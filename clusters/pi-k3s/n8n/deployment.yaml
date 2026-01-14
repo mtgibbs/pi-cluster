@@ -17,10 +17,8 @@ spec:
       labels:
         app: n8n
     spec:
-      securityContext:
-        runAsUser: ${NFS_UID}
-        runAsGroup: ${NFS_GID}
-        fsGroup: ${NFS_GID}
+      # n8n runs as 'node' user (UID 1000) internally
+      # NFS share uses no_root_squash so any user can write
       # Prefer Pi 5 workers for better performance
       affinity:
         nodeAffinity:
