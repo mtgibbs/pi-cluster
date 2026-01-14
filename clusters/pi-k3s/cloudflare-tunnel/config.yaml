@@ -12,6 +12,10 @@ data:
       - hostname: logs.mtgibbs.dev
         service: http://vector.log-aggregation.svc.cluster.local:8080
 
+      # n8n - Workflow automation (external webhooks)
+      - hostname: n8n.mtgibbs.dev
+        service: http://n8n.n8n.svc.cluster.local:5678
+
       # Personal site (uncomment when ready to migrate from Heroku)
       # - hostname: mtgibbs.xyz
       #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000

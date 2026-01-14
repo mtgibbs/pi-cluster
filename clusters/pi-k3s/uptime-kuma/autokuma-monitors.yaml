@@ -190,3 +190,21 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  n8n.json: |
+    {
+      "type": "http",
+      "name": "n8n",
+      "url": "https://n8n.lab.mtgibbs.dev/healthz",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  n8n-webhooks.json: |
+    {
+      "type": "http",
+      "name": "n8n Webhooks (External)",
+      "url": "https://n8n.mtgibbs.dev/healthz",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

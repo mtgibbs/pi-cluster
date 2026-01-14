@@ -29,6 +29,9 @@ data:
       Logs:
         style: row
         columns: 2
+      Automation:
+        style: row
+        columns: 2
       Web:
         style: row
         columns: 4
@@ -170,6 +173,13 @@ data:
             href: https://logs.mtgibbs.dev
             description: Heroku Logs
             siteMonitor: https://logs.mtgibbs.dev
+
+    - Automation:
+        - n8n:
+            icon: n8n.png
+            href: https://n8n.lab.mtgibbs.dev
+            description: Workflow Automation
+            siteMonitor: https://n8n.lab.mtgibbs.dev
 
     - Web:
         - Personal Site (Cluster):
