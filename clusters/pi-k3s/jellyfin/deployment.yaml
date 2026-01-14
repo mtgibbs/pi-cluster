@@ -15,6 +15,10 @@ spec:
       labels:
         app: jellyfin
     spec:
+      securityContext:
+        runAsUser: ${NFS_UID}
+        runAsGroup: ${NFS_GID}
+        fsGroup: ${NFS_GID}
       containers:
         - name: jellyfin
           image: jellyfin/jellyfin:latest

@@ -17,6 +17,10 @@ spec:
       labels:
         app: n8n
     spec:
+      securityContext:
+        runAsUser: ${NFS_UID}
+        runAsGroup: ${NFS_GID}
+        fsGroup: ${NFS_GID}
       # Prefer Pi 5 workers for better performance
       affinity:
         nodeAffinity:
@@ -63,6 +67,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /home/node/.n8n
+            - name: calendar
+              mountPath: /calendar
           resources:
             requests:
               cpu: 100m
@@ -86,3 +92,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: n8n-data
+        - name: calendar
+          persistentVolumeClaim:
+            claimName: n8n-calendar

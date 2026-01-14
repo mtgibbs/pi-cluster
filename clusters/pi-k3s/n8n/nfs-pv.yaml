@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-calendar
+  namespace: n8n
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-calendar
+  resources:
+    requests:
+      storage: 100Mi

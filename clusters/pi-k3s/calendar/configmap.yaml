@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: calendar-nginx-config
+  namespace: calendar
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes 1;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 128;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent"';
+
+        access_log /var/log/nginx/access.log main;
+
+        sendfile on;
+        keepalive_timeout 65;
+
+        server {
+            listen 80;
+            server_name _;
+            root /data;
+
+            # Security headers
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "DENY" always;
+            add_header X-Robots-Tag "noindex, nofollow" always;
+
+            # Only serve .ics files - nothing else
+            location ~ ^/[a-zA-Z0-9_-]+\.ics$ {
+                add_header Content-Type "text/calendar; charset=utf-8" always;
+                add_header Cache-Control "no-cache, must-revalidate" always;
+            }
+
+            # Health check endpoint
+            location = /health {
+                return 200 "ok";
+                add_header Content-Type "text/plain" always;
+            }
+
+            # Deny everything else
+            location / {
+                return 403 "Forbidden";
+            }
+
+            # No directory listing
+            autoindex off;
+        }
+    }

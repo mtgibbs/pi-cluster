@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: calendar-nfs
+spec:
+  capacity:
+    storage: 100Mi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-calendar
+  nfs:
+    server: 192.168.1.60
+    path: /volume1/cluster/calendar
+    readOnly: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calendar-data
+  namespace: calendar
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-calendar
+  resources:
+    requests:
+      storage: 100Mi

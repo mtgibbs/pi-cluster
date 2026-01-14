@@ -38,6 +38,11 @@ spec:
       enabled: true
       controllers:
         main:
+          pod:
+            securityContext:
+              runAsUser: ${NFS_UID}
+              runAsGroup: ${NFS_GID}
+              fsGroup: ${NFS_GID}
           containers:
             main:
               image:

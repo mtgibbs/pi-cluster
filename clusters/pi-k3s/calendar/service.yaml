@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: calendar
+  namespace: calendar
+spec:
+  selector:
+    app: calendar
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

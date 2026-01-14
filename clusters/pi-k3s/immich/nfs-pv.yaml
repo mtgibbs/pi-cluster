@@ -14,7 +14,7 @@ spec:
   storageClassName: ""
   nfs:
     server: 192.168.1.60
-    path: /volume1/immich-library
+    path: /volume1/cluster/photos
   mountOptions:
     - nfsvers=4
     - hard

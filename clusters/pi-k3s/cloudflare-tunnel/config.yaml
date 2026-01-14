@@ -16,6 +16,10 @@ data:
       - hostname: n8n.mtgibbs.dev
         service: http://n8n.n8n.svc.cluster.local:5678
 
+      # Calendar - ICS feed for family calendar subscriptions
+      - hostname: calendar.mtgibbs.dev
+        service: http://calendar.calendar.svc.cluster.local:80
+
       # Personal site (uncomment when ready to migrate from Heroku)
       # - hostname: mtgibbs.xyz
       #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000

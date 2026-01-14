@@ -11,7 +11,7 @@ spec:
   storageClassName: nfs-video
   nfs:
     server: 192.168.1.60
-    path: /volume1/video
+    path: /volume1/cluster/media/video
     readOnly: true
 ---
 apiVersion: v1

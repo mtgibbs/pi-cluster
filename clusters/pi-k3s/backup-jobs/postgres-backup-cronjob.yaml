@@ -30,7 +30,7 @@ spec:
                   BACKUP_DATE=$(date +%Y-%m-%d)
                   NAS_USER="mtgibbs"
                   NAS_HOST="192.168.1.60"
-                  NAS_PATH="/volume1/k3s-backups"
+                  NAS_PATH="/volume1/cluster/backups"
                   SSH_KEY="/ssh/id_ed25519"
 
                   echo "=== PostgreSQL Backup ==="
