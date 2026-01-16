@@ -37,12 +37,10 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: media
+            - name: downloads
               mountPath: /downloads
-              subPath: downloads
-            - name: media
+            - name: tv
               mountPath: /tv
-              subPath: video
           resources:
             requests:
               memory: "128Mi"
@@ -53,9 +51,12 @@ spec:
       volumes:
         - name: config
           emptyDir: {}
-        - name: media
+        - name: downloads
           persistentVolumeClaim:
             claimName: media-downloads
+        - name: tv
+          persistentVolumeClaim:
+            claimName: media-library
 ---
 apiVersion: v1
 kind: Service

@@ -11,7 +11,7 @@ spec:
   storageClassName: nfs-media-downloads
   nfs:
     server: 192.168.1.60
-    path: /volume1/cluster/media
+    path: /volume1/cluster/media/downloads
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -25,3 +25,31 @@ spec:
   resources:
     requests:
       storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-library-nfs
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-media-library
+  nfs:
+    server: 192.168.1.60
+    path: /volume1/cluster/media/video
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-library
+  namespace: media
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-media-library
+  resources:
+    requests:
+      storage: 1Ti
