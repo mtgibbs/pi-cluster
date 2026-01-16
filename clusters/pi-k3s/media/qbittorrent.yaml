@@ -49,6 +49,9 @@ spec:
               value: "United States"
             - name: FREE_ONLY
               value: "off"
+            # Disable firewall to allow tracker UDP traffic
+            - name: FIREWALL
+              value: "off"
             # Enable port forwarding via NAT-PMP
             - name: VPN_PORT_FORWARDING
               value: "on"
