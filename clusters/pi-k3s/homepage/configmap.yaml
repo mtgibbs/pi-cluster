@@ -25,7 +25,10 @@ data:
         columns: 3
       Media:
         style: row
-        columns: 3
+        columns: 4
+      Downloads:
+        style: row
+        columns: 4
       Logs:
         style: row
         columns: 2
@@ -151,6 +154,33 @@ data:
             href: https://nas.lab.mtgibbs.dev
             description: Storage
             siteMonitor: https://nas.lab.mtgibbs.dev
+
+    - Downloads:
+        - Jellyseerr:
+            icon: jellyseerr.png
+            href: https://requests.lab.mtgibbs.dev
+            description: Media Requests
+            siteMonitor: https://requests.lab.mtgibbs.dev
+        - Sonarr:
+            icon: sonarr.png
+            href: https://sonarr.lab.mtgibbs.dev
+            description: TV Shows
+            siteMonitor: https://sonarr.lab.mtgibbs.dev
+        - Radarr:
+            icon: radarr.png
+            href: https://radarr.lab.mtgibbs.dev
+            description: Movies
+            siteMonitor: https://radarr.lab.mtgibbs.dev
+        - qBittorrent:
+            icon: qbittorrent.png
+            href: https://qbit.lab.mtgibbs.dev
+            description: Torrent Client
+            siteMonitor: https://qbit.lab.mtgibbs.dev
+        - Prowlarr:
+            icon: prowlarr.png
+            href: https://prowlarr.lab.mtgibbs.dev
+            description: Indexer Manager
+            siteMonitor: https://prowlarr.lab.mtgibbs.dev
 
     - Logs:
         - Loki:
