@@ -46,7 +46,7 @@ spec:
               memory: "128Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "300m"
       volumes:
         - name: config
