@@ -434,6 +434,74 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Heroku App → logs.mtgibbs.dev → Vector → Loki → Grafana       │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                      media namespace                              │  │
+│  │                                                                   │  │
+│  │  Media Automation Stack (*arr suite + qBittorrent)              │  │
+│  │  • All services pinned to pi5-worker-1 via nodeAffinity         │  │
+│  │  • NFS storage on Synology NAS (192.168.1.60)                   │  │
+│  │                                                                   │  │
+│  │  qBittorrent + Gluetun (VPN)                                    │  │
+│  │  • Torrent client with Mullvad WireGuard sidecar                │  │
+│  │  • NET_ADMIN capability for VPN tunnel creation                 │  │
+│  │  • Server location: USA                                         │  │
+│  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: qbit.lab.mtgibbs.dev                                │  │
+│  │                                                                   │  │
+│  │  Prowlarr (Indexer Manager)                                     │  │
+│  │  • Centralizes torrent indexer management                       │  │
+│  │  • Syncs indexers to Sonarr/Radarr automatically                │  │
+│  │  • Configured indexer: 1337x (via FlareSolverr proxy)           │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: prowlarr.lab.mtgibbs.dev                            │  │
+│  │                                                                   │  │
+│  │  FlareSolverr (CloudFlare Bypass)                               │  │
+│  │  • Headless Chromium proxy for CloudFlare-protected sites       │  │
+│  │  • Memory: 1Gi (required for Chromium engine)                   │  │
+│  │  • Used by Prowlarr indexers with matching tags                 │  │
+│  │  • ClusterIP service on port 8191                               │  │
+│  │                                                                   │  │
+│  │  Sonarr (TV Show Management)                                    │  │
+│  │  • Automated TV show downloading and organization                │  │
+│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
+│  │  • Media library: NFS /volume1/cluster/media/video/tv           │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: sonarr.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  │  Radarr (Movie Management)                                       │  │
+│  │  • Automated movie downloading and organization                  │  │
+│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
+│  │  • Media library: NFS /volume1/cluster/media/video/movies       │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: radarr.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  │  Jellyseerr (Request Management)                                │  │
+│  │  • User-facing request UI for movies and TV shows               │  │
+│  │  • Authentication via Jellyfin user accounts                    │  │
+│  │  • Sends requests to Sonarr/Radarr for automated processing     │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: requests.lab.mtgibbs.dev                            │  │
+│  │                                                                   │  │
+│  │  Storage Architecture:                                           │  │
+│  │  • NFS PVs on Synology (manual provisioning):                   │  │
+│  │    - media-downloads (10Gi) → /volume1/cluster/media/downloads  │  │
+│  │    - media-library (500Gi) → /volume1/cluster/media/video       │  │
+│  │  • Local-path PVCs for app configs (5Gi each):                  │  │
+│  │    - qbittorrent-config, prowlarr-config, sonarr-config,        │  │
+│  │      radarr-config, jellyseerr-config                           │  │
+│  │                                                                   │  │
+│  │  Secrets (1Password):                                            │  │
+│  │  • mullvad-credentials: WIREGUARD_PRIVATE_KEY, WIREGUARD_       │  │
+│  │    ADDRESSES                                                     │  │
+│  │                                                                   │  │
+│  │  Data Flow:                                                       │  │
+│  │  User request (Jellyseerr) → Sonarr/Radarr → Prowlarr searches  │  │
+│  │  indexers → qBittorrent downloads via Mullvad VPN → Files land  │  │
+│  │  in NFS share → Jellyfin picks up new media                     │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1649,6 +1717,130 @@ clusters/pi-k3s/pihole/
 - Unbound remains single instance (not HA yet)
 - If Unbound down, both Pi-holes fail (shared dependency)
 - Future enhancement: Unbound HA with multiple resolvers
+
+---
+
+### 35. Media Automation Stack with VPN-Protected Downloads
+
+**Decision**: Deploy complete *arr suite (Prowlarr, Sonarr, Radarr, Jellyseerr) with qBittorrent behind Mullvad VPN
+
+**Why**:
+- Jellyfin needs automated content acquisition and organization
+- User-friendly request system for family members
+- All torrent traffic routed through VPN for privacy
+- Centralized indexer management reduces configuration duplication
+- NFS storage on Synology provides large media capacity
+
+**Problem**:
+- Manual media acquisition and organization is time-consuming
+- Jellyfin library needs consistent file naming and folder structure
+- Multiple indexers would need manual configuration in each *arr app
+- Torrent traffic should be isolated and protected via VPN
+- CloudFlare-protected indexers (1337x) need bypass solution
+
+**How**:
+
+**1. Infrastructure Placement**
+- All services pinned to pi5-worker-1 via nodeAffinity
+- Reason: NFS mount reliability and co-located workloads
+- Ensures consistent storage access patterns
+
+**2. qBittorrent + Gluetun VPN Sidecar**
+- Gluetun container with NET_ADMIN capability creates WireGuard tunnel
+- qBittorrent shares network namespace with VPN sidecar
+- All torrent traffic exits via Mullvad (USA servers)
+- Credentials from 1Password: WIREGUARD_PRIVATE_KEY, WIREGUARD_ADDRESSES
+- Web UI exposed on port 8080 (within VPN tunnel)
+
+**3. Prowlarr as Indexer Hub**
+- Single source of truth for torrent indexers
+- Automatically syncs configured indexers to Sonarr/Radarr via API
+- Configured indexer: 1337x via FlareSolverr proxy (tag: flaresolverr)
+- Eliminates need to configure indexers separately in each app
+
+**4. FlareSolverr for CloudFlare Bypass**
+- Headless Chromium proxy solves CloudFlare challenges
+- Memory allocation increased to 1Gi (Chromium requirement)
+- Used by Prowlarr indexers with matching tag
+- Issue resolved: Initially Prowlarr didn't use proxy until tags matched
+
+**5. Sonarr and Radarr**
+- Sonarr: TV shows → /volume1/cluster/media/video/tv
+- Radarr: Movies → /volume1/cluster/media/video/movies
+- Both integrate with Prowlarr (indexers) and qBittorrent (download client)
+- Automated file renaming and organization for Jellyfin compatibility
+
+**6. Jellyseerr Request Management**
+- User-facing UI for media requests
+- Authentication via Jellyfin user accounts (OAuth)
+- Approved requests automatically sent to Sonarr/Radarr
+- Family members can request content without backend access
+
+**7. Storage Architecture**
+- NFS PVs manually provisioned on Synology NAS:
+  - media-downloads (10Gi) → /volume1/cluster/media/downloads
+  - media-library (500Gi) → /volume1/cluster/media/video
+- Local-path PVCs for application configs (5Gi each)
+- Config persistence required: API keys, indexer settings, quality profiles
+
+**8. NFS Mount Issues Resolved**
+- Initial deployment failed with stale NFS handles on pi5-worker-1
+- Resolution: Worker node reboot cleared stale NFS client state
+- Reason: Previous NFS mount changes caused kernel client inconsistency
+
+**Implementation**:
+```
+clusters/pi-k3s/media/
+├── namespace.yaml
+├── external-secret.yaml        # Mullvad VPN credentials
+├── nfs-pv.yaml                # Downloads + library NFS PVs
+├── config-pvcs.yaml           # Local-path PVCs for configs
+├── qbittorrent.yaml           # Torrent client + Gluetun VPN
+├── prowlarr.yaml              # Indexer manager
+├── flaresolverr.yaml          # CloudFlare bypass (1Gi memory)
+├── sonarr.yaml                # TV show automation
+├── radarr.yaml                # Movie automation
+├── jellyseerr.yaml            # Request UI
+└── kustomization.yaml
+```
+
+**Data Flow**:
+```
+User Request (Jellyseerr)
+  ↓
+Sonarr/Radarr receives request
+  ↓
+Prowlarr searches configured indexers (1337x via FlareSolverr)
+  ↓
+qBittorrent downloads via Mullvad VPN tunnel
+  ↓
+Files saved to NFS: /volume1/cluster/media/downloads
+  ↓
+Sonarr/Radarr renames and moves to library
+  ↓
+Jellyfin detects new media in /volume1/cluster/media/video/{tv,movies}
+```
+
+**Trade-offs**:
+- Single worker node pinning creates dependency on pi5-worker-1
+- VPN sidecar adds ~64-256Mi memory overhead per pod
+- FlareSolverr requires 1Gi memory (Chromium headless browser)
+- No load balancing across workers (pinned for NFS consistency)
+- But: simplified NFS mount management, reliable storage access
+- But: complete privacy for all torrent traffic via VPN
+
+**Security**:
+- All torrent traffic encrypted and routed through Mullvad WireGuard
+- No torrenting on bare cluster nodes (isolated in VPN container)
+- FlareSolverr proxy isolates CloudFlare challenges from indexer traffic
+- API keys and VPN credentials stored in 1Password, synced via ExternalSecret
+
+**Integration with Jellyfin**:
+- Jellyfin already configured with media library paths:
+  - TV: /media/tv (NFS mount to /volume1/cluster/media/video/tv)
+  - Movies: /media/movies (NFS mount to /volume1/cluster/media/video/movies)
+- Jellyseerr authenticates users via Jellyfin OAuth
+- Automatic library scanning when new media arrives
 
 ## Observability Stack
 
