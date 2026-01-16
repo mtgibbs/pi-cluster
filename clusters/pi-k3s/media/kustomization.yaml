@@ -10,3 +10,4 @@ resources:
   - sonarr.yaml
   - radarr.yaml
   - jellyseerr.yaml
+  - flaresolverr.yaml
