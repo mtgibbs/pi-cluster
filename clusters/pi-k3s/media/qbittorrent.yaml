@@ -74,8 +74,9 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: downloads
+            - name: media
               mountPath: /downloads
+              subPath: downloads
           resources:
             requests:
               memory: "128Mi"
@@ -86,7 +87,7 @@ spec:
       volumes:
         - name: config
           emptyDir: {}
-        - name: downloads
+        - name: media
           persistentVolumeClaim:
             claimName: media-downloads
 ---
