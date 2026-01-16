@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - external-secret.yaml
   - nfs-pv.yaml
+  - config-pvcs.yaml
   - qbittorrent.yaml
   - prowlarr.yaml
   - sonarr.yaml

@@ -50,7 +50,8 @@ spec:
               cpu: "300m"
       volumes:
         - name: config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: radarr-config
         - name: downloads
           persistentVolumeClaim:
             claimName: media-downloads

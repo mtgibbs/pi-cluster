@@ -44,7 +44,8 @@ spec:
               cpu: "300m"
       volumes:
         - name: config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: jellyseerr-config
 ---
 apiVersion: v1
 kind: Service

@@ -85,7 +85,8 @@ spec:
               cpu: "500m"
       volumes:
         - name: config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: qbittorrent-config
         - name: downloads
           persistentVolumeClaim:
             claimName: media-downloads
