@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sabnzbd
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sabnzbd
+  template:
+    metadata:
+      labels:
+        app: sabnzbd
+    spec:
+      containers:
+        - name: sabnzbd
+          image: linuxserver/sabnzbd:latest
+          env:
+            - name: PUID
+              value: "1029"
+            - name: PGID
+              value: "100"
+            - name: TZ
+              value: America/Chicago
+          ports:
+            - containerPort: 8080
+              name: web
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: downloads
+              mountPath: /downloads
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: sabnzbd-config
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: media-downloads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sabnzbd
+  namespace: media
+spec:
+  selector:
+    app: sabnzbd
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: web
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sabnzbd
+  namespace: media
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - sabnzbd.lab.mtgibbs.dev
+      secretName: sabnzbd-tls
+  rules:
+    - host: sabnzbd.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sabnzbd
+                port:
+                  number: 8080

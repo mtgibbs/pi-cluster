@@ -12,3 +12,4 @@ resources:
   - radarr.yaml
   - jellyseerr.yaml
   - flaresolverr.yaml
+  - sabnzbd.yaml
