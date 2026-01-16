@@ -23,7 +23,7 @@ spec:
                     values:
                       - pi5-worker-1
       containers:
-        # Gluetun VPN sidecar
+        # Gluetun VPN sidecar with Proton VPN
         - name: gluetun
           image: qmcgaw/gluetun:latest
           securityContext:
@@ -32,23 +32,28 @@ spec:
                 - NET_ADMIN
           env:
             - name: VPN_SERVICE_PROVIDER
-              value: mullvad
+              value: protonvpn
             - name: VPN_TYPE
-              value: wireguard
-            - name: WIREGUARD_PRIVATE_KEY
+              value: openvpn
+            - name: OPENVPN_USER
               valueFrom:
                 secretKeyRef:
-                  name: mullvad-credentials
-                  key: WIREGUARD_PRIVATE_KEY
-            - name: WIREGUARD_ADDRESSES
+                  name: protonvpn-credentials
+                  key: OPENVPN_USER
+            - name: OPENVPN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mullvad-credentials
-                  key: WIREGUARD_ADDRESSES
+                  name: protonvpn-credentials
+                  key: OPENVPN_PASSWORD
             - name: SERVER_COUNTRIES
-              value: USA
-            - name: FIREWALL_VPN_INPUT_PORTS
-              value: "51820"
+              value: "United States"
+            - name: FREE_ONLY
+              value: "off"
+            # Enable port forwarding via NAT-PMP
+            - name: VPN_PORT_FORWARDING
+              value: "on"
+            - name: VPN_PORT_FORWARDING_PROVIDER
+              value: protonvpn
           ports:
             - containerPort: 8080
               name: qbit-web
