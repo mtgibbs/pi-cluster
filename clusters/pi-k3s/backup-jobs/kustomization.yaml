@@ -7,3 +7,4 @@ resources:
   - backup-cronjob.yaml
   - postgres-backup-secret.yaml
   - postgres-backup-cronjob.yaml
+  - media-backup-cronjob.yaml

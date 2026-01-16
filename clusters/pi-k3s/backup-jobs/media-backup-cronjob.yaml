@@ -1,0 +1,107 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-backup
+  namespace: backup-jobs
+spec:
+  schedule: "0 3 * * 0"  # Every Sunday at 3:00 AM (after main backup)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # Must run on pi5-worker-1 where media PVCs are stored
+          nodeSelector:
+            kubernetes.io/hostname: pi5-worker-1
+          containers:
+            - name: backup
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  STORAGE_DIR="/storage"
+                  NAS_USER="mtgibbs"
+                  NAS_HOST="192.168.1.60"
+                  NAS_PATH="/volume1/cluster/backups"
+                  SSH_KEY="/ssh/id_ed25519"
+
+                  echo "=== Media Stack Config Backup (rsync over SSH) ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/media"
+                  echo ""
+
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Create backup directory on NAS
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/media"
+
+                  # Media PVCs to backup (namespace_pvcname patterns)
+                  PVCS="media_prowlarr-config media_sonarr-config media_radarr-config media_qbittorrent-config media_jellyseerr-config"
+
+                  for PVC in ${PVCS}; do
+                    echo "--- Backing up: ${PVC} ---"
+
+                    # Find the PVC directory (pattern: pvc-*_namespace_pvcname)
+                    PVC_PATH=$(find ${STORAGE_DIR} -maxdepth 1 -type d -name "*_${PVC}" 2>/dev/null | head -1)
+
+                    if [ -z "${PVC_PATH}" ]; then
+                      echo "WARNING: PVC directory not found for ${PVC}, skipping"
+                      continue
+                    fi
+
+                    echo "Source: ${PVC_PATH}"
+
+                    # Rsync to NAS over SSH
+                    rsync -avz --delete \
+                      -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                      "${PVC_PATH}/" \
+                      "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/media/${PVC}/"
+
+                    echo "Completed: ${PVC}"
+                    echo ""
+                  done
+
+                  echo ""
+                  echo "=== Media Backup Summary ==="
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/${BACKUP_DATE}/media/ 2>/dev/null || echo 'No media backups yet'"
+
+                  echo ""
+                  echo "Media backup completed successfully!"
+
+                  # Cleanup temp key
+                  rm -f /tmp/id_ed25519
+              volumeMounts:
+                - name: k3s-storage
+                  mountPath: /storage
+                  readOnly: true
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: k3s-storage
+              hostPath:
+                path: /var/lib/rancher/k3s/storage
+                type: Directory
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400
