@@ -9,9 +9,6 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-downloads
-  mountOptions:
-    - nfsvers=4
-    - hard
   nfs:
     server: 192.168.1.60
     path: /volume1/cluster/media/downloads
@@ -40,9 +37,6 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-library
-  mountOptions:
-    - nfsvers=4
-    - hard
   nfs:
     server: 192.168.1.60
     path: /volume1/cluster/media/video
