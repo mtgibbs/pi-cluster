@@ -67,7 +67,7 @@ spec:
                   key: QBIT_PASS
             # Auto-update qBittorrent listening port when VPN port changes
             - name: VPN_PORT_FORWARDING_UP_COMMAND
-              value: '/bin/sh -c "sleep 5 && curl -s -c /tmp/qbt.cookies -b /tmp/qbt.cookies http://127.0.0.1:8080/api/v2/auth/login -d username=$QBIT_USER -d password=$QBIT_PASS && curl -s -b /tmp/qbt.cookies http://127.0.0.1:8080/api/v2/app/setPreferences -d json={\\\"listen_port\\\":$1} && echo Updated_qBittorrent_port_to_$1"'
+              value: '/bin/sh -c "sleep 5 && wget -qO- --post-data=\"username=$QBIT_USER&password=$QBIT_PASS\" --save-cookies=/tmp/qbt.cookies --keep-session-cookies http://127.0.0.1:8080/api/v2/auth/login && wget -qO- --post-data=\"json={\\\"listen_port\\\":$1}\" --load-cookies=/tmp/qbt.cookies http://127.0.0.1:8080/api/v2/app/setPreferences && echo Port_updated_to_$1"'
           ports:
             - containerPort: 8080
               name: qbit-web
