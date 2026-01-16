@@ -208,3 +208,57 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  jellyseerr.json: |
+    {
+      "type": "http",
+      "name": "Jellyseerr",
+      "url": "https://requests.lab.mtgibbs.dev/api/v1/status",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  sonarr.json: |
+    {
+      "type": "http",
+      "name": "Sonarr",
+      "url": "https://sonarr.lab.mtgibbs.dev/ping",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  radarr.json: |
+    {
+      "type": "http",
+      "name": "Radarr",
+      "url": "https://radarr.lab.mtgibbs.dev/ping",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  prowlarr.json: |
+    {
+      "type": "http",
+      "name": "Prowlarr",
+      "url": "https://prowlarr.lab.mtgibbs.dev/ping",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  sabnzbd.json: |
+    {
+      "type": "http",
+      "name": "SABnzbd",
+      "url": "https://sabnzbd.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  qbittorrent.json: |
+    {
+      "type": "http",
+      "name": "qBittorrent",
+      "url": "https://qbit.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
