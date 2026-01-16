@@ -9,5 +9,4 @@ resources:
   - prowlarr.yaml
   - sonarr.yaml
   - radarr.yaml
-  - cleanuparr.yaml
   - jellyseerr.yaml
