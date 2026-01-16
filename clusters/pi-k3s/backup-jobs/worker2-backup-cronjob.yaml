@@ -1,10 +1,10 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: pvc-backup
+  name: worker2-backup
   namespace: backup-jobs
 spec:
-  schedule: "0 2 * * 0"  # Every Sunday at 2:00 AM
+  schedule: "30 2 * * 0"  # Every Sunday at 2:30 AM (after main pvc-backup)
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -14,9 +14,9 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
-          # Must run on pi-k3s where local-path PVCs are stored
+          # Must run on pi5-worker-2 where these PVCs are stored
           nodeSelector:
-            kubernetes.io/hostname: pi-k3s
+            kubernetes.io/hostname: pi5-worker-2
           containers:
             - name: backup
               image: instrumentisto/rsync-ssh:alpine
@@ -33,9 +33,9 @@ spec:
                   NAS_PATH="/volume1/cluster/backups"
                   SSH_KEY="/ssh/id_ed25519"
 
-                  echo "=== K3s PVC Backup (rsync over SSH) ==="
+                  echo "=== Worker2 PVC Backup (rsync over SSH) ==="
                   echo "Date: ${BACKUP_DATE}"
-                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}"
+                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/worker2"
                   echo ""
 
                   # Fix SSH key permissions
@@ -44,10 +44,10 @@ spec:
 
                   # Create backup directory on NAS
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
-                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}"
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/worker2"
 
                   # PVCs to backup (namespace_pvcname patterns)
-                  PVCS="uptime-kuma_uptime-kuma-data uptime-kuma_autokuma-data pihole_pihole-etc pihole_pihole-dnsmasq monitoring_kube-prometheus-grafana jellyfin_jellyfin-config"
+                  PVCS="media_sabnzbd-config n8n_n8n-data"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"
@@ -66,25 +66,19 @@ spec:
                     rsync -avz --delete \
                       -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
                       "${PVC_PATH}/" \
-                      "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/${PVC}/"
+                      "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/worker2/${PVC}/"
 
                     echo "Completed: ${PVC}"
                     echo ""
                   done
 
-                  # Cleanup old backups (keep last 4)
-                  echo "--- Cleaning up old backups ---"
+                  echo ""
+                  echo "=== Worker2 Backup Summary ==="
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
-                    ${NAS_USER}@${NAS_HOST} \
-                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf"
+                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/${BACKUP_DATE}/worker2/ 2>/dev/null || echo 'No worker2 backups yet'"
 
                   echo ""
-                  echo "=== Backup Summary ==="
-                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
-                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/"
-
-                  echo ""
-                  echo "Backup completed successfully!"
+                  echo "Worker2 backup completed successfully!"
 
                   # Cleanup temp key
                   rm -f /tmp/id_ed25519
