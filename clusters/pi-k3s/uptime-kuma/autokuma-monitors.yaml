@@ -235,6 +235,15 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  lidarr.json: |
+    {
+      "type": "http",
+      "name": "Lidarr",
+      "url": "https://lidarr.lab.mtgibbs.dev/ping",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   prowlarr.json: |
     {
       "type": "http",

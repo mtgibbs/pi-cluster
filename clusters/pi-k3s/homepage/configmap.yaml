@@ -171,6 +171,11 @@ data:
             href: https://radarr.lab.mtgibbs.dev
             description: Movies
             siteMonitor: https://radarr.lab.mtgibbs.dev
+        - Lidarr:
+            icon: lidarr.png
+            href: https://lidarr.lab.mtgibbs.dev
+            description: Music
+            siteMonitor: https://lidarr.lab.mtgibbs.dev
         - SABnzbd:
             icon: sabnzbd.png
             href: https://sabnzbd.lab.mtgibbs.dev
