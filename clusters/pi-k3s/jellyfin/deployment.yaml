@@ -40,7 +40,7 @@ spec:
               memory: 1Gi
             limits:
               cpu: 4000m
-              memory: 4Gi
+              memory: 1280Mi
           livenessProbe:
             httpGet:
               path: /health
