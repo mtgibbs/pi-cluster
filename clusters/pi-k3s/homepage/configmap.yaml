@@ -176,6 +176,11 @@ data:
             href: https://lidarr.lab.mtgibbs.dev
             description: Music
             siteMonitor: https://lidarr.lab.mtgibbs.dev
+        - Bazarr:
+            icon: bazarr.png
+            href: https://bazarr.lab.mtgibbs.dev
+            description: Subtitles
+            siteMonitor: https://bazarr.lab.mtgibbs.dev
         - SABnzbd:
             icon: sabnzbd.png
             href: https://sabnzbd.lab.mtgibbs.dev

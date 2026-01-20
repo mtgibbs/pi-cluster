@@ -244,6 +244,15 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  bazarr.json: |
+    {
+      "type": "http",
+      "name": "Bazarr",
+      "url": "https://bazarr.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   prowlarr.json: |
     {
       "type": "http",
