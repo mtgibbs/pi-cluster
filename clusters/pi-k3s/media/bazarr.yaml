@@ -13,15 +13,6 @@ spec:
       labels:
         app: bazarr
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: In
-                    values:
-                      - pi5-worker-1
       containers:
         - name: bazarr
           image: linuxserver/bazarr:latest
