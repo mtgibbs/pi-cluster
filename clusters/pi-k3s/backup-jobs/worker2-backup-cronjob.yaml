@@ -47,7 +47,7 @@ spec:
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/worker2"
 
                   # PVCs to backup (namespace_pvcname patterns)
-                  PVCS="media_sabnzbd-config n8n_n8n-data"
+                  PVCS="media_sabnzbd-config media_bazarr-config n8n_n8n-data"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"
