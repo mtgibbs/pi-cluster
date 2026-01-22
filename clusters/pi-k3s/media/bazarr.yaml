@@ -28,10 +28,8 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            - name: movies
-              mountPath: /movies
-            - name: tv
-              mountPath: /tv
+            - name: media
+              mountPath: /media
           resources:
             requests:
               memory: "128Mi"
@@ -43,10 +41,7 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: bazarr-config
-        - name: movies
-          persistentVolumeClaim:
-            claimName: media-library
-        - name: tv
+        - name: media
           persistentVolumeClaim:
             claimName: media-library
 ---
