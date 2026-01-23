@@ -59,3 +59,4 @@ pi-cluster/
 *   `/flux-status` - Check GitOps sync state.
 *   `/cluster-health` - Quick pod/node check.
 *   `/test-dns` - Verify resolution.
+*   `/fix-jellyfin <name>` - Fix media not appearing in Jellyfin after download.

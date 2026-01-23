@@ -36,6 +36,29 @@ If pods are stuck in `ContainerCreating`:
 2. Verify NFSv3 is enabled on NAS.
 3. Check `showmount -e 192.168.1.60` from a worker node.
 
+### Jellyfin: Media Not Appearing After Download
+If a show/movie was downloaded but doesn't appear in Jellyfin after a library scan:
+
+**Root Cause**: The item may exist in the database with incomplete metadata (NULL `DateLastRefreshed`). Jellyfin won't display items with failed/interrupted metadata fetches.
+
+**Solution 1 - UI (if item is visible):**
+1. Click the item → three dots → "Refresh Metadata"
+2. Check "Replace all metadata" → Save
+
+**Solution 2 - API (if item is NOT visible):**
+```bash
+# First, find the item ID in the database
+kubectl -n jellyfin exec -it deploy/jellyfin -- sqlite3 /config/data/library.db \
+  "SELECT Id, Name FROM TypedBaseItems WHERE Name LIKE '%SHOW_NAME%' AND Type LIKE '%Series%';"
+
+# Then trigger a full metadata refresh
+kubectl -n jellyfin exec -it deploy/jellyfin -- curl -X POST \
+  "http://localhost:8096/Items/ITEM_ID_HERE/Refresh?metadataRefreshMode=FullRefresh&imageRefreshMode=FullRefresh" \
+  -H "X-Emby-Token: YOUR_API_KEY"
+```
+
+**Get API Key**: Jellyfin Dashboard → API Keys → Create
+
 ### Immich Database
 To connect to the database for debugging:
 ```bash
