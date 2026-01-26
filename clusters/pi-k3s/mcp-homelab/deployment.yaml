@@ -28,7 +28,7 @@ spec:
               name: http
           env:
             - name: MCP_TRANSPORT
-              value: "sse"
+              value: "http"
             - name: MCP_PORT
               value: "3000"
             - name: NAS_ALLOWED_PATHS
