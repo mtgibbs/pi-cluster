@@ -31,6 +31,7 @@ If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 | **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
+| **MCP Homelab** | `docs/plans/homelab-mcp-cluster-integration.md` | `cluster-ops` |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)

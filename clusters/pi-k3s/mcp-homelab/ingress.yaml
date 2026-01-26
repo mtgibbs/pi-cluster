@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-homelab
+  namespace: mcp-homelab
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "mcp.lab.mtgibbs.dev"
+      secretName: mcp-homelab-tls
+  rules:
+    - host: "mcp.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mcp-homelab
+                port:
+                  number: 3000

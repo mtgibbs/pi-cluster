@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-homelab
+  namespace: mcp-homelab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mcp-homelab
+  template:
+    metadata:
+      labels:
+        app: mcp-homelab
+    spec:
+      serviceAccountName: mcp-homelab
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: mcp-homelab
+          image: ghcr.io/mtgibbs/pi-cluster-mcp:0.1.0 # {"$imagepolicy": "flux-system:mcp-homelab"}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: MCP_TRANSPORT
+              value: "sse"
+            - name: MCP_PORT
+              value: "3000"
+            - name: NAS_ALLOWED_PATHS
+              value: "/volume1/cluster/media,/volume1/cluster/photos,/volume1/cluster/backups"
+            - name: MCP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: api-key
+            - name: JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: jellyfin-api-key
+            - name: PIHOLE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: pihole-api-token
+            - name: IMMICH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: immich-api-key
+          volumeMounts:
+            - name: ssh-key
+              mountPath: /secrets/ssh
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: ssh-key
+          secret:
+            secretName: mcp-homelab-secrets
+            items:
+              - key: nas-private-key
+                path: id_rsa
+                mode: 0400
