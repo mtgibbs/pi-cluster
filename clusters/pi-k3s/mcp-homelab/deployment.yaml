@@ -22,7 +22,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: mcp-homelab
-          image: ghcr.io/mtgibbs/pi-cluster-mcp:0.1.1 # {"$imagepolicy": "flux-system:mcp-homelab"}
+          image: ghcr.io/mtgibbs/pi-cluster-mcp:0.1.2 # {"$imagepolicy": "flux-system:mcp-homelab"}
           ports:
             - containerPort: 3000
               name: http
