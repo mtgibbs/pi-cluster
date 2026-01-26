@@ -20,6 +20,39 @@ If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 
 **DO NOT** attempt to answer technical questions from your general knowledge. **ALWAYS** load the skill first.
 
+### 3. MCP-First Protocol
+MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to cluster data.
+
+**For read-only status checks — use MCP tools directly:**
+| Operation | MCP Tool |
+| :--- | :--- |
+| Cluster health | `get_cluster_health` |
+| DNS / Pi-hole status | `get_dns_status` |
+| DNS resolution test | `test_dns_query` |
+| Pi-hole query log | `get_pihole_queries` |
+| Pi-hole whitelist | `get_pihole_whitelist` |
+| Gravity update | `update_pihole_gravity` |
+| Flux sync status | `get_flux_status` |
+| Flux reconcile | `reconcile_flux` |
+| Certificate status | `get_certificate_status` |
+| Secrets sync status | `get_secrets_status` |
+| Refresh a secret | `refresh_secret` |
+| Ingress status | `get_ingress_status` |
+| Tailscale status | `get_tailscale_status` |
+| Backup status | `get_backup_status` |
+| Trigger backup | `trigger_backup` |
+| Media services health | `get_media_status` |
+| Fix Jellyfin metadata | `fix_jellyfin_metadata` |
+| Touch NAS path | `touch_nas_path` |
+| Restart deployment | `restart_deployment` |
+
+**Delegate to `cluster-ops` only when you need:**
+- Pod logs (no MCP tool for this)
+- Editing manifests / GitOps files
+- Git operations (commit, push)
+- Arbitrary kubectl commands not covered above
+- Complex multi-step troubleshooting
+
 ## Service Index
 
 | Service | Expert Skill (READ THIS FIRST) | Agent to Use |

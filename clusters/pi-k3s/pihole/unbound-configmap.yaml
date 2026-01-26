@@ -73,6 +73,13 @@ data:
       # TCP fallback for unreliable UDP
       tcp-upstream: yes
 
+      # TCP connection management
+      # Defaults (10/10) are too low when tcp-upstream is enabled
+      incoming-num-tcp: 256
+      outgoing-num-tcp: 128
+      edns-tcp-keepalive: yes
+      edns-tcp-keepalive-timeout: 30000
+
       # Increase buffer sizes for busy resolver
       outgoing-range: 8192
       num-queries-per-thread: 4096

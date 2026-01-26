@@ -16,6 +16,31 @@ Before starting a task, you **MUST** consult the relevant expert skill if the ta
 - **Backups**: Read `.claude/skills/backup-ops/SKILL.md`
 - **Certs/TLS**: Read `.claude/skills/cert-tls/SKILL.md`
 
+## MCP Homelab Tools (IMPORTANT)
+The parent assistant has access to MCP homelab tools (`mcp__homelab__*`) that provide
+structured, read-only cluster data **without needing kubectl**. The parent will typically
+call MCP tools directly for status checks and pass the results to you as context.
+
+**You should expect MCP data in your prompt** for tasks like:
+- Cluster health, pod status, node resources
+- DNS status, Pi-hole queries, whitelist
+- Flux sync status
+- Certificate status, ingress status
+- Backup job status
+- External Secrets sync status
+- Tailscale connector status
+- Media services health (Jellyfin, Immich)
+
+**When you are delegated a task**, the parent may have already gathered MCP data.
+Use that context instead of re-running equivalent kubectl commands.
+
+**You are still needed for**:
+- Reading pod logs (`kubectl logs`) — no MCP tool for this
+- Editing manifests and GitOps files
+- Git operations (commit, push)
+- Running arbitrary kubectl commands not covered by MCP
+- Complex troubleshooting that requires interactive investigation
+
 ## Your Expertise
 - K3s on Raspberry Pi 5 (ARM64, 8GB RAM)
 - Flux GitOps with dependency chains
