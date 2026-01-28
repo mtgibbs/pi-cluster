@@ -16,6 +16,9 @@ data:
     ip link del wg0 2>/dev/null || true
     ip rule del fwmark 100 table 100 2>/dev/null || true
     ip route del default via 10.66.66.1 dev wg0 table 100 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -s 192.168.1.0/24 -d 10.42.0.0/16 -j RETURN 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -s 192.168.1.0/24 -d 10.43.0.0/16 -j RETURN 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -s 192.168.1.0/24 -d 192.168.1.0/24 -j RETURN 2>/dev/null || true
     iptables -t mangle -D PREROUTING -s 192.168.1.0/24 -j MARK --set-mark 100 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 192.168.1.0/24 -o wg0 -j MASQUERADE 2>/dev/null || true
 
@@ -80,6 +83,10 @@ data:
     ip route add default via 10.66.66.1 dev wg0 table 100
 
     # Mark forwarded LAN traffic, route it through VPN table
+    # Exclude cluster pod/service networks and local LAN from VPN routing
+    iptables -t mangle -A PREROUTING -s 192.168.1.0/24 -d 10.42.0.0/16 -j RETURN
+    iptables -t mangle -A PREROUTING -s 192.168.1.0/24 -d 10.43.0.0/16 -j RETURN
+    iptables -t mangle -A PREROUTING -s 192.168.1.0/24 -d 192.168.1.0/24 -j RETURN
     iptables -t mangle -A PREROUTING -s 192.168.1.0/24 -j MARK --set-mark 100
     ip rule add fwmark 100 table 100
 
