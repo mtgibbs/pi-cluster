@@ -18,6 +18,16 @@
 - **Impact**: Minimal - applications can read/write, but file ownership is incorrect
 - **Resolution**: Deferred - functional workaround exists, proper fix requires Synology NFS reconfiguration
 
+### Pod Overlay Networking Broken on pi-k3s Node
+- **Issue**: Cross-node pod overlay networking broken on pi-k3s master node
+- **Cause**: Unknown - possibly Flannel VXLAN, dual-stack IPv6, or CNI misconfiguration
+- **Impact**: Pods scheduled on pi-k3s cannot reach pods on other nodes (e.g., CoreDNS on pi5-worker-1)
+- **Symptoms**: DNS resolution failures, connection timeouts to cross-node services
+- **Workaround**: Use `hostNetwork: true` with `dnsPolicy: ClusterFirstWithHostNet` for affected pods
+- **Resolution**: Deferred - requires deep K3s/Flannel debugging with tcpdump
+- **Affected Workloads**: git-mirror-cronjob (workaround applied)
+- **Last Observed**: 2026-01-28
+
 ### AT&T IPv6 Routing Problems
 - **Issue**: Certain services are slow or broken when accessed via IPv6
 - **Cause**: AT&T Fiber has poor IPv6 peering/routing to some CDNs
