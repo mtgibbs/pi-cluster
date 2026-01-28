@@ -10,6 +10,7 @@ LAN Device (192.168.1.x)
     v
 pi-k3s (192.168.1.55) -- gateway pod (hostNetwork, NET_ADMIN)
     |
+    +-- Policy routing (fwmark 100 -> table 100)
     +-- iptables NAT (MASQUERADE on wg0)
     +-- WireGuard client (wg0, 10.66.66.2/24)
     |      Endpoint: 127.0.0.1:51820
@@ -23,7 +24,7 @@ pi-k3s (192.168.1.55) -- gateway pod (hostNetwork, NET_ADMIN)
 
          --- Internet (looks like HTTPS) ---
 
-Hetzner VPS (Germany, CX22)
+Hetzner VPS (Nuremberg, CX23)
     +-- shadowsocks-rust ss-server (:443)
     +-- wstunnel server (:8443)
     +-- WireGuard server (127.0.0.1:51820, localhost only)
@@ -36,15 +37,14 @@ Hetzner VPS (Germany, CX22)
 
 - Hetzner Cloud account with API token
 - Terraform >= 1.5 installed
-- 1Password service account token (same one used by ESO in the cluster)
-- SSH key pair for VPS management access
-- `ghcr.io/mtgibbs/exit-node-gateway:latest` container image built and pushed
+- SSH key pair for VPS management access (can be generated in 1Password)
+- GitHub classic PAT with `read:packages` scope for GHCR image pulls
 
 ## Repos
 
 | Repo | Purpose |
 |------|---------|
-| `private-exit-node` | Hetzner VPS provisioning + secret generation (Terraform) |
+| `private-exit-node` | Hetzner VPS provisioning + container image (Terraform + Dockerfile) |
 | `pi-cluster` | Gateway pod on K3s cluster (Flux GitOps) |
 
 ## Initial Deployment
@@ -54,25 +54,41 @@ Hetzner VPS (Germany, CX22)
 ```bash
 cd private-exit-node
 
-# Set required env vars
-export HCLOUD_TOKEN="<hetzner-api-token>"
-export OP_SERVICE_ACCOUNT_TOKEN="<1password-service-account-token>"
+# Set Hetzner API token (can read from 1Password)
+export HCLOUD_TOKEN=$(op read "op://pi-cluster/hetzner-api-token/credential")
 
 # Initialize and apply
 terraform init
 terraform plan -var 'ssh_public_key=ssh-ed25519 AAAA...'
 terraform apply -var 'ssh_public_key=ssh-ed25519 AAAA...'
-
-# Verify outputs
-terraform output
 ```
 
-This creates:
-- Hetzner VPS with WireGuard, Shadowsocks, and wstunnel
-- WireGuard keypairs and Shadowsocks password
-- 1Password item `private-exit-node` with all secrets
+### 2. Create 1Password Secrets
 
-### 2. Verify VPS
+Terraform outputs the secrets. Create a `private-exit-node` item in the `pi-cluster` vault manually:
+
+```bash
+# Get all outputs including sensitive values
+terraform output -json
+
+# Or create the 1Password item directly
+op item create \
+  --category=SecureNote \
+  --title="private-exit-node" \
+  --vault="pi-cluster" \
+  "wg-private-key[password]=$(terraform output -raw onepassword_wg_private_key)" \
+  "wg-peer-public-key[text]=$(terraform output -raw onepassword_wg_peer_public_key)" \
+  "ss-password[password]=$(terraform output -raw onepassword_ss_password)" \
+  "vps-ip[text]=$(terraform output -raw onepassword_vps_ip)"
+```
+
+### 3. Add GHCR Pull Token
+
+Create a GitHub classic PAT with `read:packages` scope and store it:
+- 1Password item: `ghcr-read-token` in `pi-cluster` vault
+- Field: `token`
+
+### 4. Verify VPS
 
 ```bash
 VPS_IP=$(terraform output -raw vps_ip)
@@ -81,30 +97,30 @@ VPS_IP=$(terraform output -raw vps_ip)
 ssh root@$VPS_IP
 
 # On the VPS:
-wg show                  # WireGuard interface should be up (no handshake yet)
-ss -tlnp | grep 443     # Shadowsocks listening
-ss -tlnp | grep 8443    # wstunnel listening
+wg show                  # WireGuard interface up (no handshake yet)
+ss -tlnp | grep 443      # Shadowsocks listening
+ss -tlnp | grep 8443     # wstunnel listening
 systemctl status wg-quick@wg0
 systemctl status shadowsocks-server
 systemctl status wstunnel-server
 ```
 
-### 3. Deploy to Cluster (GitOps)
+### 5. Deploy to Cluster (GitOps)
 
-The pi-cluster manifests are already committed. Flux will sync automatically, or force it:
+The pi-cluster manifests are committed. Flux syncs automatically, or force it:
 
 ```bash
 flux reconcile source git flux-system
 flux reconcile kustomization private-exit-node
 ```
 
-### 4. Verify ExternalSecret
+### 6. Verify ExternalSecrets
 
 ```bash
 kubectl get externalsecret -n private-exit-node
-# Should show "SecretSynced" condition
-kubectl get secret exit-node-secrets -n private-exit-node
-# Should exist with 4 keys
+# Both should show "SecretSynced":
+#   exit-node-secrets     - WireGuard keys, SS password, VPS IP
+#   ghcr-pull-secret      - Docker registry auth
 ```
 
 ## Activate
@@ -147,7 +163,7 @@ kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=ws
 kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=shadowsocks
 ```
 
-The deployment will automatically restart with the new tunnel mode.
+The deployment automatically restarts with the new tunnel mode.
 
 ## Verification Checklist
 
@@ -157,9 +173,10 @@ The deployment will automatically restart with the new tunnel mode.
 | WireGuard up | `kubectl exec -n private-exit-node deploy/exit-node-gateway -- wg show` | Handshake recent |
 | Exit IP | `kubectl exec -n private-exit-node deploy/exit-node-gateway -- curl -s https://ifconfig.me` | Hetzner VPS IP |
 | NAT rules | `kubectl exec -n private-exit-node deploy/exit-node-gateway -- iptables -t nat -L POSTROUTING` | MASQUERADE on wg0 |
+| Policy routing | `kubectl exec -n private-exit-node deploy/exit-node-gateway -- ip rule show` | fwmark 100 -> table 100 |
 | LAN egress | From laptop: `curl https://ifconfig.me` | Hetzner VPS IP (after USG route) |
 | DNS works | `dig @192.168.1.55 google.com` | Resolves (Pi-hole unaffected) |
-| Secret synced | `kubectl get externalsecret -n private-exit-node` | SecretSynced |
+| Secrets synced | `kubectl get externalsecret -n private-exit-node` | Both SecretSynced |
 
 ## Troubleshooting
 
@@ -169,25 +186,33 @@ kubectl describe pod -n private-exit-node -l app=exit-node-gateway
 kubectl logs -n private-exit-node -l app=exit-node-gateway
 ```
 
+### ImagePullBackOff
+The GHCR package is private. Verify the pull secret:
+```bash
+kubectl get secret ghcr-pull-secret -n private-exit-node -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
+```
+
 ### No WireGuard handshake
 ```bash
-# Check tunnel is running
+# Check tunnel process is running
 kubectl exec -n private-exit-node deploy/exit-node-gateway -- ps aux | grep -E 'sslocal|wstunnel'
 
 # Check WireGuard status
 kubectl exec -n private-exit-node deploy/exit-node-gateway -- wg show
 
-# Test SS connectivity manually
-kubectl exec -n private-exit-node deploy/exit-node-gateway -- curl -v https://$VPS_IP:443
+# Test connectivity to VPS
+kubectl exec -n private-exit-node deploy/exit-node-gateway -- curl -v --max-time 5 https://$VPS_IP:443
 ```
 
 ### NAT not working
 ```bash
 # Check iptables rules
 kubectl exec -n private-exit-node deploy/exit-node-gateway -- iptables -t nat -L -v
+kubectl exec -n private-exit-node deploy/exit-node-gateway -- iptables -t mangle -L -v
 
-# Check IP forwarding
-kubectl exec -n private-exit-node deploy/exit-node-gateway -- sysctl net.ipv4.ip_forward
+# Check policy routing
+kubectl exec -n private-exit-node deploy/exit-node-gateway -- ip rule show
+kubectl exec -n private-exit-node deploy/exit-node-gateway -- ip route show table 100
 
 # Check IPv6 is blocked
 kubectl exec -n private-exit-node deploy/exit-node-gateway -- ip6tables -L FORWARD
@@ -210,11 +235,12 @@ journalctl -u wstunnel-server --no-pager -n 50
 - **Pi-hole DNS**: Pi-hole -> Unbound (recursive) still works directly. DNS is not tunneled.
 - **Cluster-internal traffic**: Pod-to-pod and service communication is unaffected.
 - **Tailscale**: Continues to work independently.
+- **Host traffic**: The pi-k3s node's own traffic (not forwarded LAN traffic) uses the normal route.
 
 ## What Changes
 
-- **All LAN egress**: Routes through Germany when active (USG route in place).
-- **Latency**: Added ~30-50ms for transatlantic hop.
+- **LAN egress**: Forwarded traffic from 192.168.1.0/24 routes through Germany when active.
+- **Latency**: Added ~80-100ms for transatlantic hop.
 - **IP geolocation**: Shows German IP for external services.
 
 ## VPS Rebuild (If Compromised)
@@ -225,22 +251,30 @@ cd private-exit-node
 # Destroy existing VPS
 terraform destroy -var 'ssh_public_key=ssh-ed25519 AAAA...'
 
-# Recreate with fresh IP, same keys
+# Recreate with fresh IP
 terraform apply -var 'ssh_public_key=ssh-ed25519 AAAA...'
 
-# No cluster-side changes needed - secrets in 1Password remain the same
-# (WireGuard keys and SS password are generated once and stored in 1Password)
+# Update VPS IP in 1Password (or recreate the item)
+op item edit private-exit-node --vault=pi-cluster \
+  "vps-ip[text]=$(terraform output -raw onepassword_vps_ip)"
 ```
 
-To rotate keys as well, delete the 1Password item first, then `terraform apply` will regenerate everything.
+To rotate ALL keys (WireGuard + Shadowsocks), delete the 1Password item first, then recreate from new Terraform outputs.
 
 ## Secrets
 
-All secrets are managed via Terraform -> 1Password -> ExternalSecrets:
+| 1Password Item | Field | Description |
+|----------------|-------|-------------|
+| `private-exit-node` | `wg-private-key` | Pi's WireGuard private key |
+| `private-exit-node` | `wg-peer-public-key` | VPS's WireGuard public key |
+| `private-exit-node` | `ss-password` | Shared Shadowsocks AEAD-2022 key (base64, 32 bytes) |
+| `private-exit-node` | `vps-ip` | Hetzner VPS public IPv4 |
+| `ghcr-read-token` | `token` | GitHub PAT for private GHCR pulls |
+| `hetzner-api-token` | `credential` | Hetzner Cloud API token |
 
-| Field | Source | Description |
-|-------|--------|-------------|
-| `wg-private-key` | Terraform `wireguard_asymmetric_key.pi` | Pi's WireGuard private key |
-| `wg-peer-public-key` | Terraform `wireguard_asymmetric_key.vps` | VPS's WireGuard public key |
-| `ss-password` | Terraform `random_id` (base64, 32 bytes) | Shared Shadowsocks AEAD-2022 key |
-| `vps-ip` | Terraform `hcloud_server` | Hetzner VPS public IPv4 |
+## Container Image
+
+- **Registry**: `ghcr.io/mtgibbs/private-exit-node`
+- **Versioning**: Semver via release-please, Flux image automation updates deployment
+- **Multi-arch**: linux/amd64, linux/arm64
+- **Contents**: Alpine + wireguard-tools + shadowsocks-rust (sslocal) + wstunnel + iptables
