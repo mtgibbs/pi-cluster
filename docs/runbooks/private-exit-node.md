@@ -155,15 +155,19 @@ kubectl scale deployment exit-node-gateway -n private-exit-node --replicas=0
 
 ## Switch Obfuscation Mode
 
-Default is **wstunnel** (WebSocket over TLS on port 8443). Shadowsocks tunnel mode has a known issue with `udp_over_tcp` where sslocal fails to establish the TCP connection (see Known Issues below).
+Default is **wstunnel** (WebSocket over TLS on port 8443). Both modes are verified working.
 
 ```bash
-# Switch to Shadowsocks (currently broken - see Known Issues)
+# Switch to Shadowsocks (UDP relay on port 443)
 kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=shadowsocks
 
-# Switch back to wstunnel (default, working)
+# Switch back to wstunnel (default, WebSocket/TLS on port 8443)
 kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=wstunnel
 ```
+
+**Differences**:
+- **wstunnel**: All traffic over TCP/TLS WebSocket. Indistinguishable from HTTPS. No UDP exposure.
+- **Shadowsocks**: Uses UDP relay on port 443. AEAD-2022 encrypted, probe-resistant, but UDP:443 is an unusual traffic pattern that sophisticated DPI could flag.
 
 The deployment automatically restarts with the new tunnel mode.
 
@@ -283,20 +287,16 @@ To rotate ALL keys (WireGuard + Shadowsocks), delete the 1Password item first, t
 
 ## Known Issues
 
-### Shadowsocks tunnel mode not establishing TCP connection
+### Shadowsocks `udp_over_tcp` not supported in official sslocal
 
-**Status**: Open
+**Status**: Fixed
 
-sslocal in tunnel mode with `udp_over_tcp: true` logs a warning at startup:
+The `"udp_over_tcp": true` config field is a proprietary SagerNet protocol not implemented in official shadowsocks-rust. The field was silently ignored, and sslocal defaulted to `tcp_only` server mode, producing the warning:
 ```
-WARN no valid UDP server serving for UDP clients, consider disable UDP with "mode": "tcp_only", currently chose <VPS_IP>:443
+WARN no valid UDP server serving for UDP clients
 ```
 
-Despite WireGuard sending UDP packets to sslocal's local listener (127.0.0.1:51820), sslocal never establishes a TCP connection to the VPS. The WireGuard handshake never completes (0 B received).
-
-**Workaround**: Use wstunnel mode (default). wstunnel immediately establishes the WebSocket/TLS connection and the WireGuard tunnel works correctly.
-
-**Investigation needed**: May be a version incompatibility between sslocal 1.21.2 tunnel mode and `udp_over_tcp`. The ssserver on the VPS runs the same version and has matching config.
+**Fix**: Removed `"udp_over_tcp": true` from both client and server configs. Added `"mode": "tcp_and_udp"` at the client config top level so sslocal uses standard Shadowsocks UDP relay. Added `443/udp` to both Hetzner cloud firewall (Terraform) and VPS UFW.
 
 ### hostNetwork cleanup on restart
 

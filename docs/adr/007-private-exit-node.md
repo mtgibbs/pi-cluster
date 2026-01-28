@@ -35,22 +35,23 @@ Requirements:
 
 **Trade-off**: WireGuard uses UDP which is easily fingerprinted. Mitigated by obfuscation layer (see below).
 
-### Obfuscation: Shadowsocks (Primary) + wstunnel (Fallback)
+### Obfuscation: wstunnel (Primary) + Shadowsocks (Backup)
 
 **Chosen over**: obfs4, Tor, plain WireGuard
 
-**Primary - shadowsocks-rust with AEAD-2022**:
+**Primary - wstunnel**:
+- Pure WebSocket over TLS on port 8443
+- Indistinguishable from legitimate HTTPS WebSocket traffic
+- All traffic over TCP — no UDP exposure
+- Self-signed TLS certificate (doesn't matter since we control both ends)
+
+**Backup - shadowsocks-rust with AEAD-2022**:
 - Modern AEAD-2022 cipher (2022-blake3-aes-256-gcm) resistant to probing attacks
-- `udp_over_tcp` encapsulates WireGuard UDP inside the Shadowsocks TCP stream
-- Traffic appears as generic TLS on port 443
+- Uses standard Shadowsocks UDP relay on port 443 (TCP + UDP)
 - Battle-tested against sophisticated DPI (Chinese GFW)
 - Active development, Rust implementation is memory-safe
 
-**Fallback - wstunnel**:
-- Pure WebSocket over TLS on port 8443
-- Indistinguishable from legitimate HTTPS WebSocket traffic
-- Useful if Shadowsocks gets blocked (different traffic signature)
-- Self-signed TLS certificate (doesn't matter since we control both ends)
+**Note on `udp_over_tcp`**: Official shadowsocks-rust does not implement the `udp_over_tcp` protocol (it's a proprietary SagerNet extension). The field is silently ignored. We use standard UDP relay instead, which requires UDP port 443 open on the VPS. This means Shadowsocks has a less clean traffic profile than wstunnel (UDP on port 443 is unusual), making wstunnel the better default for DPI resistance.
 
 **Why both**: Different obfuscation techniques have different signatures. If one gets blocked, switch to the other via environment variable.
 
