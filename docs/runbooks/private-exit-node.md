@@ -125,33 +125,68 @@ kubectl get externalsecret -n private-exit-node
 
 ## Activate
 
+### Step 1: Start the gateway pod
+
 ```bash
-# 1. Scale up the gateway pod
 kubectl scale deployment exit-node-gateway -n private-exit-node --replicas=1
 kubectl wait --for=condition=available deployment/exit-node-gateway -n private-exit-node --timeout=120s
-
-# 2. Verify tunnel is working
-kubectl exec -n private-exit-node deploy/exit-node-gateway -- curl -s https://ifconfig.me
-# Should show the Hetzner VPS IP
-
-# 3. Add USG static route (Unifi Controller UI)
-#    Settings > Routing & Firewall > Static Routes > Add:
-#    Name: private-exit-node
-#    Destination: 0.0.0.0/0
-#    Next Hop: 192.168.1.55
-#    Distance: 1
 ```
+
+### Step 2: Verify the tunnel is up
+
+```bash
+kubectl exec -n private-exit-node deploy/exit-node-gateway -- wg show
+```
+
+Look for `latest handshake` within the last few seconds and non-zero `transfer` bytes received.
+
+### Step 3: Route LAN traffic through the VPN
+
+Open the **Unifi Controller UI** and add a static route:
+
+1. Go to **Settings > Routing & Firewall > Static Routes**
+2. Click **Add New Route**
+3. Fill in:
+
+   | Field | Value |
+   |-------|-------|
+   | Name | `private-exit-node` |
+   | Destination | `0.0.0.0/0` |
+   | Next Hop | `192.168.1.55` |
+   | Distance | `1` |
+
+4. Click **Save**
+
+This tells the USG to forward all LAN traffic to the Pi (192.168.1.55), where the gateway pod routes it through the VPN tunnel to Germany. Takes effect immediately for all devices on the network — no per-device configuration or DHCP renewal needed.
+
+### Step 4: Confirm from a LAN device
+
+From your laptop (or any device on the LAN):
+
+```bash
+curl -4 https://ifconfig.me
+```
+
+Should return `116.203.184.39` (the Hetzner VPS IP). If it still shows your AT&T IP, wait a few seconds for the USG route to propagate.
 
 ## Deactivate
 
-```bash
-# 1. Remove USG static route
-#    Unifi UI > Settings > Routing & Firewall > Static Routes
-#    Delete "private-exit-node" route
+### Step 1: Remove the USG static route
 
-# 2. Scale down
+1. Open **Unifi Controller UI**
+2. Go to **Settings > Routing & Firewall > Static Routes**
+3. Delete the `private-exit-node` route
+4. Click **Save**
+
+LAN traffic immediately reverts to the normal AT&T path.
+
+### Step 2: Scale down the gateway pod
+
+```bash
 kubectl scale deployment exit-node-gateway -n private-exit-node --replicas=0
 ```
+
+The pod stops, WireGuard interface is cleaned up. Zero resource usage until next activation.
 
 ## Switch Obfuscation Mode
 
