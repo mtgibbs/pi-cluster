@@ -23,7 +23,7 @@ spec:
         kubernetes.io/hostname: pi-k3s
       containers:
         - name: gateway
-          image: ghcr.io/mtgibbs/exit-node-gateway:latest
+          image: ghcr.io/mtgibbs/private-exit-node:0.1.0 # {"$imagepolicy": "flux-system:private-exit-node"}
           command: ["/bin/bash", "/entrypoint/entrypoint.sh"]
           securityContext:
             capabilities:

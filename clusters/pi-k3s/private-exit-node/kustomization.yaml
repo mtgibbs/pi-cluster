@@ -5,3 +5,4 @@ resources:
   - external-secret.yaml
   - gateway-config.yaml
   - deployment.yaml
+  - image-automation.yaml
