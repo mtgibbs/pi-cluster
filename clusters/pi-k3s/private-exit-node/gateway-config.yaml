@@ -11,6 +11,14 @@ data:
     echo "=== Private Exit Node Gateway ==="
     echo "Mode: ${TUNNEL_MODE}"
 
+    # --- Cleanup from previous runs (hostNetwork persists state) ---
+    echo "Cleaning up previous state..."
+    ip link del wg0 2>/dev/null || true
+    ip rule del fwmark 100 table 100 2>/dev/null || true
+    ip route del default via 10.66.66.1 dev wg0 table 100 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -s 192.168.1.0/24 -j MARK --set-mark 100 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 192.168.1.0/24 -o wg0 -j MASQUERADE 2>/dev/null || true
+
     # --- Start obfuscation tunnel ---
     case "${TUNNEL_MODE}" in
       shadowsocks)
