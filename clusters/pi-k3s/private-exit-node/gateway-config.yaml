@@ -11,25 +11,10 @@ data:
     echo "=== Private Exit Node Gateway ==="
     echo "Mode: ${TUNNEL_MODE}"
 
-    # --- Write WireGuard config ---
-    mkdir -p /etc/wireguard
-    cat > /etc/wireguard/wg0.conf <<WGEOF
-    [Interface]
-    Address = 10.66.66.2/24
-    PrivateKey = ${WG_PRIVATE_KEY}
-
-    [Peer]
-    PublicKey = ${WG_PEER_PUBLIC_KEY}
-    Endpoint = 127.0.0.1:51820
-    AllowedIPs = 0.0.0.0/0
-    PersistentKeepalive = 25
-    WGEOF
-
     # --- Start obfuscation tunnel ---
     case "${TUNNEL_MODE}" in
       shadowsocks)
         echo "Starting Shadowsocks tunnel (primary)"
-        # Write sslocal config for tunnel mode
         mkdir -p /etc/shadowsocks
         cat > /etc/shadowsocks/config.json <<SSEOF
     {
@@ -66,18 +51,31 @@ data:
 
     TUNNEL_PID=$!
     echo "Tunnel PID: ${TUNNEL_PID}"
-
-    # Wait for tunnel to initialize
     sleep 3
 
-    # --- Bring up WireGuard ---
-    wg-quick up wg0
+    # --- Set up WireGuard manually (avoids wg-quick sysctl issues) ---
+    echo "${WG_PRIVATE_KEY}" > /tmp/wg-private-key
+    ip link add wg0 type wireguard
+    wg set wg0 \
+      private-key /tmp/wg-private-key \
+      peer "${WG_PEER_PUBLIC_KEY}" \
+      endpoint 127.0.0.1:51820 \
+      allowed-ips 0.0.0.0/0 \
+      persistent-keepalive 25
+    rm -f /tmp/wg-private-key
+    ip addr add 10.66.66.2/24 dev wg0
+    ip link set wg0 up
     echo "WireGuard interface up"
 
-    # --- Enable IPv4 forwarding ---
-    sysctl -w net.ipv4.ip_forward=1
+    # --- Policy routing: only forward LAN traffic through VPN ---
+    # Route table 100 sends traffic via WireGuard
+    ip route add default via 10.66.66.1 dev wg0 table 100
 
-    # --- NAT: masquerade LAN traffic going through the tunnel ---
+    # Mark forwarded LAN traffic, route it through VPN table
+    iptables -t mangle -A PREROUTING -s 192.168.1.0/24 -j MARK --set-mark 100
+    ip rule add fwmark 100 table 100
+
+    # NAT: masquerade LAN traffic going through the tunnel
     iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o wg0 -j MASQUERADE
 
     # --- Block IPv6 forwarding to prevent leaks ---
