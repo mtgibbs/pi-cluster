@@ -21,6 +21,8 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/hostname: pi-k3s
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       containers:
         - name: gateway
           image: ghcr.io/mtgibbs/private-exit-node:0.1.0 # {"$imagepolicy": "flux-system:private-exit-node"}
