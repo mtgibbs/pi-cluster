@@ -155,12 +155,14 @@ kubectl scale deployment exit-node-gateway -n private-exit-node --replicas=0
 
 ## Switch Obfuscation Mode
 
-```bash
-# Switch to wstunnel (WebSocket fallback)
-kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=wstunnel
+Default is **wstunnel** (WebSocket over TLS on port 8443). Shadowsocks tunnel mode has a known issue with `udp_over_tcp` where sslocal fails to establish the TCP connection (see Known Issues below).
 
-# Switch back to Shadowsocks (primary)
+```bash
+# Switch to Shadowsocks (currently broken - see Known Issues)
 kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=shadowsocks
+
+# Switch back to wstunnel (default, working)
+kubectl set env deployment/exit-node-gateway -n private-exit-node TUNNEL_MODE=wstunnel
 ```
 
 The deployment automatically restarts with the new tunnel mode.
@@ -278,3 +280,26 @@ To rotate ALL keys (WireGuard + Shadowsocks), delete the 1Password item first, t
 - **Versioning**: Semver via release-please, Flux image automation updates deployment
 - **Multi-arch**: linux/amd64, linux/arm64
 - **Contents**: Alpine + wireguard-tools + shadowsocks-rust (sslocal) + wstunnel + iptables
+
+## Known Issues
+
+### Shadowsocks tunnel mode not establishing TCP connection
+
+**Status**: Open
+
+sslocal in tunnel mode with `udp_over_tcp: true` logs a warning at startup:
+```
+WARN no valid UDP server serving for UDP clients, consider disable UDP with "mode": "tcp_only", currently chose <VPS_IP>:443
+```
+
+Despite WireGuard sending UDP packets to sslocal's local listener (127.0.0.1:51820), sslocal never establishes a TCP connection to the VPS. The WireGuard handshake never completes (0 B received).
+
+**Workaround**: Use wstunnel mode (default). wstunnel immediately establishes the WebSocket/TLS connection and the WireGuard tunnel works correctly.
+
+**Investigation needed**: May be a version incompatibility between sslocal 1.21.2 tunnel mode and `udp_over_tcp`. The ssserver on the VPS runs the same version and has matching config.
+
+### hostNetwork cleanup on restart
+
+**Status**: Fixed
+
+With `hostNetwork: true`, the WireGuard interface and iptables/routing rules persist on the host between container restarts. The entrypoint script now includes cleanup logic that runs before setup to remove stale state.
