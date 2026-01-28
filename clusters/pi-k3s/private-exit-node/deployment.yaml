@@ -34,7 +34,7 @@ spec:
                 - NET_RAW
           env:
             - name: TUNNEL_MODE
-              value: "shadowsocks"
+              value: "wstunnel"
             - name: WG_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
