@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-entrypoint
+  namespace: private-exit-node
+data:
+  entrypoint.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "=== Private Exit Node Gateway ==="
+    echo "Mode: ${TUNNEL_MODE}"
+
+    # --- Write WireGuard config ---
+    mkdir -p /etc/wireguard
+    cat > /etc/wireguard/wg0.conf <<WGEOF
+    [Interface]
+    Address = 10.66.66.2/24
+    PrivateKey = ${WG_PRIVATE_KEY}
+
+    [Peer]
+    PublicKey = ${WG_PEER_PUBLIC_KEY}
+    Endpoint = 127.0.0.1:51820
+    AllowedIPs = 0.0.0.0/0
+    PersistentKeepalive = 25
+    WGEOF
+
+    # --- Start obfuscation tunnel ---
+    case "${TUNNEL_MODE}" in
+      shadowsocks)
+        echo "Starting Shadowsocks tunnel (primary)"
+        # Write sslocal config for tunnel mode
+        mkdir -p /etc/shadowsocks
+        cat > /etc/shadowsocks/config.json <<SSEOF
+    {
+      "locals": [
+        {
+          "local_address": "127.0.0.1",
+          "local_port": 51820,
+          "forward_address": "127.0.0.1",
+          "forward_port": 51820,
+          "protocol": "tunnel",
+          "mode": "udp_only"
+        }
+      ],
+      "server": "${VPS_IP}",
+      "server_port": 443,
+      "password": "${SS_PASSWORD}",
+      "method": "2022-blake3-aes-256-gcm",
+      "udp_over_tcp": true
+    }
+    SSEOF
+        sslocal -c /etc/shadowsocks/config.json &
+        ;;
+      wstunnel)
+        echo "Starting wstunnel (fallback)"
+        wstunnel client \
+          -L "udp://127.0.0.1:51820:127.0.0.1:51820" \
+          "wss://${VPS_IP}:8443" &
+        ;;
+      *)
+        echo "ERROR: Unknown TUNNEL_MODE: ${TUNNEL_MODE}"
+        exit 1
+        ;;
+    esac
+
+    TUNNEL_PID=$!
+    echo "Tunnel PID: ${TUNNEL_PID}"
+
+    # Wait for tunnel to initialize
+    sleep 3
+
+    # --- Bring up WireGuard ---
+    wg-quick up wg0
+    echo "WireGuard interface up"
+
+    # --- Enable IPv4 forwarding ---
+    sysctl -w net.ipv4.ip_forward=1
+
+    # --- NAT: masquerade LAN traffic going through the tunnel ---
+    iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o wg0 -j MASQUERADE
+
+    # --- Block IPv6 forwarding to prevent leaks ---
+    ip6tables -P FORWARD DROP
+
+    echo "=== Gateway active (mode: ${TUNNEL_MODE}) ==="
+
+    # Keep running - wait on tunnel process
+    wait ${TUNNEL_PID}

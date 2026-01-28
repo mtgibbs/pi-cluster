@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exit-node-gateway
+  namespace: private-exit-node
+  labels:
+    app: exit-node-gateway
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: exit-node-gateway
+  template:
+    metadata:
+      labels:
+        app: exit-node-gateway
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: pi-k3s
+      containers:
+        - name: gateway
+          image: ghcr.io/mtgibbs/exit-node-gateway:latest
+          command: ["/bin/bash", "/entrypoint/entrypoint.sh"]
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          env:
+            - name: TUNNEL_MODE
+              value: "shadowsocks"
+            - name: WG_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: exit-node-secrets
+                  key: wg-private-key
+            - name: WG_PEER_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: exit-node-secrets
+                  key: wg-peer-public-key
+            - name: SS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: exit-node-secrets
+                  key: ss-password
+            - name: VPS_IP
+              valueFrom:
+                secretKeyRef:
+                  name: exit-node-secrets
+                  key: vps-ip
+          volumeMounts:
+            - name: entrypoint
+              mountPath: /entrypoint
+              readOnly: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      volumes:
+        - name: entrypoint
+          configMap:
+            name: gateway-entrypoint
+            defaultMode: 0755

@@ -487,3 +487,21 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 23. Private Exit Node - dormant VPN gateway (replicas: 0 by default)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: private-exit-node
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/private-exit-node
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
