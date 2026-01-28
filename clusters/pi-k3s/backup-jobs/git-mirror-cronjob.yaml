@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: git-mirror-backup
+  namespace: backup-jobs
+spec:
+  schedule: "30 3 * * 0"  # Every Sunday at 3:30 AM (after PVC backup at 2:00 AM)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: pi-k3s
+          containers:
+            - name: git-mirror
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  apk add --no-cache git curl jq
+
+                  GITHUB_USER="mtgibbs"
+                  GITHUB_TOKEN=$(cat /github/token)
+                  NAS_USER="mtgibbs"
+                  NAS_HOST="192.168.1.60"
+                  NAS_PATH="/volume1/cluster/backups/git-mirrors"
+                  WORK_DIR="/tmp/mirrors"
+                  SSH_KEY="/ssh/id_ed25519"
+
+                  echo "=== GitHub Repository Mirror Backup ==="
+                  echo "Date: $(date +%Y-%m-%d)"
+                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}"
+                  echo ""
+
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Create workspace and NAS target dir
+                  mkdir -p ${WORK_DIR}
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}"
+
+                  # Pull existing mirrors from NAS (incremental - avoids full re-clone)
+                  echo "--- Syncing existing mirrors from NAS ---"
+                  rsync -az -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                    ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/ ${WORK_DIR}/ 2>/dev/null || true
+
+                  # Fetch all repos from GitHub API (handles pagination)
+                  echo "--- Fetching repository list from GitHub ---"
+                  REPOS=$(curl -sf -H "Authorization: token ${GITHUB_TOKEN}" \
+                    "https://api.github.com/user/repos?per_page=100&affiliation=owner" \
+                    | jq -r '.[].clone_url')
+
+                  REPO_COUNT=$(echo "${REPOS}" | wc -l | tr -d ' ')
+                  echo "Found ${REPO_COUNT} repositories"
+                  echo ""
+
+                  # Mirror each repo
+                  for REPO_URL in ${REPOS}; do
+                    REPO_NAME=$(basename "${REPO_URL}" .git)
+                    MIRROR_DIR="${WORK_DIR}/${REPO_NAME}.git"
+                    # Inject token into clone URL for private repos
+                    AUTH_URL=$(echo "${REPO_URL}" | sed "s|https://|https://${GITHUB_TOKEN}@|")
+
+                    if [ -d "${MIRROR_DIR}" ]; then
+                      echo "--- Updating mirror: ${REPO_NAME} ---"
+                      cd "${MIRROR_DIR}"
+                      git remote set-url origin "${AUTH_URL}"
+                      git remote update --prune
+                      cd /
+                    else
+                      echo "--- Cloning new mirror: ${REPO_NAME} ---"
+                      git clone --mirror "${AUTH_URL}" "${MIRROR_DIR}"
+                    fi
+                  done
+
+                  echo ""
+                  echo "--- Syncing mirrors to NAS ---"
+                  rsync -az --delete \
+                    -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                    ${WORK_DIR}/ ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/
+
+                  echo ""
+                  echo "=== Mirror Backup Summary ==="
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/"
+
+                  echo ""
+                  echo "Git mirror backup completed successfully!"
+
+                  # Cleanup
+                  rm -f /tmp/id_ed25519
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+                - name: github-token
+                  mountPath: /github
+                  readOnly: true
+                - name: workspace
+                  mountPath: /tmp/mirrors
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400
+            - name: github-token
+              secret:
+                secretName: github-mirror-token
+                defaultMode: 0400
+            - name: workspace
+              emptyDir: {}

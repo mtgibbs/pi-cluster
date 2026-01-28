@@ -9,3 +9,5 @@ resources:
   - postgres-backup-cronjob.yaml
   - media-backup-cronjob.yaml
   - worker2-backup-cronjob.yaml
+  - git-mirror-external-secret.yaml
+  - git-mirror-cronjob.yaml
