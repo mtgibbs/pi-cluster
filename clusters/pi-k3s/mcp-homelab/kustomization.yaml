@@ -9,3 +9,5 @@ resources:
   - service.yaml
   - ingress.yaml
   - image-automation.yaml
+  - debug-agent-daemonset.yaml
+  - debug-agent-role.yaml

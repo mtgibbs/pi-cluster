@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mcp-debug-agent
+  namespace: mcp-homelab
+  labels:
+    app.kubernetes.io/name: mcp-debug-agent
+    app.kubernetes.io/part-of: mcp-homelab
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-debug-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-debug-agent
+    spec:
+      serviceAccountName: mcp-homelab
+      hostNetwork: true
+      hostPID: true
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: netshoot
+          image: nicolaka/netshoot:v0.13
+          command: ["sleep", "infinity"]
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
