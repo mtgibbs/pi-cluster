@@ -5,7 +5,7 @@ metadata:
 rules:
   # Read-only: Core resources
   - apiGroups: [""]
-    resources: [pods, services, nodes, events, configmaps, persistentvolumeclaims, namespaces]
+    resources: [pods, pods/log, services, nodes, events, configmaps, persistentvolumeclaims, namespaces]
     verbs: [get, list, watch]
 
   # Read-only: Apps
@@ -119,4 +119,29 @@ subjects:
 roleRef:
   kind: Role
   name: mcp-homelab-jellyfin-exec
+  apiGroup: rbac.authorization.k8s.io
+---
+# Namespace-scoped: pod exec in pihole (for DNS query testing)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mcp-homelab-pihole-exec
+  namespace: pihole
+rules:
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-homelab-pihole-exec
+  namespace: pihole
+subjects:
+  - kind: ServiceAccount
+    name: mcp-homelab
+    namespace: mcp-homelab
+roleRef:
+  kind: Role
+  name: mcp-homelab-pihole-exec
   apiGroup: rbac.authorization.k8s.io
