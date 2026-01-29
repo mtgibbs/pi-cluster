@@ -145,3 +145,28 @@ roleRef:
   kind: Role
   name: mcp-homelab-pihole-exec
   apiGroup: rbac.authorization.k8s.io
+---
+# Namespace-scoped: pod exec in mcp-homelab (for debug-agent tools)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mcp-homelab-debug-exec
+  namespace: mcp-homelab
+rules:
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-homelab-debug-exec
+  namespace: mcp-homelab
+subjects:
+  - kind: ServiceAccount
+    name: mcp-homelab
+    namespace: mcp-homelab
+roleRef:
+  kind: Role
+  name: mcp-homelab-debug-exec
+  apiGroup: rbac.authorization.k8s.io
