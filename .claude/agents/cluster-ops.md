@@ -18,28 +18,35 @@ Before starting a task, you **MUST** consult the relevant expert skill if the ta
 
 ## MCP Homelab Tools (IMPORTANT)
 The parent assistant has access to MCP homelab tools (`mcp__homelab__*`) that provide
-structured, read-only cluster data **without needing kubectl**. The parent will typically
+structured cluster data **without needing kubectl**. The parent will typically
 call MCP tools directly for status checks and pass the results to you as context.
 
 **You should expect MCP data in your prompt** for tasks like:
 - Cluster health, pod status, node resources
+- Pod logs (via `get_pod_logs`)
 - DNS status, Pi-hole queries, whitelist
 - Flux sync status
 - Certificate status, ingress status
 - Backup job status
-- External Secrets sync status
 - Tailscale connector status
 - Media services health (Jellyfin, Immich)
+- Network diagnostics (node networking, iptables, conntrack, connectivity tests)
 
 **When you are delegated a task**, the parent may have already gathered MCP data.
 Use that context instead of re-running equivalent kubectl commands.
 
+### Known Broken MCP Tools (use kubectl instead)
+These tools have bugs and require kubectl workarounds:
+- `get_secrets_status` — returns 404, use: `kubectl get externalsecrets -A`
+- `test_dns_query` — exec fails, use: `kubectl exec -n pihole <pod> -- dig <domain>`
+- `get_dns_status` (stats only) — Pi-hole v6 API issue, pod status still works
+
 **You are still needed for**:
-- Reading pod logs (`kubectl logs`) — no MCP tool for this
 - Editing manifests and GitOps files
 - Git operations (commit, push)
 - Running arbitrary kubectl commands not covered by MCP
 - Complex troubleshooting that requires interactive investigation
+- Workarounds for broken MCP tools listed above
 
 ## Your Expertise
 - K3s on Raspberry Pi 5 (ARM64, 8GB RAM)

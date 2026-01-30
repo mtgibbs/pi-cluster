@@ -23,35 +23,63 @@ If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 ### 3. MCP-First Protocol
 MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to cluster data.
 
-**For read-only status checks — use MCP tools directly:**
+**For status checks and diagnostics — use MCP tools directly:**
+
+#### Cluster & Workloads
 | Operation | MCP Tool |
 | :--- | :--- |
 | Cluster health | `get_cluster_health` |
-| DNS / Pi-hole status | `get_dns_status` |
-| DNS resolution test | `test_dns_query` |
-| Pi-hole query log | `get_pihole_queries` |
-| Pi-hole whitelist | `get_pihole_whitelist` |
-| Gravity update | `update_pihole_gravity` |
-| Flux sync status | `get_flux_status` |
-| Flux reconcile | `reconcile_flux` |
+| Pod logs | `get_pod_logs` |
+| Restart deployment | `restart_deployment` |
+
+#### DNS & Pi-hole
+| Operation | MCP Tool | Status |
+| :--- | :--- | :--- |
+| DNS / Pi-hole status | `get_dns_status` | ⚠️ Stats broken ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) |
+| DNS resolution test | `test_dns_query` | ❌ Broken ([#18](https://github.com/mtgibbs/pi-cluster-mcp/issues/18)) |
+| Pi-hole query log | `get_pihole_queries` | |
+| Pi-hole whitelist | `get_pihole_whitelist` | |
+| Gravity update | `update_pihole_gravity` | |
+
+#### GitOps & Secrets
+| Operation | MCP Tool | Status |
+| :--- | :--- | :--- |
+| Flux sync status | `get_flux_status` | |
+| Flux reconcile | `reconcile_flux` | |
+| Secrets sync status | `get_secrets_status` | ❌ Broken ([#16](https://github.com/mtgibbs/pi-cluster-mcp/issues/16)) |
+| Refresh a secret | `refresh_secret` | |
+
+#### Infrastructure
+| Operation | MCP Tool |
+| :--- | :--- |
 | Certificate status | `get_certificate_status` |
-| Secrets sync status | `get_secrets_status` |
-| Refresh a secret | `refresh_secret` |
 | Ingress status | `get_ingress_status` |
 | Tailscale status | `get_tailscale_status` |
 | Backup status | `get_backup_status` |
 | Trigger backup | `trigger_backup` |
+
+#### Media Services
+| Operation | MCP Tool |
+| :--- | :--- |
 | Media services health | `get_media_status` |
 | Fix Jellyfin metadata | `fix_jellyfin_metadata` |
 | Touch NAS path | `touch_nas_path` |
-| Restart deployment | `restart_deployment` |
+
+#### Network Diagnostics
+| Operation | MCP Tool |
+| :--- | :--- |
+| Node networking info | `get_node_networking` |
+| iptables rules | `get_iptables_rules` |
+| Connection tracking | `get_conntrack_entries` |
+| Test ingress HTTP(S) | `curl_ingress` |
+| Test pod connectivity | `test_pod_connectivity` |
 
 **Delegate to `cluster-ops` only when you need:**
-- Pod logs (no MCP tool for this)
 - Editing manifests / GitOps files
 - Git operations (commit, push)
 - Arbitrary kubectl commands not covered above
 - Complex multi-step troubleshooting
+- Workarounds for broken MCP tools (use kubectl directly)
 
 ## Service Index
 
