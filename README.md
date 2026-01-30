@@ -91,36 +91,91 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 
 ## Stack
 
+### Core Infrastructure
 | Component | Version | Purpose |
 |-----------|---------|---------|
 | K3s | v1.34.3+k3s1 | Lightweight Kubernetes |
 | Flux | v2.x | GitOps operator |
 | External Secrets Operator | 1.2.0 | Secrets sync from 1Password |
-| nginx-ingress | latest | Ingress controller (hostPort 443) |
-| cert-manager | latest | TLS certificates (Let's Encrypt via Cloudflare) |
-| kube-prometheus-stack | latest | Prometheus + Grafana |
-| Pi-hole | latest (v6) | DNS-level ad blocking (HA with 2 instances) |
+| nginx-ingress | 4.12.0 | Ingress controller (hostPort 443) |
+| cert-manager | v1.17.1 | TLS certificates (Let's Encrypt via Cloudflare) |
+
+### DNS & VPN
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| Pi-hole | v6 (latest) | DNS-level ad blocking (HA with 2 instances) |
 | Unbound | latest | Recursive DNS resolver |
 | Tailscale | v1.92.5 | VPN with exit node for mobile ad blocking |
+
+### Observability
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| kube-prometheus-stack | 80.6.0 | Prometheus + Grafana |
+| Loki | 6.51.0 | Log aggregation |
 | Uptime Kuma | v2.x | Status page for home services |
 | AutoKuma | latest | GitOps-managed monitors for Uptime Kuma |
 | Homepage | latest | Unified dashboard with live service widgets |
-| Jellyfin | latest | Self-hosted media server (Plex alternative) |
-| Immich | v2.4.1 | Self-hosted photo backup and management |
-| PostgreSQL | 16 | Database for Immich with pgvector extension |
+
+### Media & Photos
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| Jellyfin | latest | Self-hosted media server |
+| Immich | 0.10.3 (chart) | Self-hosted photo backup and management |
+| Sonarr | latest | TV show management |
+| Radarr | latest | Movie management |
+| Lidarr | latest | Music management |
+| Prowlarr | latest | Indexer management |
+| Bazarr | latest | Subtitle management |
+| Jellyseerr | latest | Media request management |
+| qBittorrent | latest | Torrent client |
+| SABnzbd | latest | Usenet client |
+
+### Applications
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| n8n | latest | Workflow automation |
+| Ollama | latest | Local LLM inference |
+| CARL | 0.3.3 | AI assistant |
+| MCP Homelab | 0.1.12 | Claude Code cluster integration |
+| PostgreSQL | 16 | Database for Immich (pgvector) |
 | Valkey | latest | Redis-compatible cache for Immich |
 
 ## Service URLs
 
+### Dashboards & Monitoring
 | Service | URL |
 |---------|-----|
 | Homepage (Dashboard) | https://home.lab.mtgibbs.dev |
 | Grafana (Monitoring) | https://grafana.lab.mtgibbs.dev |
 | Uptime Kuma (Status) | https://status.lab.mtgibbs.dev |
 | Pi-hole Admin | https://pihole.lab.mtgibbs.dev |
-| Jellyfin (Media) | https://jellyfin.lab.mtgibbs.dev |
+
+### Media Services
+| Service | URL |
+|---------|-----|
+| Jellyfin (Streaming) | https://jellyfin.lab.mtgibbs.dev |
 | Immich (Photos) | https://immich.lab.mtgibbs.dev |
+| Jellyseerr (Requests) | https://requests.lab.mtgibbs.dev |
+| Sonarr (TV) | https://sonarr.lab.mtgibbs.dev |
+| Radarr (Movies) | https://radarr.lab.mtgibbs.dev |
+| Lidarr (Music) | https://lidarr.lab.mtgibbs.dev |
+| Bazarr (Subtitles) | https://bazarr.lab.mtgibbs.dev |
+| Prowlarr (Indexers) | https://prowlarr.lab.mtgibbs.dev |
+| qBittorrent | https://qbit.lab.mtgibbs.dev |
+| SABnzbd | https://sabnzbd.lab.mtgibbs.dev |
+
+### Applications
+| Service | URL |
+|---------|-----|
+| n8n (Automation) | https://n8n.lab.mtgibbs.dev |
+| CARL (AI Assistant) | https://carl.lab.mtgibbs.dev |
+| MCP Homelab (Claude Code) | https://mcp.lab.mtgibbs.dev |
 | Personal Website | https://site.lab.mtgibbs.dev |
+
+### External Services (Reverse Proxy)
+| Service | URL |
+|---------|-----|
+| Plex | https://plex.lab.mtgibbs.dev |
 | Unifi Controller | https://unifi.lab.mtgibbs.dev |
 | Synology NAS | https://nas.lab.mtgibbs.dev |
 
@@ -136,28 +191,49 @@ Git Push → GitHub → Flux detects change → Applies to cluster
 │   └── pi-k3s/
 │       ├── flux-system/              # Flux bootstrap and orchestration
 │       │   └── infrastructure.yaml   # Kustomizations with dependencies
+│       │
+│       │   # Core Infrastructure
 │       ├── external-secrets/         # ESO Helm release
 │       ├── external-secrets-config/  # ClusterSecretStore for 1Password
 │       ├── ingress/                  # nginx-ingress HelmRelease
 │       ├── cert-manager/             # cert-manager HelmRelease
 │       ├── cert-manager-config/      # ClusterIssuers (Let's Encrypt) + Cloudflare secret
+│       │
+│       │   # DNS & VPN
 │       ├── pihole/                   # Pi-hole + Unbound + exporter + ingress
-│       ├── monitoring/               # kube-prometheus-stack + Grafana
-│       ├── uptime-kuma/              # Status page + AutoKuma monitors
-│       ├── homepage/                 # Homepage dashboard (unified landing page)
 │       ├── tailscale/                # Tailscale operator for VPN
 │       ├── tailscale-config/         # Exit node + subnet routes
+│       ├── cloudflare-tunnel/        # Cloudflare Tunnel for external access
+│       ├── private-exit-node/        # Alternative WireGuard exit node
+│       │
+│       │   # Observability
+│       ├── monitoring/               # kube-prometheus-stack + Grafana
+│       ├── log-aggregation/          # Loki for log collection
+│       ├── uptime-kuma/              # Status page + AutoKuma monitors
+│       ├── homepage/                 # Homepage dashboard
+│       │
+│       │   # Media Services
 │       ├── jellyfin/                 # Media server with NFS storage
 │       ├── immich/                   # Photo management with NFS storage
+│       ├── media/                    # *arr stack (Sonarr, Radarr, etc.)
+│       │
+│       │   # Applications
+│       ├── n8n/                      # Workflow automation
+│       ├── carl/                     # AI assistant
+│       ├── ollama/                   # Local LLM inference
+│       ├── mcp-homelab/              # Claude Code cluster integration
+│       ├── calendar/                 # Calendar file server
 │       ├── mtgibbs-site/             # Personal website with Flux auto-deploy
-│       ├── backup-jobs/              # PVC + PostgreSQL backups
+│       │
+│       │   # Operations
+│       ├── backup-jobs/              # PVC + PostgreSQL backups to NAS
 │       ├── flux-notifications/       # Discord deployment notifications
-│       └── external-services/        # Reverse proxies for external home infrastructure
+│       └── external-services/        # Reverse proxies for external infrastructure
 ├── docs/
 │   ├── flux-gitops.md                # Flux dependency chain reference
 │   ├── known-issues.md               # Current known issues
-│   ├── external-secrets-1password-sdk.md
-│   └── pihole-v6-api.md
+│   ├── recaps/                       # Session recaps
+│   └── plans/                        # Implementation plans
 ├── scripts/                          # Helper scripts
 └── .claude/
     ├── agents/                       # Sub-agent prompts (cluster-ops, recap-architect)

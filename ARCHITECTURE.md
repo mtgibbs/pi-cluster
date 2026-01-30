@@ -348,6 +348,8 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Each service gets TLS via cert-manager + Ingress              │  │
 │  │                                                                   │  │
 │  │  Services:                                                        │  │
+│  │  • Plex Media Server - https://plex.lab.mtgibbs.dev              │  │
+│  │    → 192.168.1.60:32400 (Synology package)                      │  │
 │  │  • Unifi Controller  - https://unifi.lab.mtgibbs.dev             │  │
 │  │    → 192.168.1.30:8443 (HTTPS backend)                          │  │
 │  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
@@ -484,6 +486,24 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: requests.lab.mtgibbs.dev                            │  │
 │  │                                                                   │  │
+│  │  Lidarr (Music Management)                                      │  │
+│  │  • Automated music downloading and organization                 │  │
+│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
+│  │  • Media library: NFS /volume1/cluster/media/music              │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: lidarr.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  │  Bazarr (Subtitle Management)                                   │  │
+│  │  • Automated subtitle downloading for Sonarr/Radarr             │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: bazarr.lab.mtgibbs.dev                              │  │
+│  │                                                                   │  │
+│  │  SABnzbd (Usenet Client)                                        │  │
+│  │  • Usenet download client for NZB files                         │  │
+│  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
+│  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress: sabnzbd.lab.mtgibbs.dev                             │  │
+│  │                                                                   │  │
 │  │  Storage Architecture:                                           │  │
 │  │  • NFS PVs on Synology (manual provisioning):                   │  │
 │  │    - media-downloads (10Gi) → /volume1/cluster/media/downloads  │  │
@@ -500,6 +520,101 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  User request (Jellyseerr) → Sonarr/Radarr → Prowlarr searches  │  │
 │  │  indexers → qBittorrent downloads via Mullvad VPN → Files land  │  │
 │  │  in NFS share → Jellyfin picks up new media                     │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                        n8n namespace                              │  │
+│  │                                                                   │  │
+│  │  n8n Workflow Automation                                         │  │
+│  │  • Self-hosted workflow automation (Zapier/Make alternative)     │  │
+│  │  • Image: n8nio/n8n:latest                                       │  │
+│  │  • SQLite database stored on NFS PVC                             │  │
+│  │  • Node affinity: prefers Pi 5 workers                           │  │
+│  │  • Resources: 100m-1000m CPU / 256Mi-1Gi memory                  │  │
+│  │  • Ingress: n8n.lab.mtgibbs.dev                                  │  │
+│  │                                                                   │  │
+│  │  Storage:                                                         │  │
+│  │  • NFS PVC for n8n data persistence                              │  │
+│  │  • Calendar NFS mount for file access                            │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    mcp-homelab namespace                          │  │
+│  │                                                                   │  │
+│  │  MCP Homelab (Claude Code Integration)                           │  │
+│  │  • Model Context Protocol server for homelab operations          │  │
+│  │  • Provides Claude Code with direct cluster access               │  │
+│  │  • Image: ghcr.io/mtgibbs/pi-cluster-mcp (auto-deployed)        │  │
+│  │  • Node affinity: prefers Pi 5 workers                           │  │
+│  │  • Resources: 50m-200m CPU / 128Mi-256Mi memory                  │  │
+│  │  • Read-only root filesystem for security                        │  │
+│  │  • Ingress: mcp.lab.mtgibbs.dev                                  │  │
+│  │                                                                   │  │
+│  │  Capabilities:                                                    │  │
+│  │  • Cluster health, pod logs, Flux status                        │  │
+│  │  • DNS operations, Pi-hole queries                               │  │
+│  │  • Certificate and secrets status                                │  │
+│  │  • Network diagnostics (iptables, conntrack)                     │  │
+│  │  • Media services health (Jellyfin, Immich)                      │  │
+│  │  • SSH access to NAS for file operations                         │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation:                                          │  │
+│  │  • ImagePolicy tracks semver releases (>=0.1.0)                  │  │
+│  │  • Auto-updates on new GHCR pushes                               │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                     calendar namespace                            │  │
+│  │                                                                   │  │
+│  │  Calendar File Server                                            │  │
+│  │  • Nginx static file server for ICS files                        │  │
+│  │  • Image: nginx:alpine                                           │  │
+│  │  • NFS PV mounted from Synology NAS                              │  │
+│  │  • Resources: 10m-50m CPU / 16Mi-32Mi memory                     │  │
+│  │  • Internal ClusterIP service (no external ingress)              │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                  private-exit-node namespace                      │  │
+│  │                                                                   │  │
+│  │  Private Exit Node (Alternative VPN Gateway)                     │  │
+│  │  • WireGuard-based VPN exit node for CGNAT bypass                │  │
+│  │  • Image: ghcr.io/mtgibbs/private-exit-node (auto-deployed)     │  │
+│  │  • Connects to external VPS via wstunnel                         │  │
+│  │  • Capabilities: NET_ADMIN, NET_RAW for tunnel creation          │  │
+│  │  • Node: pinned to pi-k3s (hostNetwork mode)                     │  │
+│  │  • Status: Currently scaled to 0 replicas (disabled)             │  │
+│  │                                                                   │  │
+│  │  Secrets (1Password):                                             │  │
+│  │  • WireGuard private/public keys                                 │  │
+│  │  • Shadowsocks password                                          │  │
+│  │  • VPS IP address                                                │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation:                                          │  │
+│  │  • ImagePolicy tracks semver releases (>=0.1.0)                  │  │
+│  │  • GHCR credentials via ExternalSecret                           │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    backup-jobs namespace                          │  │
+│  │                                                                   │  │
+│  │  Cluster Backup Operations                                       │  │
+│  │  • Scheduled backups to Synology NAS via rsync over SSH          │  │
+│  │  • Runs from pi-k3s node (access to local-path storage)          │  │
+│  │                                                                   │  │
+│  │  CronJobs:                                                        │  │
+│  │  • pvc-backup        - Weekly PVC snapshots (Sun 2:00 AM)        │  │
+│  │  • postgres-backup   - Weekly Immich DB dump (Sun 2:30 AM)       │  │
+│  │  • worker2-backup    - Weekly pi5-worker-2 (Sun 2:30 AM)         │  │
+│  │  • media-backup      - Weekly media configs (Sun 3:00 AM)        │  │
+│  │  • git-mirror-backup - Weekly git repos (Sun 3:30 AM)            │  │
+│  │                                                                   │  │
+│  │  Storage Target: /volume1/cluster/backups on Synology NAS       │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
