@@ -17,7 +17,6 @@ spec:
     spec:
       serviceAccountName: mcp-homelab
       hostNetwork: true
-      hostPID: true
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -39,7 +38,13 @@ spec:
           image: nicolaka/netshoot:v0.13
           command: ["sleep", "infinity"]
           securityContext:
-            privileged: true
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_ADMIN  # iptables-save, conntrack
+                - NET_RAW    # ping
           resources:
             requests:
               cpu: 10m
