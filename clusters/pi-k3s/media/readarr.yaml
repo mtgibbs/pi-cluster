@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: readarr
-          image: lscr.io/linuxserver/readarr:develop
+          image: linuxserver/readarr:0.4.18-develop
           env:
             - name: PUID
               value: "1029"
