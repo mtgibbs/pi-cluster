@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: readarr
-          image: ghcr.io/hotio/readarr:nightly
+          image: lscr.io/linuxserver/readarr:latest
           env:
             - name: PUID
               value: "1029"
