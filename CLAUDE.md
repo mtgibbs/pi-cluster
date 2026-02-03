@@ -36,18 +36,18 @@ MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to clust
 | Operation | MCP Tool | Status |
 | :--- | :--- | :--- |
 | DNS / Pi-hole status | `get_dns_status` | ⚠️ Stats broken ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) |
-| DNS resolution test | `test_dns_query` | ❌ Broken ([#18](https://github.com/mtgibbs/pi-cluster-mcp/issues/18)) |
-| Pi-hole query log | `get_pihole_queries` | |
-| Pi-hole whitelist | `get_pihole_whitelist` | |
-| Gravity update | `update_pihole_gravity` | |
+| DNS resolution test | `test_dns_query` | ✅ |
+| Pi-hole query log | `get_pihole_queries` | ✅ |
+| Pi-hole whitelist | `get_pihole_whitelist` | ✅ |
+| Gravity update | `update_pihole_gravity` | ✅ |
 
 #### GitOps & Secrets
 | Operation | MCP Tool | Status |
 | :--- | :--- | :--- |
-| Flux sync status | `get_flux_status` | |
-| Flux reconcile | `reconcile_flux` | |
-| Secrets sync status | `get_secrets_status` | ❌ Broken ([#16](https://github.com/mtgibbs/pi-cluster-mcp/issues/16)) |
-| Refresh a secret | `refresh_secret` | |
+| Flux sync status | `get_flux_status` | ✅ |
+| Flux reconcile | `reconcile_flux` | ✅ |
+| Secrets sync status | `get_secrets_status` | ✅ |
+| Refresh a secret | `refresh_secret` | ✅ |
 
 #### Infrastructure
 | Operation | MCP Tool |
@@ -66,13 +66,13 @@ MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to clust
 | Touch NAS path | `touch_nas_path` |
 
 #### Network Diagnostics
-| Operation | MCP Tool |
-| :--- | :--- |
-| Node networking info | `get_node_networking` |
-| iptables rules | `get_iptables_rules` |
-| Connection tracking | `get_conntrack_entries` |
-| Test ingress HTTP(S) | `curl_ingress` |
-| Test pod connectivity | `test_pod_connectivity` |
+| Operation | MCP Tool | Status |
+| :--- | :--- | :--- |
+| Node networking info | `get_node_networking` | ✅ |
+| iptables rules | `get_iptables_rules` | ✅ |
+| Connection tracking | `get_conntrack_entries` | ✅ |
+| Test ingress HTTP(S) | `curl_ingress` | ✅ |
+| Test pod connectivity | `test_pod_connectivity` | ✅ |
 
 **Delegate to `cluster-ops` only when you need:**
 - Editing manifests / GitOps files
