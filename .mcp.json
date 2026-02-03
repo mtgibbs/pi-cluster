@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "memory": {
+      "type": "stdio",
+      "command": "/usr/local/bin/node",
+      "args": [
+        "/Users/mtgibbs/dev/dev-space-mcp/memory-server.js"
+      ],
+      "env": {}
+    }
+  }
+}

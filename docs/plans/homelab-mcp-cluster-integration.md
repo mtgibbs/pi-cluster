@@ -439,3 +439,53 @@ curl -H "X-API-Key: $(op read 'op://pi-cluster/mcp-homelab-api-key/api-key')" \
 # Check logs
 kubectl logs -n mcp-homelab -l app=mcp-homelab -f
 ```
+
+---
+
+## Appendix: Post-Deployment Issues & Fixes
+
+### Issue 1: Exec-Based Tools Failing (Feb 2, 2026)
+
+**Symptom**: All exec-based MCP tools failing with `WebSocket connection failed (empty error)`
+
+**Root Cause**: RBAC ClusterRole had `create` verb on `pods/exec` but was missing `get` verb. The Kubernetes exec API requires BOTH verbs to establish the WebSocket upgrade handshake.
+
+**Fix** (commit e933486):
+```yaml
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create", "get"]  # Added "get"
+```
+
+**Affected Tools** (now working):
+- `test_dns_query`, `curl_ingress`, `test_pod_connectivity`
+- `get_node_networking`, `get_iptables_rules`, `get_conntrack_entries`
+
+**Diagnostic Process**:
+1. Added error logging to capture WebSocket errors (v0.1.17)
+2. Improved error extraction to read `ErrorEvent` properties (v0.1.18)
+3. Discovered error was `403 Forbidden` during WebSocket upgrade
+4. Added missing `get` verb to RBAC
+
+### Issue 2: Overly-Permissive Debug Agent (Feb 2, 2026)
+
+**Problem**: debug-agent DaemonSet used `privileged: true` and `hostPID: true`
+
+**Security Risk**: Privileged containers have full root access and can escape to host
+
+**Fix** (commit 509b39d):
+```yaml
+securityContext:
+  privileged: false
+  capabilities:
+    drop: [ALL]
+    add:
+      - NET_ADMIN  # Required: iptables-save, conntrack
+      - NET_RAW    # Required: ping (ICMP raw sockets)
+hostPID: false       # Removed, not needed
+hostNetwork: true    # Kept, required for network diagnostics
+```
+
+**Outcome**: Reduced attack surface while maintaining functionality
+
+**See**: `/Users/mtgibbs/dev/pi-cluster/docs/session-recaps/2026-02-02-mcp-exec-tools-security-fix.md` for full details
