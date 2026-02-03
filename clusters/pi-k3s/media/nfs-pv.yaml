@@ -81,3 +81,31 @@ spec:
   resources:
     requests:
       storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-books-nfs
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-media-books
+  nfs:
+    server: 192.168.1.60
+    path: /volume1/cluster/books
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-books
+  namespace: media
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-media-books
+  resources:
+    requests:
+      storage: 200Gi

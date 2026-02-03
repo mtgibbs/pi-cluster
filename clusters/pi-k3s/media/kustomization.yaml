@@ -15,3 +15,5 @@ resources:
   - sabnzbd.yaml
   - lidarr.yaml
   - bazarr.yaml
+  - readarr.yaml
+  - calibre-web.yaml

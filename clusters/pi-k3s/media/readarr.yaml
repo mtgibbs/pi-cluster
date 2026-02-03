@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readarr
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: readarr
+  template:
+    metadata:
+      labels:
+        app: readarr
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+      containers:
+        - name: readarr
+          image: lscr.io/linuxserver/readarr:develop
+          env:
+            - name: PUID
+              value: "1029"
+            - name: PGID
+              value: "100"
+            - name: TZ
+              value: America/Chicago
+          ports:
+            - containerPort: 8787
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: downloads
+              mountPath: /downloads
+            - name: books
+              mountPath: /books
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "300m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: readarr-config
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: media-downloads
+        - name: books
+          persistentVolumeClaim:
+            claimName: media-books
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: readarr
+  namespace: media
+spec:
+  selector:
+    app: readarr
+  ports:
+    - port: 8787
+      targetPort: 8787
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: readarr
+  namespace: media
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - readarr.lab.mtgibbs.dev
+      secretName: readarr-tls
+  rules:
+    - host: readarr.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: readarr
+                port:
+                  number: 8787
