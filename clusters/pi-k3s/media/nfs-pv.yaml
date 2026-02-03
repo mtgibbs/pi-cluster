@@ -95,7 +95,7 @@ spec:
   storageClassName: nfs-media-books
   nfs:
     server: 192.168.1.60
-    path: /volume1/cluster/books
+    path: /volume1/cluster/media/books
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
