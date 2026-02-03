@@ -17,3 +17,4 @@ resources:
   - bazarr.yaml
   - readarr.yaml
   - calibre-web.yaml
+  - lazylibrarian.yaml

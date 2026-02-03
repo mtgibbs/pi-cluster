@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lazylibrarian
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lazylibrarian
+  template:
+    metadata:
+      labels:
+        app: lazylibrarian
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+      containers:
+        - name: lazylibrarian
+          image: lscr.io/linuxserver/lazylibrarian:latest
+          env:
+            - name: PUID
+              value: "1029"
+            - name: PGID
+              value: "100"
+            - name: TZ
+              value: America/Chicago
+          ports:
+            - containerPort: 5299
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: downloads
+              mountPath: /downloads
+            - name: books
+              mountPath: /books
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "300m"
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: lazylibrarian-config
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: media-downloads
+        - name: books
+          persistentVolumeClaim:
+            claimName: media-books
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lazylibrarian
+  namespace: media
+spec:
+  selector:
+    app: lazylibrarian
+  ports:
+    - port: 5299
+      targetPort: 5299
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lazylibrarian
+  namespace: media
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - lazylibrarian.lab.mtgibbs.dev
+      secretName: lazylibrarian-tls
+  rules:
+    - host: lazylibrarian.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lazylibrarian
+                port:
+                  number: 5299
