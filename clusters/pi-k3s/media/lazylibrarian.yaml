@@ -32,6 +32,8 @@ spec:
               value: "100"
             - name: TZ
               value: America/Chicago
+            - name: DOCKER_MODS
+              value: "linuxserver/mods:universal-calibre"
           ports:
             - containerPort: 5299
           volumeMounts:
@@ -43,11 +45,11 @@ spec:
               mountPath: /books
           resources:
             requests:
-              memory: "128Mi"
+              memory: "192Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
-              cpu: "300m"
+              memory: "768Mi"
+              cpu: "500m"
       volumes:
         - name: config
           persistentVolumeClaim:
