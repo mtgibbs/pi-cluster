@@ -34,6 +34,8 @@ spec:
               value: America/Chicago
             - name: DOCKER_MODS
               value: "linuxserver/mods:universal-calibre"
+            - name: CALIBRE_OVERRIDE_DATABASE_PATH
+              value: "/books/metadata.db"
           ports:
             - containerPort: 5299
           volumeMounts:
