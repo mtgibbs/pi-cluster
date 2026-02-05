@@ -280,3 +280,21 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  calibre-web.json: |
+    {
+      "type": "http",
+      "name": "Calibre-Web",
+      "url": "https://calibre.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  lazylibrarian.json: |
+    {
+      "type": "http",
+      "name": "LazyLibrarian",
+      "url": "https://lazylibrarian.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

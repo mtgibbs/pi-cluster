@@ -25,7 +25,7 @@ data:
         columns: 3
       Media:
         style: row
-        columns: 4
+        columns: 5
       Downloads:
         style: row
         columns: 4
@@ -149,6 +149,16 @@ data:
               key: "{{HOMEPAGE_VAR_IMMICH_API_KEY}}"
               version: 2
               fields: ["photos", "videos", "storage"]
+        - Calibre-Web:
+            icon: calibre-web.png
+            href: https://calibre.lab.mtgibbs.dev
+            description: eBook Library
+            siteMonitor: https://calibre.lab.mtgibbs.dev
+        - LazyLibrarian:
+            icon: lazylibrarian.png
+            href: https://lazylibrarian.lab.mtgibbs.dev
+            description: eBook Search & Management
+            siteMonitor: https://lazylibrarian.lab.mtgibbs.dev
         - Synology NAS:
             icon: synology.png
             href: https://nas.lab.mtgibbs.dev
