@@ -47,7 +47,7 @@ spec:
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/media"
 
                   # Media PVCs to backup (namespace_pvcname patterns)
-                  PVCS="media_prowlarr-config media_sonarr-config media_radarr-config media_qbittorrent-config media_jellyseerr-config"
+                  PVCS="media_prowlarr-config media_sonarr-config media_radarr-config media_qbittorrent-config media_jellyseerr-config media_lazylibrarian-config media_calibre-web-config media_readarr-config media_lidarr-config"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"
