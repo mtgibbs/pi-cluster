@@ -20,8 +20,12 @@ If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 
 **DO NOT** attempt to answer technical questions from your general knowledge. **ALWAYS** load the skill first.
 
-### 3. MCP-First Protocol
+### 3. MCP-First Protocol (CRITICAL)
 MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to cluster data.
+
+**NEVER use kubectl via `cluster-ops` or Bash when an MCP tool exists for the operation.**
+This includes pod logs, deployment restarts, resource inspection, queue checks, and all status queries.
+Only fall back to kubectl for operations with NO MCP equivalent.
 
 **For status checks and diagnostics — use MCP tools directly:**
 
@@ -31,6 +35,10 @@ MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to clust
 | Cluster health | `get_cluster_health` |
 | Pod logs | `get_pod_logs` |
 | Restart deployment | `restart_deployment` |
+| Inspect resource | `describe_resource` |
+| List PVCs | `get_pvcs` |
+| CronJob details | `get_cronjob_details` |
+| Job logs | `get_job_logs` |
 
 #### DNS & Pi-hole
 | Operation | MCP Tool | Status |
@@ -64,6 +72,37 @@ MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to clust
 | Media services health | `get_media_status` |
 | Fix Jellyfin metadata | `fix_jellyfin_metadata` |
 | Touch NAS path | `touch_nas_path` |
+| Subtitle status | `get_subtitle_status` |
+| Subtitle history | `get_subtitle_history` |
+| Search subtitles | `search_subtitles` |
+
+#### Sonarr (TV)
+| Operation | MCP Tool |
+| :--- | :--- |
+| Download queue | `get_sonarr_queue` |
+| Recent history | `get_sonarr_history` |
+| Manual episode search | `search_sonarr_episode` |
+
+#### Radarr (Movies)
+| Operation | MCP Tool |
+| :--- | :--- |
+| Download queue | `get_radarr_queue` |
+| Recent history | `get_radarr_history` |
+| Manual movie search | `search_radarr_movie` |
+
+#### SABnzbd (Downloads)
+| Operation | MCP Tool |
+| :--- | :--- |
+| Download queue | `get_sabnzbd_queue` |
+| Download history | `get_sabnzbd_history` |
+| Retry failed download | `retry_sabnzbd_download` |
+| Pause/resume queue | `pause_resume_sabnzbd` |
+
+#### Shared Media Tools
+| Operation | MCP Tool |
+| :--- | :--- |
+| Quality profiles | `get_quality_profile` |
+| Reject & re-search | `reject_and_search` |
 
 #### Network Diagnostics
 | Operation | MCP Tool | Status |
@@ -77,8 +116,8 @@ MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to clust
 **Delegate to `cluster-ops` only when you need:**
 - Editing manifests / GitOps files
 - Git operations (commit, push)
-- Arbitrary kubectl commands not covered above
-- Complex multi-step troubleshooting
+- kubectl commands with NO MCP equivalent (e.g., `scale`, `exec`, `apply`)
+- Complex multi-step troubleshooting requiring shell pipelines
 - Workarounds for broken MCP tools (use kubectl directly)
 
 ## Service Index
