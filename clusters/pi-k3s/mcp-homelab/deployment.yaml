@@ -53,6 +53,26 @@ spec:
                 secretKeyRef:
                   name: mcp-homelab-secrets
                   key: immich-api-key
+            - name: BAZARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: bazarr-api-key
+            - name: SONARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: sonarr-api-key
+            - name: RADARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: radarr-api-key
+            - name: SABNZBD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: sabnzbd-api-key
           volumeMounts:
             - name: ssh-key
               mountPath: /secrets/ssh
