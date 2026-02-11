@@ -79,10 +79,10 @@ spec:
               resources:
                 requests:
                   cpu: 100m
-                  memory: 512Mi
+                  memory: 256Mi
                 limits:
                   cpu: 2000m
-                  memory: 2Gi
+                  memory: 768Mi
       ingress:
         main:
           enabled: true
