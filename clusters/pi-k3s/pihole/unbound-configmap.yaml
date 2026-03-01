@@ -4,6 +4,10 @@ metadata:
   name: unbound-config
   namespace: pihole
 data:
+  dnssec-exceptions.conf: |
+    server:
+      # Domains with broken DNSSEC configs (DS published but no valid DNSKEY)
+      domain-insecure: "peaceloveandpizza.com"
   unbound.conf: |
     server:
       verbosity: 1
@@ -51,9 +55,6 @@ data:
 
       # Deny queries of type ANY (reduces attack surface)
       deny-any: yes
-
-      # DNSSEC exceptions for domains with broken DNSSEC configs
-      domain-insecure: "peaceloveandpizza.com"
 
       # Aggressive NSEC uses cached NSEC records for negative answers
       aggressive-nsec: yes

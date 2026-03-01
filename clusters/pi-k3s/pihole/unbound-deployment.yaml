@@ -31,6 +31,9 @@ spec:
             - name: unbound-config
               mountPath: /opt/unbound/etc/unbound/unbound.conf
               subPath: unbound.conf
+            - name: unbound-config
+              mountPath: /usr/local/unbound/conf.d/dnssec-exceptions.conf
+              subPath: dnssec-exceptions.conf
           resources:
             requests:
               memory: "64Mi"
