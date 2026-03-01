@@ -52,6 +52,9 @@ data:
       # Deny queries of type ANY (reduces attack surface)
       deny-any: yes
 
+      # DNSSEC exceptions for domains with broken DNSSEC configs
+      domain-insecure: "peaceloveandpizza.com"
+
       # Aggressive NSEC uses cached NSEC records for negative answers
       aggressive-nsec: yes
 
