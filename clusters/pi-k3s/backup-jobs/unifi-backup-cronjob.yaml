@@ -59,28 +59,32 @@ spec:
                   fi
                   echo "Authentication successful"
 
-                  # Trigger backup generation
-                  echo "--- Triggering backup export ---"
-                  BACKUP_RESPONSE=$(curl -sk \
+                  # List auto-backups and find the latest one
+                  # NOTE: CK Gen1 on 6.1.71 cannot generate on-demand backups (cmd:backup hangs).
+                  # Instead we download the most recent auto-backup (monthly, configured on controller).
+                  echo "--- Finding latest auto-backup ---"
+                  BACKUP_LIST=$(curl -sk --max-time 15 \
                     -X POST "${CONTROLLER}/api/s/${SITE}/cmd/backup" \
                     -H "Content-Type: application/json" \
                     -b "${COOKIE_JAR}" \
-                    -d "{\"cmd\":\"backup\",\"days\":0}")
+                    -d '{"cmd":"list-backups"}')
 
-                  BACKUP_URL=$(echo "${BACKUP_RESPONSE}" | jq -r '.data[0].url // empty')
+                  LATEST_FILE=$(echo "${BACKUP_LIST}" | jq -r '.data | sort_by(.time) | last | .filename // empty')
 
-                  if [ -z "${BACKUP_URL}" ]; then
-                    echo "ERROR: Failed to trigger backup"
-                    echo "${BACKUP_RESPONSE}"
+                  if [ -z "${LATEST_FILE}" ]; then
+                    echo "ERROR: No auto-backups found on controller"
+                    echo "${BACKUP_LIST}"
                     exit 1
                   fi
-                  echo "Backup generated: ${BACKUP_URL}"
+
+                  LATEST_DATE=$(echo "${BACKUP_LIST}" | jq -r '.data | sort_by(.time) | last | .datetime')
+                  echo "Latest auto-backup: ${LATEST_FILE} (${LATEST_DATE})"
 
                   # Download the backup file
                   echo "--- Downloading backup ---"
-                  curl -sk -o /tmp/unifi-backup.unf \
+                  curl -sk --max-time 60 -o /tmp/unifi-backup.unf \
                     -b "${COOKIE_JAR}" \
-                    "${CONTROLLER}${BACKUP_URL}"
+                    "${CONTROLLER}/dl/autobackup/${LATEST_FILE}"
 
                   BACKUP_SIZE=$(wc -c < /tmp/unifi-backup.unf)
                   echo "Downloaded backup: ${BACKUP_SIZE} bytes"
