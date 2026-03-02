@@ -11,3 +11,5 @@ resources:
   - worker2-backup-cronjob.yaml
   - git-mirror-external-secret.yaml
   - git-mirror-cronjob.yaml
+  - unifi-backup-secret.yaml
+  - unifi-backup-cronjob.yaml

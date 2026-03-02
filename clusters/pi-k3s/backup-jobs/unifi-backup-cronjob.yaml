@@ -1,0 +1,142 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: unifi-backup
+  namespace: backup-jobs
+spec:
+  schedule: "30 3 * * 0"  # Every Sunday at 3:30 AM (after PVC backup at 2:00 AM)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: unifi-backup
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  apk add --no-cache curl jq openssh-client
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  CONTROLLER="https://192.168.1.30:8443"
+                  SITE="default"
+                  NAS_USER="mtgibbs"
+                  NAS_HOST="192.168.1.60"
+                  NAS_PATH="/volume1/cluster/backups/${BACKUP_DATE}/unifi"
+                  SSH_KEY="/ssh/id_ed25519"
+                  COOKIE_JAR="/tmp/unifi_cookies"
+
+                  echo "=== UniFi Config Backup ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo "Controller: ${CONTROLLER}"
+                  echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}"
+                  echo ""
+
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Authenticate with UniFi controller (classic API for CK Gen1)
+                  echo "--- Authenticating with UniFi controller ---"
+                  HTTP_CODE=$(curl -sk -o /tmp/auth_response -w "%{http_code}" \
+                    -X POST "${CONTROLLER}/api/login" \
+                    -H "Content-Type: application/json" \
+                    -c "${COOKIE_JAR}" \
+                    -d "{\"username\":\"${UNIFI_USERNAME}\",\"password\":\"${UNIFI_PASSWORD}\"}")
+
+                  if [ "${HTTP_CODE}" != "200" ]; then
+                    echo "ERROR: Authentication failed (HTTP ${HTTP_CODE})"
+                    cat /tmp/auth_response
+                    exit 1
+                  fi
+                  echo "Authentication successful"
+
+                  # Trigger backup generation
+                  echo "--- Triggering backup export ---"
+                  BACKUP_RESPONSE=$(curl -sk \
+                    -X POST "${CONTROLLER}/api/s/${SITE}/cmd/backup" \
+                    -H "Content-Type: application/json" \
+                    -b "${COOKIE_JAR}" \
+                    -d "{\"cmd\":\"backup\",\"days\":0}")
+
+                  BACKUP_URL=$(echo "${BACKUP_RESPONSE}" | jq -r '.data[0].url // empty')
+
+                  if [ -z "${BACKUP_URL}" ]; then
+                    echo "ERROR: Failed to trigger backup"
+                    echo "${BACKUP_RESPONSE}"
+                    exit 1
+                  fi
+                  echo "Backup generated: ${BACKUP_URL}"
+
+                  # Download the backup file
+                  echo "--- Downloading backup ---"
+                  curl -sk -o /tmp/unifi-backup.unf \
+                    -b "${COOKIE_JAR}" \
+                    "${CONTROLLER}${BACKUP_URL}"
+
+                  BACKUP_SIZE=$(wc -c < /tmp/unifi-backup.unf)
+                  echo "Downloaded backup: ${BACKUP_SIZE} bytes"
+
+                  if [ "${BACKUP_SIZE}" -lt 1000 ]; then
+                    echo "ERROR: Backup file too small, likely failed"
+                    exit 1
+                  fi
+
+                  # Copy to NAS via SSH
+                  echo "--- Copying to NAS ---"
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}"
+
+                  scp -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    /tmp/unifi-backup.unf \
+                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/unifi-backup-${BACKUP_DATE}.unf"
+
+                  echo "Backup copied to NAS"
+
+                  # Cleanup old UniFi backups (keep last 4 weekly)
+                  echo "--- Cleaning up old UniFi backups ---"
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} \
+                    "find /volume1/cluster/backups/*/unifi -name '*.unf' -type f 2>/dev/null | sort -r | tail -n +5 | xargs -r rm -f"
+
+                  echo ""
+                  echo "=== UniFi Backup Complete ==="
+                  echo "File: unifi-backup-${BACKUP_DATE}.unf (${BACKUP_SIZE} bytes)"
+
+                  # Cleanup temp files
+                  rm -f /tmp/id_ed25519 /tmp/unifi-backup.unf ${COOKIE_JAR} /tmp/auth_response
+              env:
+                - name: UNIFI_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: unifi-credentials
+                      key: username
+                - name: UNIFI_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: unifi-credentials
+                      key: password
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400

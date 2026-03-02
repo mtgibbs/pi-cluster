@@ -7,6 +7,16 @@
         "/Users/mtgibbs/dev/dev-space-mcp/memory-server.js"
       ],
       "env": {}
+    },
+    "unifi": {
+      "type": "stdio",
+      "command": "go-unifi-mcp",
+      "env": {
+        "UNIFI_HOST": "https://192.168.1.30:8443",
+        "UNIFI_VERIFY_SSL": "false",
+        "UNIFI_SITE": "default",
+        "UNIFI_TOOL_MODE": "lazy"
+      }
     }
   }
 }
