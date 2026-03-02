@@ -42,51 +42,49 @@ A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing
 ### Request Flow
 
 ```
-┌──────────────┐      DNS Query        ┌──────────────────────────────────────┐
-│              │     (port 53)         │           Raspberry Pi               │
-│ Client       │ ───────────────────── │                                      │
-│ Devices      │                       │  ┌────────────────────────────────┐  │
-│              │                       │  │         Pi-hole                │  │
-│ • Phones     │                       │  │     (hostNetwork: true)        │  │
-│ • Laptops    │                       │  │                                │  │
-│ • IoT        │                       │  │  • Ad/tracker blocking         │  │
-│              │                       │  │  • DNS caching                 │  │
-└──────────────┘                       │  │  • Query logging               │  │
-                                       │  │  • Web UI on :80               │  │
-                                       │  └───────────┬────────────────────┘  │
-                                       │              │                       │
-                                       │              │ unbound.pihole.svc    │
-                                       │              │ .cluster.local:5335   │
-                                       │              ▼                       │
-                                       │  ┌────────────────────────────────┐  │
-                                       │  │         Unbound                │  │
-                                       │  │      (ClusterIP svc)           │  │
-                                       │  │                                │  │
-                                       │  │  • Recursive resolver          │  │
-                                       │  │  • DNSSEC validation           │  │
-                                       │  │  • No upstream forwarder       │  │
-                                       │  └───────────┬────────────────────┘  │
-                                       └──────────────┼───────────────────────┘
-                                                      │
-                              ┌────────────────────── │ ──────────────────────┐
-                              │                       ▼                       │
-                              │              ┌─────────────────┐              │
-                              │              │  Root DNS       │              │
-                              │              │  Servers        │              │
-                              │              └────────┬────────┘              │
-                              │                       │                       │
-                              │              ┌────────▼────────┐              │
-                              │              │  TLD Servers    │              │
-                              │              │  (.com, .org)   │              │
-                              │              └────────┬────────┘              │
-                              │                       │                       │
-                              │              ┌────────▼────────┐              │
-                              │              │  Authoritative  │              │
-                              │              │  Nameservers    │              │
-                              │              └─────────────────┘              │
-                              │                                               │
-                              │                  Internet                     │
-                              └───────────────────────────────────────────────┘
+                                    DNS Query (port 53)
+┌──────────────┐       ┌────────────────────────────────────────────────────────────┐
+│              │       │                                                            │
+│ Client       │       │   ┌─── pi-k3s (192.168.1.55) ───┐  ┌─ pi5-worker-1 ───┐  │
+│ Devices      │       │   │                              │  │ (192.168.1.56)   │  │
+│              │  DNS  │   │  ┌────────────────────────┐  │  │                  │  │
+│ • Phones     │ ─────▶│   │  │  Pi-hole PRIMARY       │  │  │  ┌────────────┐  │  │
+│ • Laptops    │       │   │  │  (hostNetwork: true)    │  │  │  │  Pi-hole   │  │  │
+│ • IoT        │       │   │  │  • Ad/tracker blocking  │  │  │  │ SECONDARY  │  │  │
+│              │       │   │  │  • DNS caching          │  │  │  │ (hostNet)  │  │  │
+│ Router DHCP  │       │   │  │  • Query logging        │  │  │  │            │  │  │
+│ advertises   │       │   │  │  • Web UI on :80        │  │  │  │ (same      │  │  │
+│ both IPs     │       │   │  └───────────┬────────────┘  │  │  │  config)    │  │  │
+└──────────────┘       │   │              │ :5335         │  │  └──────┬─────┘  │  │
+                       │   │              ▼               │  │         │ :5335  │  │
+                       │   │  ┌────────────────────────┐  │  │  ┌──────▼─────┐  │  │
+                       │   │  │  Unbound PRIMARY       │  │  │  │  Unbound   │  │  │
+                       │   │  │  • Recursive resolver   │  │  │  │ SECONDARY  │  │  │
+                       │   │  │  • DNSSEC validation    │  │  │  │ (same      │  │  │
+                       │   │  │  • serve-expired cache  │  │  │  │  config)   │  │  │
+                       │   │  └───────────┬────────────┘  │  │  └──────┬─────┘  │  │
+                       │   └──────────────┼───────────────┘  └─────────┼────────┘  │
+                       └──────────────────┼────────────────────────────┼────────────┘
+                                          │                            │
+                              ┌───────────┴────────────────────────────┴───────────┐
+                              │                       ▼                            │
+                              │              ┌─────────────────┐                   │
+                              │              │  Root DNS       │                   │
+                              │              │  Servers        │                   │
+                              │              └────────┬────────┘                   │
+                              │                       │                            │
+                              │              ┌────────▼────────┐                   │
+                              │              │  TLD Servers    │                   │
+                              │              │  (.com, .org)   │                   │
+                              │              └────────┬────────┘                   │
+                              │                       │                            │
+                              │              ┌────────▼────────┐                   │
+                              │              │  Authoritative  │                   │
+                              │              │  Nameservers    │                   │
+                              │              └─────────────────┘                   │
+                              │                                                    │
+                              │                  Internet                          │
+                              └────────────────────────────────────────────────────┘
 ```
 
 ### Why Recursive DNS (Unbound) Instead of Forwarding?
@@ -117,25 +115,36 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                      pihole namespace                             │  │
 │  │                                                                   │  │
+│  │  PRIMARY PAIR (pi-k3s / 192.168.1.55):                           │  │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │  │
-│  │  │    Pi-hole      │  │    Unbound      │  │ pihole-exporter  │  │  │
-│  │  │   Deployment    │  │   Deployment    │  │   Deployment     │  │  │
-│  │  │                 │  │                 │  │                  │  │  │
-│  │  │ pihole/pihole   │  │ madnuttah/      │  │ ekofr/pihole-    │  │  │
-│  │  │ :latest         │  │ unbound:latest  │  │ exporter:latest  │  │  │
-│  │  │ (on pi-k3s)     │  │ (pi3-worker-1)  │  │                  │  │  │
-│  │  └────────┬────────┘  └────────┬────────┘  └────────┬─────────┘  │  │
-│  │           │                    │                    │            │  │
-│  │  ┌────────▼────────┐  ┌────────▼────────┐  ┌────────▼─────────┐  │  │
-│  │  │    (hostNet)    │  │  ClusterIP svc  │  │  ClusterIP svc   │  │  │
-│  │  │  :53 UDP/TCP    │  │  :5335 UDP/TCP  │  │  :9617 metrics   │  │  │
-│  │  │  :80 HTTP       │  └─────────────────┘  └──────────────────┘  │  │
-│  │  └─────────────────┘                                             │  │
+│  │  │  Pi-hole        │  │  Unbound        │  │ pihole-exporter  │  │  │
+│  │  │  (primary)      │  │  (primary)      │  │ (primary)        │  │  │
+│  │  │  pihole/pihole  │  │  madnuttah/     │  │ ekofr/pihole-    │  │  │
+│  │  │  :latest        │  │  unbound:latest │  │ exporter:latest  │  │  │
+│  │  │  hostNet :53,:80│  │  nodeSelector:  │  │ → 192.168.1.55   │  │  │
+│  │  │  nodeSelector:  │  │    pi-k3s       │  │   :9617 metrics  │  │  │
+│  │  │    pi-k3s       │  │  svc :5335      │  │                  │  │  │
+│  │  └─────────────────┘  └─────────────────┘  └──────────────────┘  │  │
+│  │                                                                   │  │
+│  │  SECONDARY PAIR (pi5-worker-1 / 192.168.1.56):                   │  │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │  │
+│  │  │  Pi-hole        │  │  Unbound        │  │ pihole-exporter  │  │  │
+│  │  │  (secondary)    │  │  (secondary)    │  │ (secondary)      │  │  │
+│  │  │  pihole/pihole  │  │  madnuttah/     │  │ ekofr/pihole-    │  │  │
+│  │  │  :latest        │  │  unbound:latest │  │ exporter:latest  │  │  │
+│  │  │  hostNet :53,:80│  │  nodeSelector:  │  │ → 192.168.1.56   │  │  │
+│  │  │  nodeSelector:  │  │   pi5-worker-1  │  │   :9617 metrics  │  │  │
+│  │  │   pi5-worker-1  │  │  svc :5335      │  │                  │  │  │
+│  │  └─────────────────┘  └─────────────────┘  └──────────────────┘  │  │
 │  │                                                                   │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐ │  │
 │  │  │                     Storage (PVCs)                          │ │  │
+│  │  │  Primary:                                                   │ │  │
 │  │  │  • pihole-etc (1Gi)      → /etc/pihole                     │ │  │
 │  │  │  • pihole-dnsmasq (100Mi) → /etc/dnsmasq.d                 │ │  │
+│  │  │  Secondary:                                                 │ │  │
+│  │  │  • pihole-etc-secondary (1Gi) → /etc/pihole                │ │  │
+│  │  │  • pihole-dnsmasq-secondary (100Mi) → /etc/dnsmasq.d       │ │  │
 │  │  │  StorageClass: local-path (k3s default)                    │ │  │
 │  │  └─────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                   │  │
@@ -149,7 +158,10 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  │                      ConfigMaps                             │ │  │
 │  │  │  • pihole-adlists (adlists.txt)                            │ │  │
 │  │  │    GitOps-managed blocklists (Firebog curated, ~900k)      │ │  │
+│  │  │  • unbound-config (shared by both primary and secondary)   │ │  │
 │  │  └─────────────────────────────────────────────────────────────┘ │  │
+│  │                                                                   │  │
+│  │  Ingress: pihole.lab.mtgibbs.dev (primary only)                  │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
@@ -382,22 +394,6 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                    mtgibbs-site namespace                         │  │
-│  │                                                                   │  │
-│  │  Personal Website (Next.js)                                      │  │
-│  │  • Auto-deployed via Flux Image Automation                       │  │
-│  │  • Image: ghcr.io/mtgibbs/mtgibbs.xyz (multi-arch ARM64/AMD64)  │  │
-│  │  • Node affinity: prefers Pi 3 workers                          │  │
-│  │  • Ingress: site.lab.mtgibbs.dev                                │  │
-│  │                                                                   │  │
-│  │  Flux Image Automation (flux-system namespace):                  │  │
-│  │  • ImageRepository scans GHCR every 5 minutes                    │  │
-│  │  • ImagePolicy selects newest timestamp tag (YYYYMMDDHHmmss)     │  │
-│  │  • ImageUpdateAutomation updates deployment, commits, pushes     │  │
-│  │                                                                   │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                 cloudflare-tunnel namespace                       │  │
 │  │                                                                   │  │
 │  │  Cloudflare Tunnel (cloudflared)                                 │  │
@@ -445,9 +441,11 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • NFS storage on Synology NAS (192.168.1.60)                   │  │
 │  │                                                                   │  │
 │  │  qBittorrent + Gluetun (VPN)                                    │  │
-│  │  • Torrent client with Mullvad WireGuard sidecar                │  │
+│  │  • Torrent client with ProtonVPN OpenVPN sidecar (via Gluetun)  │  │
 │  │  • NET_ADMIN capability for VPN tunnel creation                 │  │
 │  │  • Server location: USA                                         │  │
+│  │  • VPN port forwarding enabled (NAT-PMP), auto-updates          │  │
+│  │    qBittorrent listen port via API                              │  │
 │  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: qbit.lab.mtgibbs.dev                                │  │
@@ -498,6 +496,32 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: bazarr.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
+│  │  LazyLibrarian (Book Search & Download)                         │  │
+│  │  • Automated book downloading and organization                  │  │
+│  │  • Image: lscr.io/linuxserver/lazylibrarian:latest              │  │
+│  │  • Docker mod: linuxserver/mods:universal-calibre               │  │
+│  │  • Pinned to pi5-worker-1 (required nodeAffinity)               │  │
+│  │  • NFS: /volume1/cluster/media/books (shared with Calibre-Web)  │  │
+│  │  • Config persisted on local-path PVC (2Gi)                     │  │
+│  │  • Ingress: lazylibrarian.lab.mtgibbs.dev                       │  │
+│  │                                                                   │  │
+│  │  Calibre-Web (Book Reader UI)                                   │  │
+│  │  • Web-based ebook reader and library browser                   │  │
+│  │  • Image: lscr.io/linuxserver/calibre-web:latest                │  │
+│  │  • Docker mod: linuxserver/mods:universal-calibre               │  │
+│  │  • Pinned to pi5-worker-1 (required nodeAffinity)               │  │
+│  │  • Shares media-books NFS PV with LazyLibrarian                 │  │
+│  │  • Config persisted on local-path PVC (2Gi)                     │  │
+│  │  • Ingress: calibre.lab.mtgibbs.dev                             │  │
+│  │                                                                   │  │
+│  │  Readarr (Book Management)                                      │  │
+│  │  • Automated book downloading via Prowlarr + SABnzbd/qBit      │  │
+│  │  • Image: linuxserver/readarr:0.4.18-develop                    │  │
+│  │  • Pinned to pi5-worker-1 (required nodeAffinity)               │  │
+│  │  • NFS: /volume1/cluster/media/books + /downloads               │  │
+│  │  • Config persisted on local-path PVC (2Gi)                     │  │
+│  │  • Ingress: readarr.lab.mtgibbs.dev                             │  │
+│  │                                                                   │  │
 │  │  SABnzbd (Usenet Client)                                        │  │
 │  │  • Usenet download client for NZB files                         │  │
 │  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
@@ -506,19 +530,21 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                                                                   │  │
 │  │  Storage Architecture:                                           │  │
 │  │  • NFS PVs on Synology (manual provisioning):                   │  │
-│  │    - media-downloads (10Gi) → /volume1/cluster/media/downloads  │  │
+│  │    - media-downloads (500Gi) → /volume1/cluster/media/downloads │  │
 │  │    - media-library (500Gi) → /volume1/cluster/media/video       │  │
-│  │  • Local-path PVCs for app configs (5Gi each):                  │  │
+│  │    - media-books (200Gi) → /volume1/cluster/media/books         │  │
+│  │  • Local-path PVCs for app configs:                             │  │
 │  │    - qbittorrent-config, prowlarr-config, sonarr-config,        │  │
-│  │      radarr-config, jellyseerr-config                           │  │
+│  │      radarr-config, jellyseerr-config, lazylibrarian-config,    │  │
+│  │      calibre-web-config, readarr-config                         │  │
 │  │                                                                   │  │
 │  │  Secrets (1Password):                                            │  │
-│  │  • mullvad-credentials: WIREGUARD_PRIVATE_KEY, WIREGUARD_       │  │
-│  │    ADDRESSES                                                     │  │
+│  │  • protonvpn-credentials: OPENVPN_USER, OPENVPN_PASSWORD       │  │
+│  │  • qbittorrent-credentials: QBIT_USER, QBIT_PASS               │  │
 │  │                                                                   │  │
 │  │  Data Flow:                                                       │  │
 │  │  User request (Jellyseerr) → Sonarr/Radarr → Prowlarr searches  │  │
-│  │  indexers → qBittorrent downloads via Mullvad VPN → Files land  │  │
+│  │  indexers → qBittorrent downloads via ProtonVPN → Files land    │  │
 │  │  in NFS share → Jellyfin picks up new media                     │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
@@ -762,17 +788,18 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 
 ### 13. Multi-Node Cluster with Heterogeneous Hardware
 
-**Decision**: Expand from single Pi 5 to 3-node cluster (Pi 5 + 2x Pi 3)
+**Decision**: Expand from single Pi 5 to 4-node cluster (3x Pi 5 + 1x Pi 3)
 
 **Why**:
 - Learning opportunity for multi-node Kubernetes operations
 - Better resource utilization through workload distribution
-- Foundation for future HA implementations
+- Foundation for HA implementations (e.g., dual Pi-hole/Unbound)
 
 **How**:
-- Pi 5 remains master + worker (critical infrastructure)
-- Pi 3s added as workers only (1GB RAM each)
-- Strategic nodeSelector placement for specific workloads (Unbound on pi3-worker-1)
+- pi-k3s (Pi 5): master + worker (critical infrastructure, DNS primary, monitoring)
+- pi5-worker-1 (Pi 5): worker (media services, DNS secondary, Tailscale exit node)
+- pi5-worker-2 (Pi 5): worker (heavy workloads, distributed apps)
+- pi3-worker-2 (Pi 3): worker (lightweight services only, 1GB RAM)
 - Backup jobs pinned to pi-k3s (require hostPath access to local-path PVCs)
 
 **Trade-offs**:
@@ -1230,7 +1257,6 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
-                      - pi3-worker-1
                       - pi3-worker-2
 ```
 
@@ -1795,8 +1821,9 @@ clusters/pi-k3s/ollama/
 - Clients try primary first, failover to secondary
 
 **3. Unbound Configuration**
-- Single Unbound instance on pi-k3s (shared by both Pi-holes)
-- Both Pi-hole instances forward to unbound.pihole.svc.cluster.local:5335
+- Unbound primary on pi-k3s, Unbound secondary on pi5-worker-1
+- Each Pi-hole forwards to its co-located Unbound on :5335
+- Both Unbounds share same unbound-config ConfigMap
 - Unbound has DNS resilience settings (serve-expired, TCP fallback)
 
 **4. Monitoring**
@@ -1825,19 +1852,19 @@ clusters/pi-k3s/pihole/
 **Failover Behavior**:
 - Primary (192.168.1.55) down → Clients failover to secondary (192.168.1.56) in ~1-5 seconds
 - Both instances have same blocklists and configuration
-- Both instances forward to same Unbound resolver
+- Each pair (Pi-hole + Unbound) is co-located on the same node
 - Query logs and statistics are separate (not synchronized)
 
-**Unbound as Shared Backend**:
-- Unbound remains single instance (not HA yet)
-- If Unbound down, both Pi-holes fail (shared dependency)
-- Future enhancement: Unbound HA with multiple resolvers
+**Unbound HA**:
+- Each Pi-hole has its own co-located Unbound instance
+- No shared DNS resolver dependency — one node down doesn't affect the other
+- Both Unbounds use the same ConfigMap for consistent configuration
 
 ---
 
 ### 35. Media Automation Stack with VPN-Protected Downloads
 
-**Decision**: Deploy complete *arr suite (Prowlarr, Sonarr, Radarr, Jellyseerr) with qBittorrent behind Mullvad VPN
+**Decision**: Deploy complete *arr suite (Prowlarr, Sonarr, Radarr, Jellyseerr) with qBittorrent behind ProtonVPN
 
 **Why**:
 - Jellyfin needs automated content acquisition and organization
@@ -1861,10 +1888,11 @@ clusters/pi-k3s/pihole/
 - Ensures consistent storage access patterns
 
 **2. qBittorrent + Gluetun VPN Sidecar**
-- Gluetun container with NET_ADMIN capability creates WireGuard tunnel
+- Gluetun container with NET_ADMIN capability creates OpenVPN tunnel
 - qBittorrent shares network namespace with VPN sidecar
-- All torrent traffic exits via Mullvad (USA servers)
-- Credentials from 1Password: WIREGUARD_PRIVATE_KEY, WIREGUARD_ADDRESSES
+- All torrent traffic exits via ProtonVPN (USA servers)
+- Credentials from 1Password: OPENVPN_USER, OPENVPN_PASSWORD
+- VPN port forwarding enabled (NAT-PMP), auto-updates qBittorrent listen port via API
 - Web UI exposed on port 8080 (within VPN tunnel)
 
 **3. Prowlarr as Indexer Hub**
@@ -1907,7 +1935,7 @@ clusters/pi-k3s/pihole/
 ```
 clusters/pi-k3s/media/
 ├── namespace.yaml
-├── external-secret.yaml        # Mullvad VPN credentials
+├── external-secret.yaml        # ProtonVPN + qBittorrent credentials
 ├── nfs-pv.yaml                # Downloads + library NFS PVs
 ├── config-pvcs.yaml           # Local-path PVCs for configs
 ├── qbittorrent.yaml           # Torrent client + Gluetun VPN
@@ -1927,7 +1955,7 @@ Sonarr/Radarr receives request
   ↓
 Prowlarr searches configured indexers (1337x via FlareSolverr)
   ↓
-qBittorrent downloads via Mullvad VPN tunnel
+qBittorrent downloads via ProtonVPN tunnel
   ↓
 Files saved to NFS: /volume1/cluster/media/downloads
   ↓
@@ -1945,7 +1973,7 @@ Jellyfin detects new media in /volume1/cluster/media/video/{tv,movies}
 - But: complete privacy for all torrent traffic via VPN
 
 **Security**:
-- All torrent traffic encrypted and routed through Mullvad WireGuard
+- All torrent traffic encrypted and routed through ProtonVPN OpenVPN
 - No torrenting on bare cluster nodes (isolated in VPN container)
 - FlareSolverr proxy isolates CloudFlare challenges from indexer traffic
 - API keys and VPN credentials stored in 1Password, synced via ExternalSecret
@@ -2325,7 +2353,7 @@ This ensures:
 - [x] **Uptime Kuma**: Status page for home services monitoring
 - [x] **GitOps monitor setup**: AutoKuma manages monitors declaratively via ConfigMap
 - [x] **Homepage dashboard**: Unified landing page for all services
-- [x] **Multi-node**: 3-node cluster (Pi 5 + 2x Pi 3 workers)
+- [x] **Multi-node**: 4-node cluster (3x Pi 5 + 1x Pi 3 worker)
 - [x] **Media services**: Jellyfin media server with NFS storage
 - [x] **Photo management**: Immich v2 for self-hosted photo backup
 - [x] **Deployment notifications**: Discord webhook integration via Flux
