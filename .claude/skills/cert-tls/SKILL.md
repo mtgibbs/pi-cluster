@@ -6,6 +6,14 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 # TLS & Certificate Operations
 
+## MCP Quick Actions (USE FIRST)
+
+| Operation | MCP Tool |
+| :--- | :--- |
+| All certs, Ready status, expiry, challenges | `get_certificate_status` |
+| Ingress hosts, TLS config, backend health | `get_ingress_status` |
+| Force ExternalSecret resync | `refresh_secret(namespace, name)` |
+
 ## Architecture
 - **Issuer**: Let's Encrypt (Production & Staging)
 - **Challenge**: DNS-01 via Cloudflare API
@@ -34,7 +42,9 @@ annotations:
 ## Troubleshooting
 
 ### Debug Flow
-1. **Check Certificate Resource**:
+1. **Check Certificate Status**:
+   **MCP (preferred):** `get_certificate_status` — shows all certs, Ready status, expiry, and pending challenges.
+   **kubectl fallback (cluster-ops):**
    ```bash
    kubectl get certificate -n <namespace>
    kubectl describe certificate <name> -n <namespace>

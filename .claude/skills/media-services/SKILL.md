@@ -6,6 +6,17 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 # Media Services (Jellyfin + Immich)
 
+## MCP Quick Actions (USE FIRST)
+
+| Operation | MCP Tool |
+| :--- | :--- |
+| Media services health + library stats | `get_media_status` |
+| Fix missing/broken metadata | `fix_jellyfin_metadata(name="TITLE")` |
+| Touch NFS path (trigger inotify) | `touch_nas_path(path="/volume1/cluster/media/...")` |
+| Subtitle status (wanted/missing) | `get_subtitle_status` |
+| Subtitle download history | `get_subtitle_history` |
+| Trigger subtitle search | `search_subtitles(type, id)` |
+
 ## Storage Architecture
 All media is stored on the Synology NAS (`192.168.1.60`) and mounted via NFS.
 
@@ -40,6 +51,9 @@ If pods are stuck in `ContainerCreating`:
 If a show/movie was downloaded but doesn't appear in Jellyfin after a library scan:
 
 **Root Cause**: The item may exist in the database with incomplete metadata (NULL `DateLastRefreshed`). Jellyfin won't display items with failed/interrupted metadata fetches.
+
+**Solution 0 - MCP (TRY FIRST):**
+Use `fix_jellyfin_metadata(name="SHOW_NAME")` — searches Jellyfin library and triggers a full metadata refresh via API. No kubectl or API keys needed.
 
 **Solution 1 - UI (if item is visible):**
 1. Click the item → three dots → "Refresh Metadata"

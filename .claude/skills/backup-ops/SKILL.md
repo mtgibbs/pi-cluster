@@ -6,6 +6,15 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 # Backup Operations
 
+## MCP Quick Actions (USE FIRST)
+
+| Operation | MCP Tool |
+| :--- | :--- |
+| Backup status (schedules, last runs) | `get_backup_status` |
+| Trigger manual backup | `trigger_backup(namespace, cronjob)` |
+| CronJob details (spec, volumes, history) | `get_cronjob_details(namespace, cronjob)` |
+| Job logs (check output) | `get_job_logs(namespace, job)` |
+
 ## Strategy
 All backups target the Synology NAS (`192.168.1.60`) using **rsync over SSH**.
 Backups run weekly on Sundays, staggered to avoid overlap.
@@ -69,29 +78,36 @@ All PVC backup jobs use the same approach:
 ## Operations
 
 ### Trigger Manual Backup
+
+**MCP (preferred):**
+```
+trigger_backup(namespace="backup-jobs", cronjob="pvc-backup")
+trigger_backup(namespace="backup-jobs", cronjob="media-backup")
+trigger_backup(namespace="backup-jobs", cronjob="worker2-backup")
+trigger_backup(namespace="backup-jobs", cronjob="postgres-backup")
+trigger_backup(namespace="backup-jobs", cronjob="git-mirror-backup")
+```
+
+**kubectl fallback (cluster-ops):**
 ```bash
-# PVC backup (master node)
 kubectl create job --from=cronjob/pvc-backup manual-pvc-backup -n backup-jobs
-
-# Media stack backup (worker 1)
 kubectl create job --from=cronjob/media-backup manual-media-backup -n backup-jobs
-
-# Worker 2 backup
 kubectl create job --from=cronjob/worker2-backup manual-worker2-backup -n backup-jobs
-
-# PostgreSQL backup
 kubectl create job --from=cronjob/postgres-backup manual-postgres-backup -n backup-jobs
-
-# Git mirror backup
 kubectl create job --from=cronjob/git-mirror-backup manual-git-mirror -n backup-jobs
 ```
 
 ### Check Backup Logs
-```bash
-# Find the most recent job for a cronjob
-kubectl get jobs -n backup-jobs --sort-by=.metadata.creationTimestamp
 
-# Get logs from last run
+**MCP (preferred):**
+```
+get_backup_status                              # Overview of all jobs
+get_job_logs(namespace="backup-jobs", job="<job-name>")  # Specific job output
+```
+
+**kubectl fallback (cluster-ops):**
+```bash
+kubectl get jobs -n backup-jobs --sort-by=.metadata.creationTimestamp
 kubectl logs job/<job-name> -n backup-jobs
 ```
 

@@ -10,7 +10,13 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 -   **Always use 1Password** (`pi-cluster` vault).
 -   **Use ExternalSecrets** for Kubernetes integration.
 
-### 2. The "Receptionist" Protocol (CRITICAL)
+### 2. Diagnostic Discipline (CRITICAL)
+When a user reports something isn't working:
+1. **Prove the server path first.** Check the full backend chain (pod health, logs, upstream deps) BEFORE suggesting client-side causes.
+2. **Cached success ≠ proof.** Stale cache can mask failures. Use tools that bypass caches (e.g., `diagnose_dns` over `test_dns_query`).
+3. **Check every layer.** One green light doesn't prove the layers behind it are healthy.
+
+### 3. The "Receptionist" Protocol (CRITICAL)
 You are the **Router**. You do not perform technical operations yourself.
 If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 
@@ -20,25 +26,13 @@ If a user asks how to configure, deploy, or fix something, **YOU MUST**:
 
 **DO NOT** attempt to answer technical questions from your general knowledge. **ALWAYS** load the skill first.
 
-### 3. MCP-First Protocol (CRITICAL)
+**Exception**: For simple MCP status checks and actions (restart, queue check, flux reconcile), call MCP tools directly without loading a skill. Load the skill when the task requires config changes, multi-step troubleshooting, or service architecture knowledge.
+
+### 4. MCP-First Protocol (CRITICAL)
 MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to cluster data.
 
 **NEVER use kubectl via `cluster-ops` or Bash when an MCP tool exists for the operation.**
-This includes pod logs, deployment restarts, resource inspection, queue checks, and all status queries.
 Only fall back to kubectl for operations with NO MCP equivalent.
-
-**For status checks and diagnostics — use MCP tools directly:**
-
-#### Cluster & Workloads
-| Operation | MCP Tool |
-| :--- | :--- |
-| Cluster health | `get_cluster_health` |
-| Pod logs | `get_pod_logs` |
-| Restart deployment | `restart_deployment` |
-| Inspect resource | `describe_resource` |
-| List PVCs | `get_pvcs` |
-| CronJob details | `get_cronjob_details` |
-| Job logs | `get_job_logs` |
 
 #### DNS & Pi-hole
 | Operation | MCP Tool | Status |
@@ -50,76 +44,19 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | Pi-hole whitelist | `get_pihole_whitelist` | ✅ |
 | Gravity update | `update_pihole_gravity` | ✅ |
 
-#### GitOps & Secrets
-| Operation | MCP Tool | Status |
-| :--- | :--- | :--- |
-| Flux sync status | `get_flux_status` | ✅ |
-| Flux reconcile | `reconcile_flux` | ✅ |
-| Secrets sync status | `get_secrets_status` | ✅ |
-| Refresh a secret | `refresh_secret` | ✅ |
-
-#### Infrastructure
-| Operation | MCP Tool |
-| :--- | :--- |
-| Certificate status | `get_certificate_status` |
-| Ingress status | `get_ingress_status` |
-| Tailscale status | `get_tailscale_status` |
-| Backup status | `get_backup_status` |
-| Trigger backup | `trigger_backup` |
-
-#### Media Services
-| Operation | MCP Tool |
-| :--- | :--- |
-| Media services health | `get_media_status` |
-| Fix Jellyfin metadata | `fix_jellyfin_metadata` |
-| Touch NAS path | `touch_nas_path` |
-| Subtitle status | `get_subtitle_status` |
-| Subtitle history | `get_subtitle_history` |
-| Search subtitles | `search_subtitles` |
-
-#### Sonarr (TV)
-| Operation | MCP Tool |
-| :--- | :--- |
-| Download queue | `get_sonarr_queue` |
-| Recent history | `get_sonarr_history` |
-| Manual episode search | `search_sonarr_episode` |
-
-#### Radarr (Movies)
-| Operation | MCP Tool |
-| :--- | :--- |
-| Download queue | `get_radarr_queue` |
-| Recent history | `get_radarr_history` |
-| Manual movie search | `search_radarr_movie` |
-
-#### SABnzbd (Downloads)
-| Operation | MCP Tool |
-| :--- | :--- |
-| Download queue | `get_sabnzbd_queue` |
-| Download history | `get_sabnzbd_history` |
-| Retry failed download | `retry_sabnzbd_download` |
-| Pause/resume queue | `pause_resume_sabnzbd` |
-
-#### Shared Media Tools
-| Operation | MCP Tool |
-| :--- | :--- |
-| Quality profiles | `get_quality_profile` |
-| Reject & re-search | `reject_and_search` |
-
-#### Network Diagnostics
-| Operation | MCP Tool | Status |
-| :--- | :--- | :--- |
-| Node networking info | `get_node_networking` | ✅ |
-| iptables rules | `get_iptables_rules` | ✅ |
-| Connection tracking | `get_conntrack_entries` | ✅ |
-| Test ingress HTTP(S) | `curl_ingress` | ✅ |
-| Test pod connectivity | `test_pod_connectivity` | ✅ |
+#### Other MCP Tools (self-documenting — call directly)
+- **Cluster**: `get_cluster_health`, `get_pod_logs`, `restart_deployment`, `describe_resource`, `get_pvcs`, `get_cronjob_details`, `get_job_logs`
+- **GitOps & Secrets**: `get_flux_status`, `reconcile_flux`, `get_secrets_status`, `refresh_secret`
+- **Infrastructure**: `get_certificate_status`, `get_ingress_status`, `get_tailscale_status`, `get_backup_status`, `trigger_backup`
+- **Media**: `get_media_status`, `fix_jellyfin_metadata`, `touch_nas_path`, `get_subtitle_status`, `get_subtitle_history`, `search_subtitles`
+- **Sonarr/Radarr/SABnzbd**: `get_sonarr_queue`, `get_sonarr_history`, `search_sonarr_episode`, `get_radarr_queue`, `get_radarr_history`, `search_radarr_movie`, `get_sabnzbd_queue`, `get_sabnzbd_history`, `retry_sabnzbd_download`, `pause_resume_sabnzbd`, `get_quality_profile`, `reject_and_search`
+- **Network**: `get_node_networking`, `get_iptables_rules`, `get_conntrack_entries`, `curl_ingress`, `test_pod_connectivity`
 
 **Delegate to `cluster-ops` only when you need:**
 - Editing manifests / GitOps files
 - Git operations (commit, push)
 - kubectl commands with NO MCP equivalent (e.g., `scale`, `exec`, `apply`)
 - Complex multi-step troubleshooting requiring shell pipelines
-- Workarounds for broken MCP tools (use kubectl directly)
 
 ## Service Index
 
@@ -132,7 +69,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
-| **MCP Homelab** | `docs/plans/homelab-mcp-cluster-integration.md` | `cluster-ops` |
+| **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)

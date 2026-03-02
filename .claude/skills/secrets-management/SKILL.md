@@ -6,6 +6,13 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 # Secrets Management with ESO + 1Password
 
+## MCP Quick Actions (USE FIRST)
+
+| Operation | MCP Tool |
+| :--- | :--- |
+| All ExternalSecrets sync status | `get_secrets_status` |
+| Force ExternalSecret resync | `refresh_secret(namespace, name)` |
+
 ## When to Use This Skill
 
 Use this skill when:

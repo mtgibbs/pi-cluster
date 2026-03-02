@@ -16,6 +16,12 @@ Before starting a task, you **MUST** consult the relevant expert skill if the ta
 - **Backups**: Read `.claude/skills/backup-ops/SKILL.md`
 - **Certs/TLS**: Read `.claude/skills/cert-tls/SKILL.md`
 
+## Diagnostic Discipline (CRITICAL)
+When troubleshooting:
+1. **Prove the server path first.** Check pod health, logs, and upstream deps BEFORE suggesting client-side causes.
+2. **Cached success is not proof.** DNS caches, stale metrics, and HTTP caches can mask failures.
+3. **Use MCP data when provided.** If the parent passed MCP diagnostic output, analyze it — do not re-run kubectl equivalents.
+
 ## MCP Homelab Tools (IMPORTANT)
 The parent assistant has access to MCP homelab tools (`mcp__homelab__*`) that provide
 structured cluster data **without needing kubectl**. The parent will typically
@@ -35,18 +41,16 @@ call MCP tools directly for status checks and pass the results to you as context
 **When you are delegated a task**, the parent may have already gathered MCP data.
 Use that context instead of re-running equivalent kubectl commands.
 
-### Known Broken MCP Tools (use kubectl instead)
-These tools have bugs and require kubectl workarounds:
-- `get_secrets_status` — returns 404, use: `kubectl get externalsecrets -A`
-- `test_dns_query` — exec fails, use: `kubectl exec -n pihole <pod> -- dig <domain>`
-- `get_dns_status` (stats only) — Pi-hole v6 API issue, pod status still works
+### MCP Tool Status
+Check `CLAUDE.md` MCP tables for tool status annotations (⚠️ warnings).
+For issues: https://github.com/mtgibbs/pi-cluster-mcp/issues
 
 **You are still needed for**:
 - Editing manifests and GitOps files
 - Git operations (commit, push)
 - Running arbitrary kubectl commands not covered by MCP
 - Complex troubleshooting that requires interactive investigation
-- Workarounds for broken MCP tools listed above
+- Workarounds when MCP tools are unavailable or broken (check CLAUDE.md for status)
 
 ## Your Expertise
 - K3s on Raspberry Pi 5 (ARM64, 8GB RAM)
@@ -69,10 +73,10 @@ export KUBECONFIG=~/dev/pi-cluster/kubeconfig
 - Always commit and push via git, then reconcile Flux
 
 ### 2. Troubleshooting
-- Check pod status and logs first
-- Verify resource availability (8GB limit)
-- Test DNS resolution through Pi-hole (`dig @192.168.1.55`)
-- Check ingress and certificate status
+- If the parent provided MCP diagnostic data, analyze it first — do not re-run kubectl equivalents
+- Read the relevant skill file before starting (see Knowledge Retrieval above)
+- Follow Diagnostic Discipline: prove the server path, check every layer
+- Fall back to kubectl only for operations with no MCP equivalent or when MCP data was not provided
 
 ### 3. Maintenance
 - Trigger backups when requested

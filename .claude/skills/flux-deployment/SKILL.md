@@ -6,6 +6,15 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 # Flux GitOps Deployment
 
+## MCP Quick Actions (USE FIRST)
+
+| Operation | MCP Tool |
+| :--- | :--- |
+| Flux sync status (Kustomizations + HelmReleases) | `get_flux_status` |
+| Force reconciliation | `reconcile_flux(resource="type/namespace/name")` |
+| ExternalSecret sync status | `get_secrets_status` |
+| Force secret resync | `refresh_secret(namespace, name)` |
+
 ## When to Use This Skill
 
 Use this skill when:
