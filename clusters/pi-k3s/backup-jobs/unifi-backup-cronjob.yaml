@@ -99,7 +99,7 @@ spec:
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}"
 
-                  scp -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                  scp -O -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     /tmp/unifi-backup.unf \
                     "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/unifi-backup-${BACKUP_DATE}.unf"
 
