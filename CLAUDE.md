@@ -44,7 +44,8 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | Operation | MCP Tool | Status |
 | :--- | :--- | :--- |
 | DNS / Pi-hole status | `get_dns_status` | ⚠️ Stats broken ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) |
-| DNS resolution test | `test_dns_query` | ✅ |
+| **Full DNS diagnostic** | **`diagnose_dns`** | ✅ **USE THIS for troubleshooting** (tests Pi-hole + both Unbounds + DNSSEC) |
+| DNS resolution test (cached) | `test_dns_query` | ⚠️ May return stale cache — prefer `diagnose_dns` |
 | Pi-hole query log | `get_pihole_queries` | ✅ |
 | Pi-hole whitelist | `get_pihole_whitelist` | ✅ |
 | Gravity update | `update_pihole_gravity` | ✅ |
