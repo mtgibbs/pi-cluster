@@ -48,9 +48,13 @@ go-unifi-mcp runs in **lazy mode** — tools are loaded on demand via three meta
 ## Backup Strategy
 - Automated weekly backup CronJob: `unifi-backup` in `backup-jobs` namespace
 - Schedule: Sundays 3:30 AM (after PVC backup at 2:00 AM)
-- Uses UniFi controller's native backup API (`/api/s/default/cmd/backup`)
+- **Downloads the latest auto-backup** from the controller (does NOT generate on-demand)
+  - CK Gen1 on 6.1.71 hangs indefinitely on `cmd:backup` (on-demand generation)
+  - Uses `cmd:list-backups` to find the newest auto-backup, then downloads from `/dl/autobackup/`
+  - Controller auto-backups run monthly (`0 0 1 * *`, 30-day retention)
 - `.unf` files stored on NAS at `/volume1/cluster/backups/{date}/unifi/`
 - Keeps last 4 backups
+- Uses `scp -O` (legacy protocol) — Synology rejects SFTP-based scp
 - Critical for eventual CK Gen1 hardware migration
 
 ## Credentials
