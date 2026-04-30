@@ -11,11 +11,26 @@
     "unifi": {
       "type": "stdio",
       "command": "go-unifi-mcp",
+      "args": [],
       "env": {
         "UNIFI_HOST": "https://192.168.1.30:8443",
         "UNIFI_VERIFY_SSL": "false",
         "UNIFI_SITE": "default",
         "UNIFI_TOOL_MODE": "lazy"
+      }
+    },
+    "qnap-ro": {
+      "type": "http",
+      "url": "http://qnap.lab.mtgibbs.dev:8442/mcp",
+      "headers": {
+        "Authorization": "Bearer ${QNAP_MCP_TOKEN_RO}"
+      }
+    },
+    "qnap-rw": {
+      "type": "http",
+      "url": "http://qnap.lab.mtgibbs.dev:8442/mcp",
+      "headers": {
+        "Authorization": "Bearer ${QNAP_MCP_TOKEN_RW}"
       }
     }
   }
