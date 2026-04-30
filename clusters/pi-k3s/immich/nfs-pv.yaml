@@ -16,7 +16,6 @@ spec:
     server: storage.lab.mtgibbs.dev
     path: /share/cluster/photos
   mountOptions:
-    - nfsvers=4
     - hard
     - rsize=1048576
     - wsize=1048576
