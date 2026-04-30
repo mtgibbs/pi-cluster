@@ -1,0 +1,25 @@
+---
+# CoreDNS custom config — picked up by k3s's default Corefile via
+# `import /etc/coredns/custom/*.server` and `*.override` directives.
+#
+# Both keys must remain present:
+# - custom.override: cluster-wide upstream resolvers (Cloudflare/Google)
+# - lab.mtgibbs.dev.server: forwards local-domain queries to Pi-hole so
+#   cluster pods see Pi-hole's specific overrides (e.g. storage.lab → QNAP)
+#   instead of falling through to the public wildcard via the upstream.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  custom.override: |
+    forward . 1.1.1.1 8.8.8.8 {
+      policy sequential
+    }
+  lab.mtgibbs.dev.server: |
+    lab.mtgibbs.dev:53 {
+        errors
+        cache 30
+        forward . 192.168.1.55 192.168.1.56
+    }

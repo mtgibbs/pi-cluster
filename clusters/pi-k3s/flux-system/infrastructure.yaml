@@ -102,6 +102,23 @@ spec:
   wait: true
   timeout: 5m
 ---
+# 6.5 CoreDNS custom config - cluster DNS forwarding rules
+# (specifically: forward lab.mtgibbs.dev → Pi-hole so internal overrides win)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: coredns-custom
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/pi-k3s/coredns-custom
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
 # 7. Pi-hole stack - depends on secrets, ingress, and cert-manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
