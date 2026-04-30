@@ -9,9 +9,11 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-video
+  mountOptions:
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/media/video
+    path: /cluster/media/video
     readOnly: true
 ---
 apiVersion: v1

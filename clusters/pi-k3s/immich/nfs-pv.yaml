@@ -14,8 +14,9 @@ spec:
   storageClassName: ""
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/photos
+    path: /cluster/photos
   mountOptions:
     - hard
+    - nolock
     - rsize=1048576
     - wsize=1048576

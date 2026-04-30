@@ -9,9 +9,11 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-downloads
+  mountOptions:
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/media/downloads
+    path: /cluster/media/downloads
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -37,9 +39,11 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-library
+  mountOptions:
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/media/video
+    path: /cluster/media/video
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -65,9 +69,11 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-music
+  mountOptions:
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/media/music
+    path: /cluster/media/music
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -93,9 +99,11 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-books
+  mountOptions:
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/media/books
+    path: /cluster/media/books
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

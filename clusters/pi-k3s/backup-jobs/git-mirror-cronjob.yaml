@@ -33,7 +33,7 @@ spec:
                   GITHUB_TOKEN=$(cat /github/token)
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
-                  NAS_PATH="/share/cluster/backups/git-mirrors"
+                  NAS_PATH="/cluster/backups/git-mirrors"
                   WORK_DIR="/tmp/mirrors"
                   SSH_KEY="/ssh/id_ed25519"
 

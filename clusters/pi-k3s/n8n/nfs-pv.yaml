@@ -10,11 +10,11 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-n8n-calendar
   mountOptions:
-    - nfsvers=4
     - hard
+    - nolock
   nfs:
     server: storage.lab.mtgibbs.dev
-    path: /share/cluster/calendar
+    path: /cluster/calendar
     readOnly: false
 ---
 apiVersion: v1

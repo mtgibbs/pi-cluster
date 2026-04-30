@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: synology-to-qnap-migration
+  namespace: default
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: [pi5-worker-1, pi5-worker-2]
+      containers:
+      - name: rsync
+        image: alpine:3.19
+        resources:
+          requests: { cpu: 500m, memory: 512Mi }
+          limits: { cpu: "2", memory: 2Gi }
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache rsync
+          rsync -aHAXv --numeric-ids --info=progress2,stats2 \
+            --partial --partial-dir=.rsync-partial \
+            --exclude='@eaDir' --exclude='#recycle' \
+            --exclude='.caltrash' --exclude='.calnotes' \
+            /src/ /dst/
+        volumeMounts:
+        - { name: synology, mountPath: /src, readOnly: true }
+        - { name: qnap, mountPath: /dst }
+      volumes:
+      - name: synology
+        nfs: { server: 192.168.1.60, path: /volume1/cluster }
+      - name: qnap
+        nfs: { server: 192.168.1.61, path: /cluster }
