@@ -10,8 +10,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-downloads
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/downloads
+    server: storage.lab.mtgibbs.dev
+    path: /share/cluster/media/downloads
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -38,8 +38,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-library
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/video
+    server: storage.lab.mtgibbs.dev
+    path: /share/cluster/media/video
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -66,8 +66,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-music
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/music
+    server: storage.lab.mtgibbs.dev
+    path: /share/cluster/media/music
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -94,8 +94,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-books
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/books
+    server: storage.lab.mtgibbs.dev
+    path: /share/cluster/media/books
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

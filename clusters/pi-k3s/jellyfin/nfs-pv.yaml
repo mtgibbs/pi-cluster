@@ -10,8 +10,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-video
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/video
+    server: storage.lab.mtgibbs.dev
+    path: /share/cluster/media/video
     readOnly: true
 ---
 apiVersion: v1
