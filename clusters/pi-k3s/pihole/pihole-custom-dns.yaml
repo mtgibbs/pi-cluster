@@ -6,8 +6,11 @@ metadata:
 data:
   # Wildcard DNS for home lab services
   # All *.lab.mtgibbs.dev resolves to the Pi (ingress controller)
+  # Specific overrides below the wildcard (dnsmasq is most-specific-match-wins).
   02-local-dns.conf: |
     address=/lab.mtgibbs.dev/192.168.1.55
+    # NAS direct (NFS/SSH) — currently Synology, flip to 192.168.1.61 (QNAP) at cutover
+    address=/storage.lab.mtgibbs.dev/192.168.1.60
   # Block AAAA (IPv6) for domains with broken/slow IPv6 routing
   # Returns :: (null IPv6) so clients immediately fall back to IPv4
   # See: docs/known-issues.md for AT&T IPv6 routing problems
