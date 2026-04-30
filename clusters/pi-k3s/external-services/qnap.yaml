@@ -1,0 +1,52 @@
+---
+# Endpoints for QNAP NAS admin UI (external device)
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: qnap-external
+  namespace: external-services
+subsets:
+  - addresses:
+      - ip: 192.168.1.61
+    ports:
+      - port: 8080
+        name: http
+---
+# Service pointing to the external endpoints
+apiVersion: v1
+kind: Service
+metadata:
+  name: qnap-external
+  namespace: external-services
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+# Ingress with TLS termination — gives QNAP admin a Let's Encrypt cert
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: qnap
+  namespace: external-services
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "qnap.lab.mtgibbs.dev"
+      secretName: qnap-tls
+  rules:
+    - host: "qnap.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: qnap-external
+                port:
+                  number: 8080

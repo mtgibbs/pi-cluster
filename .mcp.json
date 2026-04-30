@@ -21,14 +21,14 @@
     },
     "qnap-ro": {
       "type": "http",
-      "url": "http://qnap.lab.mtgibbs.dev:8442/mcp",
+      "url": "http://qnap-mcp.lab.mtgibbs.dev:8442/mcp",
       "headers": {
         "Authorization": "Bearer ${QNAP_MCP_TOKEN_RO}"
       }
     },
     "qnap-rw": {
       "type": "http",
-      "url": "http://qnap.lab.mtgibbs.dev:8442/mcp",
+      "url": "http://qnap-mcp.lab.mtgibbs.dev:8442/mcp",
       "headers": {
         "Authorization": "Bearer ${QNAP_MCP_TOKEN_RW}"
       }
