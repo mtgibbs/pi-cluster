@@ -1,0 +1,246 @@
+---
+# QNAP NFS Pre-Flight Bench Test
+#
+# Spawns one test pod per future PV. Each pod mounts the EXACT path
+# with the EXACT options that kubelet will use, writes + reads a test
+# file, and reports OK or fails noisily.
+#
+# Apply BEFORE any production PV swap. Wait for all 8 jobs to Succeed.
+# If ANY fail, fix the underlying issue before touching production PVs.
+#
+# Usage:
+#   kubectl apply -f migration/preflight-bench.yaml
+#   kubectl get jobs -n default | grep preflight
+#   kubectl logs job/preflight-<name> -n default --tail=20
+#   # All 8 must show "PREFLIGHT OK". If any FAIL, dig in before cutover.
+#   # When done:
+#   kubectl delete -f migration/preflight-bench.yaml
+
+# ===== media-downloads =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-media-downloads
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          echo "=== media-downloads: mount RW, nolock ==="
+          mount -v -t nfs -o nolock storage.lab.mtgibbs.dev:/cluster/media/downloads /mnt
+          echo "=== write test ==="
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          cat "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK media-downloads"
+---
+# ===== media-library (read-write for Sonarr/Radarr) =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-media-library
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o nolock storage.lab.mtgibbs.dev:/cluster/media/video /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          cat "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK media-library"
+---
+# ===== media-music =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-media-music
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o nolock storage.lab.mtgibbs.dev:/cluster/media/music /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK media-music"
+---
+# ===== media-books =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-media-books
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o nolock storage.lab.mtgibbs.dev:/cluster/media/books /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK media-books"
+---
+# ===== immich-library =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-immich-library
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o hard,nolock,rsize=1048576,wsize=1048576 \
+            storage.lab.mtgibbs.dev:/cluster/photos /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK immich-library"
+---
+# ===== calendar =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-calendar
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o hard,nolock storage.lab.mtgibbs.dev:/cluster/calendar /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK calendar"
+---
+# ===== n8n-calendar (same path as calendar) =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-n8n-calendar
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          mount -v -t nfs -o hard,nolock storage.lab.mtgibbs.dev:/cluster/calendar /mnt
+          F=/mnt/.preflight-$RANDOM
+          echo data > "$F"
+          rm "$F"
+          umount /mnt
+          echo "PREFLIGHT OK n8n-calendar"
+---
+# ===== jellyfin-video (READ-ONLY — this one bit us tonight) =====
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: preflight-jellyfin-video-ro
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apk add --no-cache nfs-utils >/dev/null
+          # Critical test — kubelet adds 'ro' for readOnly:true PVs. This must work.
+          mount -v -t nfs -o nolock,ro storage.lab.mtgibbs.dev:/cluster/media/video /mnt
+          ls /mnt | head -3
+          # No write test — it's readOnly
+          umount /mnt
+          echo "PREFLIGHT OK jellyfin-video (read-only mount)"
