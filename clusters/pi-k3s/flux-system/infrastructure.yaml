@@ -475,7 +475,9 @@ spec:
     - name: external-secrets-config
     - name: ingress
     - name: cert-manager-config
-    - name: jellyfin
+    # NOTE: removed dependsOn jellyfin 2026-04-30 — media doesn't actually need
+    # jellyfin to be Ready, and a broken jellyfin shouldn't block media. If you
+    # want strict ordering back, add jellyfin to depends list again.
   interval: 10m
   path: ./clusters/pi-k3s/media
   prune: true
