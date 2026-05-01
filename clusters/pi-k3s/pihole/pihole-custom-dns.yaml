@@ -10,7 +10,7 @@ data:
   02-local-dns.conf: |
     address=/lab.mtgibbs.dev/192.168.1.55
     # NAS direct (NFS/SSH) — points at QNAP after cutover (was Synology .60)
-    address=/storage.lab.mtgibbs.dev/192.168.1.61
+    address=/storage.lab.mtgibbs.dev/192.168.1.60
     # QNAP admin UI — via cluster ingress for TLS termination + LE cert
     # qnap.lab → ingress (.55), backed by Endpoints in external-services/qnap.yaml
     # Wildcard already routes *.lab → .55, but explicit entry documents intent.

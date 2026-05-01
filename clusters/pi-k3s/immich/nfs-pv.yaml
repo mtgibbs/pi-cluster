@@ -13,8 +13,8 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/photos
+    server: 192.168.1.60
+    path: /volume1/cluster/photos
   mountOptions:
     - hard
     - nolock

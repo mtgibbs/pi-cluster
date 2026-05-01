@@ -12,8 +12,8 @@ spec:
   mountOptions:
     - nolock
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/media/downloads
+    server: 192.168.1.60
+    path: /volume1/cluster/media/downloads
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -42,8 +42,8 @@ spec:
   mountOptions:
     - nolock
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/media/video
+    server: 192.168.1.60
+    path: /volume1/cluster/media/video
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -72,8 +72,8 @@ spec:
   mountOptions:
     - nolock
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/media/music
+    server: 192.168.1.60
+    path: /volume1/cluster/media/music
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -102,8 +102,8 @@ spec:
   mountOptions:
     - nolock
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/media/books
+    server: 192.168.1.60
+    path: /volume1/cluster/media/books
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

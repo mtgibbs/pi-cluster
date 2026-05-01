@@ -28,9 +28,9 @@ spec:
 
                   BACKUP_DATE=$(date +%Y-%m-%d)
                   STORAGE_DIR="/storage"
-                  NAS_USER="cluster-backup"
+                  NAS_USER="mtgibbs"
                   NAS_HOST="storage.lab.mtgibbs.dev"
-                  NAS_PATH="/cluster/backups"
+                  NAS_PATH="/volume1/cluster/backups"
                   SSH_KEY="/ssh/id_ed25519"
 
                   echo "=== K3s PVC Backup (rsync over SSH) ==="

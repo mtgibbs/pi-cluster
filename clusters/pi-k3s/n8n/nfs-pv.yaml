@@ -13,8 +13,8 @@ spec:
     - hard
     - nolock
   nfs:
-    server: storage.lab.mtgibbs.dev
-    path: /cluster/calendar
+    server: 192.168.1.60
+    path: /volume1/cluster/calendar
     readOnly: false
 ---
 apiVersion: v1
