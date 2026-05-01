@@ -3,3 +3,4 @@ kind: Kustomization
 namespace: kube-system
 resources:
   - coredns-custom-configmap.yaml
+  - pi-k3s-hosts-overrides.yaml

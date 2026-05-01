@@ -1,0 +1,80 @@
+---
+# pi-k3s /etc/hosts overrides
+#
+# Why this exists:
+# pi-k3s master uses public DNS (1.1.1.1/8.8.8.8) by design — bootstrap
+# resilience so it can pull images even if Pi-hole is down. See
+# .claude/skills/dns-ops/SKILL.md and memory/pi-k3s-dns-fallback.md.
+#
+# Side effect: pi-k3s does NOT see Pi-hole's local overrides for
+# *.lab.mtgibbs.dev names. Anything pi-k3s's kubelet resolves (NFS mounts,
+# image pulls, etc.) bypasses CoreDNS and uses host resolv.conf.
+#
+# This DaemonSet ensures /etc/hosts on pi-k3s has the local-only DNS names
+# that workloads scheduled there need. Idempotent — survives reboots and
+# reimages because Flux re-applies it.
+#
+# DO NOT add general DNS records here. Only names that pi-k3s's kubelet
+# specifically needs to resolve to a non-wildcard answer.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pi-k3s-hosts-overrides
+  namespace: kube-system
+  labels:
+    app: pi-k3s-hosts-overrides
+spec:
+  selector:
+    matchLabels:
+      app: pi-k3s-hosts-overrides
+  template:
+    metadata:
+      labels:
+        app: pi-k3s-hosts-overrides
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi-k3s
+      tolerations:
+        - operator: Exists
+      hostPID: false
+      hostNetwork: false
+      containers:
+        - name: ensure-hosts
+          image: alpine:3.19
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              F=/host/etc/hosts
+              # Each entry: "ip hostname  # comment"
+              # Idempotent: only append if not already present
+              ensure() {
+                ip="$1"; name="$2"
+                if grep -qE "^[^#]*[[:space:]]${name}([[:space:]]|$)" $F; then
+                  echo "ok: $name already in /etc/hosts"
+                else
+                  echo "$ip $name  # managed by pi-k3s-hosts-overrides DaemonSet" >> $F
+                  echo "added: $ip $name"
+                fi
+              }
+              ensure "192.168.1.61" "storage.lab.mtgibbs.dev"
+              # Add more entries here as new local-only names need to resolve on pi-k3s
+              echo "/etc/hosts state:"
+              grep -E "lab.mtgibbs.dev|managed by pi-k3s-hosts-overrides" $F || true
+              # Stay alive so DaemonSet stays Ready; re-checks would happen on pod restart
+              exec sleep infinity
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 32Mi }
+          volumeMounts:
+            - name: host-etc
+              mountPath: /host/etc
+      volumes:
+        - name: host-etc
+          hostPath:
+            path: /etc
+            type: Directory
