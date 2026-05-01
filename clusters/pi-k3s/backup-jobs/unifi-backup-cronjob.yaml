@@ -28,9 +28,9 @@ spec:
                   BACKUP_DATE=$(date +%Y-%m-%d)
                   CONTROLLER="https://192.168.1.30:8443"
                   SITE="default"
-                  NAS_USER="mtgibbs"
+                  NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
-                  NAS_PATH="/volume1/cluster/backups/${BACKUP_DATE}/unifi"
+                  NAS_PATH="/cluster/backups/${BACKUP_DATE}/unifi"
                   SSH_KEY="/ssh/id_ed25519"
                   COOKIE_JAR="/tmp/unifi_cookies"
 
@@ -109,7 +109,7 @@ spec:
                   echo "--- Cleaning up old UniFi backups ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
-                    "find /volume1/cluster/backups/*/unifi -name '*.unf' -type f 2>/dev/null | sort -r | tail -n +5 | xargs -r rm -f"
+                    "find /cluster/backups/*/unifi -name '*.unf' -type f 2>/dev/null | sort -r | tail -n +5 | xargs -r rm -f"
 
                   echo ""
                   echo "=== UniFi Backup Complete ==="

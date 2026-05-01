@@ -12,8 +12,8 @@ spec:
   mountOptions:
     - nolock
   nfs:
-    server: 192.168.1.60
-    path: /volume1/cluster/media/video
+    server: storage.lab.mtgibbs.dev
+    path: /cluster/media/video
     readOnly: true
 ---
 apiVersion: v1
