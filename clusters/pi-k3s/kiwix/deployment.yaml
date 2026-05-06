@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kiwix
+  namespace: kiwix
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kiwix
+  template:
+    metadata:
+      labels:
+        app: kiwix
+    spec:
+      affinity:
+        nodeAffinity:
+          # Hard exclude: pi3-worker-2 only has 1 GiB RAM — kiwix's 1Gi limit
+          # alone could OOM the node under query bursts.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+          # Soft prefer: keep DNS-critical master uncontended; let the scheduler
+          # pick between pi5-worker-1 and pi5-worker-2 based on current load.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi-k3s
+      containers:
+        - name: kiwix-serve
+          image: ghcr.io/kiwix/kiwix-tools:latest
+          command: ["kiwix-serve"]
+          args:
+            - "--port=8080"
+            - "--blockExternal"
+            - "--library"
+            - "/data/library.xml"
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: zim
+              mountPath: /data
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: zim
+          persistentVolumeClaim:
+            claimName: kiwix-zim

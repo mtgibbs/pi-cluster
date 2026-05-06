@@ -298,3 +298,12 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  kiwix.json: |
+    {
+      "type": "http",
+      "name": "Kiwix",
+      "url": "https://kiwix.lab.mtgibbs.dev/",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

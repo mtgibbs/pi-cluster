@@ -1,0 +1,81 @@
+# One-time seed job — populate /cluster/kiwix/zim on QNAP with initial ZIMs
+# and build library.xml. NOT part of the kustomization (Flux ignores it).
+#
+# Apply manually:
+#   kubectl apply -f clusters/pi-k3s/kiwix/namespace.yaml
+#   kubectl apply -f clusters/pi-k3s/kiwix/kiwix-seed-job.yaml
+#   kubectl logs -f -n kiwix job/kiwix-seed
+#
+# Re-run to add more ZIMs: edit the URL list, delete the Job, re-apply.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kiwix-seed
+  namespace: kiwix
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: kiwix-seed
+    spec:
+      restartPolicy: Never
+      # Run as cluster-backup (uid 1001) — same user that owns /share/cluster/kiwix
+      # on QNAP, so NFS writes go through cleanly without root squash issues.
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 100
+      initContainers:
+        - name: download
+          image: curlimages/curl:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              cd /data
+              for url in \
+                https://download.kiwix.org/zim/wikipedia/wikipedia_en_simple_all_nopic_2026-02.zim \
+                https://download.kiwix.org/zim/wiktionary/wiktionary_en_all_nopic_2026-02.zim; do
+                name=$(basename "$url")
+                if [ -f "$name" ]; then
+                  echo "==> $name already present, skipping"
+                  continue
+                fi
+                echo "==> downloading $name"
+                curl -fL --retry 3 --retry-delay 5 -o "$name.part" "$url"
+                mv "$name.part" "$name"
+              done
+              echo "==> ZIMs on disk:"
+              ls -lh *.zim
+          volumeMounts:
+            - name: zim
+              mountPath: /data
+      containers:
+        - name: kiwix-manage
+          image: ghcr.io/kiwix/kiwix-tools:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              cd /data
+              echo "==> rebuilding library.xml"
+              rm -f library.xml
+              for f in *.zim; do
+                echo "    add $f"
+                kiwix-manage library.xml add "$f"
+              done
+              echo "==> library.xml contents:"
+              cat library.xml
+              echo "==> final directory:"
+              ls -lh
+          volumeMounts:
+            - name: zim
+              mountPath: /data
+      volumes:
+        - name: zim
+          nfs:
+            server: storage.lab.mtgibbs.dev
+            path: /cluster/kiwix/zim
+            readOnly: false

@@ -159,6 +159,11 @@ data:
             href: https://lazylibrarian.lab.mtgibbs.dev
             description: eBook Search & Management
             siteMonitor: https://lazylibrarian.lab.mtgibbs.dev
+        - Kiwix:
+            icon: mdi-bookshelf
+            href: https://kiwix.lab.mtgibbs.dev
+            description: Offline Wikipedia & Reference
+            siteMonitor: https://kiwix.lab.mtgibbs.dev
         - Synology NAS:
             icon: synology.png
             href: https://nas.lab.mtgibbs.dev

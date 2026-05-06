@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kiwix-zim-nfs
+spec:
+  capacity:
+    storage: 250Gi
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-kiwix
+  mountOptions:
+    - nolock
+  nfs:
+    server: storage.lab.mtgibbs.dev
+    path: /cluster/kiwix/zim
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kiwix-zim
+  namespace: kiwix
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: nfs-kiwix
+  resources:
+    requests:
+      storage: 250Gi
