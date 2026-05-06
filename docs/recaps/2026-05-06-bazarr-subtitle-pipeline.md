@@ -103,6 +103,38 @@ The DELETE endpoint (`DELETE /api/movies/subtitles`) uses `path=` for the subtit
 
 Known client limitation. If an external SRT is the only subtitle option and it's misaligned, there is no in-player workaround. The solution is to ensure the embedded PGS track is recognized (via the ignore_pgs_subs fix above), not to compensate with offset.
 
+### 8. Apple TV Jellyfin App Cannot Render PGS Direct Play
+
+Discovered after the ignore_pgs_subs fix and external SRT cleanup for Shaolin Soccer: Apple TV's native Jellyfin tvOS app **lists** the embedded PGS track in the subtitle menu (`English - PGSSUB`), but **does not render** the bitmap when selected. The track is direct-played to the client; the client's renderer fails to draw the PGS bitmaps. Long-standing tvOS app limitation.
+
+Server-side burn-in (transcoding the bitmap into the video stream) was rejected — Pi 5 cannot afford HEVC + PGS overlay during foreign-cinema playback. Two viable alternatives identified:
+- **Infuse** ($1.99/mo, $16.99/yr, $99.99 lifetime — Apple TV / iOS / macOS): native PGS direct-play renderer, no server transcoding required.
+- **PGS → SRT one-time OCR** (free, scriptable): extract embedded PGS, run tesseract OCR, save as external SRT. Timing inherits from PGS (perfect). Apple TV renders text fine. One-time CPU cost per movie, then never again.
+
+Infuse was tested first (7-day Pro trial). Confirmed working end-to-end via Jellyfin session metadata: client identifier `Infuse-Direct`, `TranscodingInfo: null`, 0 active transcoding sessions during playback. Pi cluster healthy throughout. **PGS rendered correctly with no detectable Pi load** — pure direct play.
+
+---
+
+## Resolution
+
+**Workflow established for foreign-cinema Blu-ray rips:**
+
+1. Bazarr's `ignore_pgs_subs` and `ignore_vobsub_subs` flipped to `false` (already done above) — Bazarr no longer downloads external English SRTs for files with embedded PGS-eng.
+2. Apple TV uses **Infuse** as the Jellyfin client for content with embedded PGS subtitles. Native Jellyfin tvOS app retained for content with external text SRTs.
+3. Pre-existing external English SRTs cleaned up where embedded PGS-eng is present.
+
+### Bulk Cleanup Executed (2026-05-06)
+
+Audit: cross-referenced Jellyfin's MediaStreams (movies with `PGSSUB`/`eng` embedded) against Bazarr's movie list (movies with non-null external English SRT path). Intersection = 35 movies where the external SRT was redundant.
+
+All 35 deleted via `DELETE /api/movies/subtitles` loop:
+- 14 foreign-language films where this fixed the timing problem (Akira, Brotherhood of the Wolf, Final Fantasy VII: Advent Children, Ghost in the Shell, Kung Fu Hustle, Life Is Beautiful, Mars Express, Morgiana, Nausicaä of the Valley of the Wind, Oldboy, The Red Violin, Vampire Hunter D: Bloodlust, Logan's Run, Amadeus)
+- 21 English-audio films where the external SRT was clutter (Atomic Blonde, Blade Runner 2049, The Death of Stalin, Ed Wood, etc.)
+
+Verification: 35 success, 0 failure. Bazarr's count of movies with non-null English SRT paths dropped from 50 → 15 (the 15 remaining are titles without embedded PGS-eng, where the external is the only English option).
+
+Episodes (TV series) not yet audited — same workflow applies and is a candidate for a future pass.
+
 ---
 
 ## Decisions Made
@@ -126,11 +158,13 @@ Known client limitation. If an external SRT is the only subtitle option and it's
 
 ## Open Follow-Ups
 
-- [ ] Audit library for titles with embedded PGS-eng + external SRT coexisting — delete the external SRTs where PGS is a better choice. Use the Jellyfin query in `servarr-ops/SKILL.md` (MediaStreams filter for PGSSUB + eng).
-- [ ] Decide cleanup strategy for existing external `.hi.srt` files on BD rips (bulk DELETE via Bazarr API vs leave them, since the PGS will now be preferred).
-- [ ] File Bazarr GitHub issue for `api-key-helper.sh` path convention mismatch (op://... path not standardized).
+- [x] ~~Audit library for titles with embedded PGS-eng + external SRT coexisting — delete the external SRTs where PGS is a better choice.~~ Done — 35 movies cleaned 2026-05-06.
+- [x] ~~Decide cleanup strategy for existing external `.hi.srt` files on BD rips.~~ Done — bulk-deleted via Bazarr API.
+- [ ] Audit and clean episodes (TV series) using the same intersection workflow.
+- [ ] Fix `api-key-helper.sh` to handle Bazarr's vault path (or rename the 1Password item to `bazarr.lab.mtgibbs.dev`).
 - [ ] Evaluate routing ffsubsync to Beelink once LiteLLM stack is live (Beelink Ansible stages 30-tailscale + 40-rocm + Compose stack are still pending).
 - [ ] Update `mcp-homelab` `touch_nas_path` tool — still hardcodes `/volume1/cluster/...` Synology paths; needs QNAP path update (carried forward from 2026-04-30 session).
+- [ ] Decide on Infuse subscription — Pro trial active; tested working. Lifetime ($99.99) vs annual ($16.99) decision pending.
 
 ---
 
