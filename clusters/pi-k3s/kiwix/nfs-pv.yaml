@@ -1,3 +1,7 @@
+# NFS PV/PVC capacity is metadata only — NFS doesn't enforce a quota.
+# Actual ceiling is QNAP free space (11+ TiB at provisioning). Don't try
+# to resize the PVC — the nfs-kiwix StorageClass doesn't support it.
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -27,4 +31,4 @@ spec:
   storageClassName: nfs-kiwix
   resources:
     requests:
-      storage: 500Gi
+      storage: 250Gi
