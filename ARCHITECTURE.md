@@ -4,6 +4,12 @@
 
 A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing high-availability network-wide ad blocking via dual Pi-hole instances with privacy-focused recursive DNS resolution via Unbound. Includes Tailscale VPN for mobile ad blocking, self-hosted media services, and comprehensive monitoring with Discord alerting.
 
+**Network gateway**: UDM Pro Max (upgraded 2026-04-19, replaces UniFi Cloud Key Gen1 + previous router)
+
+**NAS**: QNAP TS-435XeU at `storage.lab.mtgibbs.dev` (192.168.1.61), cutover from Synology 2026-04-30. 3x 10TB WD Red Plus RAID 5, ~16 TB usable. All NFS PVs use `/cluster/...` path prefix.
+
+**Inference appliance (in progress)**: Beelink GTR9 Pro (`beelink-ai`, 192.168.1.70) — see `docs/beelink-ai-stack.md`.
+
 ## Hardware
 
 ```
@@ -252,8 +258,8 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                                                                   │  │
 │  │  Jellyfin Media Server                                           │  │
 │  │  • Self-hosted media streaming (Plex alternative)                │  │
-│  │  • NFS PersistentVolume → Synology NAS (192.168.1.60:/volume1/  │  │
-│  │    video)                                                         │  │
+│  │  • NFS PersistentVolume → QNAP NAS (storage.lab.mtgibbs.dev:    │  │
+│  │    /cluster/media/video, read-only mount)                        │  │
 │  │  • Ingress: jellyfin.lab.mtgibbs.dev                            │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
@@ -264,7 +270,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Immich Photo Management (v2.4.1)                                │  │
 │  │  • Self-hosted photo backup and management                       │  │
 │  │  • Deployed via Helm chart (immich-charts v0.10.3)               │  │
-│  │  • NFS storage to Synology NAS for photos                        │  │
+│  │  • NFS storage to QNAP NAS (/cluster/photos) for photos          │  │
 │  │  • PostgreSQL with pgvector extension                            │  │
 │  │  • Valkey (Redis) for caching                                    │  │
 │  │  • Ingress: immich.lab.mtgibbs.dev                              │  │
@@ -363,9 +369,11 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Plex Media Server - https://plex.lab.mtgibbs.dev              │  │
 │  │    → 192.168.1.60:32400 (Synology package)                      │  │
 │  │  • Unifi Controller  - https://unifi.lab.mtgibbs.dev             │  │
-│  │    → 192.168.1.30:8443 (HTTPS backend)                          │  │
+│  │    → UDM Pro Max built-in controller (192.168.1.1)              │  │
 │  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
-│  │    → 192.168.1.60:5000 (HTTP backend)                           │  │
+│  │    → 192.168.1.60:5000 (retained; status: repurpose TBD)        │  │
+│  │  • QNAP NAS          - https://qnap.lab.mtgibbs.dev              │  │
+│  │    → 192.168.1.61:8080 (admin UI via ingress)                   │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -436,17 +444,14 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                      media namespace                              │  │
 │  │                                                                   │  │
-│  │  Media Automation Stack (*arr suite + qBittorrent)              │  │
+│  │  Media Automation Stack (*arr suite + SABnzbd)                  │  │
 │  │  • All services pinned to pi5-worker-1 via nodeAffinity         │  │
-│  │  • NFS storage on Synology NAS (192.168.1.60)                   │  │
+│  │  • NFS storage on QNAP NAS (storage.lab.mtgibbs.dev, /cluster/) │  │
 │  │                                                                   │  │
 │  │  qBittorrent + Gluetun (VPN)                                    │  │
 │  │  • Torrent client with ProtonVPN OpenVPN sidecar (via Gluetun)  │  │
-│  │  • NET_ADMIN capability for VPN tunnel creation                 │  │
-│  │  • Server location: USA                                         │  │
-│  │  • VPN port forwarding enabled (NAT-PMP), auto-updates          │  │
-│  │    qBittorrent listen port via API                              │  │
-│  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
+│  │  • Status: DISABLED (scaled to 0 replicas)                      │  │
+│  │  • Downloads to NFS: /cluster/media/downloads                   │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: qbit.lab.mtgibbs.dev                                │  │
 │  │                                                                   │  │
@@ -465,15 +470,15 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                                                                   │  │
 │  │  Sonarr (TV Show Management)                                    │  │
 │  │  • Automated TV show downloading and organization                │  │
-│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
-│  │  • Media library: NFS /volume1/cluster/media/video/tv           │  │
+│  │  • Integrates: Prowlarr (indexers) + SABnzbd (client)          │  │
+│  │  • Media library: NFS /cluster/media/video/tv                   │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: sonarr.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
 │  │  Radarr (Movie Management)                                       │  │
 │  │  • Automated movie downloading and organization                  │  │
-│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
-│  │  • Media library: NFS /volume1/cluster/media/video/movies       │  │
+│  │  • Integrates: Prowlarr (indexers) + SABnzbd (client)          │  │
+│  │  • Media library: NFS /cluster/media/video/Movies               │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: radarr.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
@@ -486,14 +491,15 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                                                                   │  │
 │  │  Lidarr (Music Management)                                      │  │
 │  │  • Automated music downloading and organization                 │  │
-│  │  • Integrates: Prowlarr (indexers) + qBittorrent (client)      │  │
-│  │  • Media library: NFS /volume1/cluster/media/music              │  │
+│  │  • Integrates: Prowlarr (indexers) + SABnzbd (client)          │  │
+│  │  • Media library: NFS /cluster/media/music                      │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: lidarr.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
 │  │  Bazarr (Subtitle Management)                                   │  │
 │  │  • Automated subtitle downloading for Sonarr/Radarr             │  │
 │  │  • Config persisted on local-path PVC                           │  │
+│  │  • Ingress timeout: 600s (ffsubsync is synchronous + slow)      │  │
 │  │  • Ingress: bazarr.lab.mtgibbs.dev                              │  │
 │  │                                                                   │  │
 │  │  LazyLibrarian (Book Search & Download)                         │  │
@@ -501,7 +507,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Image: lscr.io/linuxserver/lazylibrarian:latest              │  │
 │  │  • Docker mod: linuxserver/mods:universal-calibre               │  │
 │  │  • Pinned to pi5-worker-1 (required nodeAffinity)               │  │
-│  │  • NFS: /volume1/cluster/media/books (shared with Calibre-Web)  │  │
+│  │  • NFS: /cluster/media/books (shared with Calibre-Web)          │  │
 │  │  • Config persisted on local-path PVC (2Gi)                     │  │
 │  │  • Ingress: lazylibrarian.lab.mtgibbs.dev                       │  │
 │  │                                                                   │  │
@@ -515,28 +521,28 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Ingress: calibre.lab.mtgibbs.dev                             │  │
 │  │                                                                   │  │
 │  │  Readarr (Book Management)                                      │  │
-│  │  • Automated book downloading via Prowlarr + SABnzbd/qBit      │  │
+│  │  • Automated book downloading via Prowlarr + SABnzbd            │  │
 │  │  • Image: linuxserver/readarr:0.4.18-develop                    │  │
 │  │  • Pinned to pi5-worker-1 (required nodeAffinity)               │  │
-│  │  • NFS: /volume1/cluster/media/books + /downloads               │  │
+│  │  • NFS: /cluster/media/books + /cluster/media/downloads         │  │
 │  │  • Config persisted on local-path PVC (2Gi)                     │  │
 │  │  • Ingress: readarr.lab.mtgibbs.dev                             │  │
 │  │                                                                   │  │
 │  │  SABnzbd (Usenet Client)                                        │  │
 │  │  • Usenet download client for NZB files                         │  │
-│  │  • Downloads to NFS: /volume1/cluster/media/downloads           │  │
+│  │  • Downloads to NFS: /cluster/media/downloads                   │  │
 │  │  • Config persisted on local-path PVC                           │  │
 │  │  • Ingress: sabnzbd.lab.mtgibbs.dev                             │  │
 │  │                                                                   │  │
 │  │  Storage Architecture:                                           │  │
-│  │  • NFS PVs on Synology (manual provisioning):                   │  │
-│  │    - media-downloads (500Gi) → /volume1/cluster/media/downloads │  │
-│  │    - media-library (500Gi) → /volume1/cluster/media/video       │  │
-│  │    - media-books (200Gi) → /volume1/cluster/media/books         │  │
+│  │  • NFS PVs on QNAP (storage.lab.mtgibbs.dev):                   │  │
+│  │    - media-downloads (500Gi) → /cluster/media/downloads         │  │
+│  │    - media-library (500Gi) → /cluster/media/video               │  │
+│  │    - media-books (200Gi) → /cluster/media/books                 │  │
 │  │  • Local-path PVCs for app configs:                             │  │
-│  │    - qbittorrent-config, prowlarr-config, sonarr-config,        │  │
-│  │      radarr-config, jellyseerr-config, lazylibrarian-config,    │  │
-│  │      calibre-web-config, readarr-config                         │  │
+│  │    - prowlarr-config, sonarr-config, radarr-config,             │  │
+│  │      jellyseerr-config, lazylibrarian-config,                   │  │
+│  │      calibre-web-config, readarr-config, bazarr-config          │  │
 │  │                                                                   │  │
 │  │  Secrets (1Password):                                            │  │
 │  │  • protonvpn-credentials: OPENVPN_USER, OPENVPN_PASSWORD       │  │
@@ -544,8 +550,8 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                                                                   │  │
 │  │  Data Flow:                                                       │  │
 │  │  User request (Jellyseerr) → Sonarr/Radarr → Prowlarr searches  │  │
-│  │  indexers → qBittorrent downloads via ProtonVPN → Files land    │  │
-│  │  in NFS share → Jellyfin picks up new media                     │  │
+│  │  indexers → SABnzbd downloads via usenet → Files land in QNAP   │  │
+│  │  NFS share → Jellyfin picks up new media (15-min scan interval) │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -598,7 +604,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Calendar File Server                                            │  │
 │  │  • Nginx static file server for ICS files                        │  │
 │  │  • Image: nginx:alpine                                           │  │
-│  │  • NFS PV mounted from Synology NAS                              │  │
+│  │  • NFS PV mounted from QNAP NAS (/cluster/calendar)             │  │
 │  │  • Resources: 10m-50m CPU / 16Mi-32Mi memory                     │  │
 │  │  • Internal ClusterIP service (no external ingress)              │  │
 │  │                                                                   │  │
@@ -630,8 +636,9 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │                    backup-jobs namespace                          │  │
 │  │                                                                   │  │
 │  │  Cluster Backup Operations                                       │  │
-│  │  • Scheduled backups to Synology NAS via rsync over SSH          │  │
+│  │  • Scheduled backups to QNAP NAS via rsync over SSH              │  │
 │  │  • Runs from pi-k3s node (access to local-path storage)          │  │
+│  │  • SSH user: cluster-backup (uid 1001, administrators group)     │  │
 │  │                                                                   │  │
 │  │  CronJobs:                                                        │  │
 │  │  • pvc-backup        - Weekly PVC snapshots (Sun 2:00 AM)        │  │
@@ -639,8 +646,10 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • worker2-backup    - Weekly pi5-worker-2 (Sun 2:30 AM)         │  │
 │  │  • media-backup      - Weekly media configs (Sun 3:00 AM)        │  │
 │  │  • git-mirror-backup - Weekly git repos (Sun 3:30 AM)            │  │
+│  │  • unifi-backup      - Weekly UniFi config (Sun 3:30 AM)         │  │
 │  │                                                                   │  │
-│  │  Storage Target: /volume1/cluster/backups on Synology NAS       │  │
+│  │  Storage Target: /share/cluster/backups on QNAP NAS             │  │
+│  │  (storage.lab.mtgibbs.dev / 192.168.1.61)                       │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -815,11 +824,11 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Open-source with no proprietary restrictions
 - Better privacy (no phone-home to Plex servers)
 - Full control over media server functionality
-- NFS integration with existing Synology NAS storage
+- NFS integration with QNAP NAS storage (cutover from Synology 2026-04-30)
 
 **Implementation**:
 - Full GitOps deployment in `jellyfin` namespace
-- NFS PersistentVolume to Synology NAS (`/volume1/video`)
+- NFS PersistentVolume to QNAP NAS (`storage.lab.mtgibbs.dev:/cluster/media/video`)
 - Ingress with Let's Encrypt certificate
 - Replaces Plex in Homepage dashboard
 
@@ -841,7 +850,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Step 1: Upgrade to v1.132.3 (last TypeORM version, prepares for migration)
 - Step 2: Upgrade to v2.4.1 (Kysely migration runs automatically)
 - Fixed storage: `IMMICH_MEDIA_LOCATION=/data` (matches PVC mount point)
-- Adjusted for Pi ARM compatibility (postgres with pgvector, NFSv3 for Synology)
+- Adjusted for Pi ARM compatibility (postgres with pgvector, NFSv3 negotiated by default; do NOT set nfsvers=4 explicitly — causes immich sub-path mount failures)
 
 **Trade-offs**:
 - Longer migration window with potential for data issues
@@ -950,9 +959,10 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 - Together: Complete disaster recovery capability
 
 **Technical Notes**:
-- rsync chosen over scp because Synology NAS has SFTP subsystem disabled
+- rsync chosen over scp because SFTP subsystem can be unreliable on NAS devices
 - rsync works over plain SSH, provides compression and resume capability
 - Alpine Linux repos updated from PostgreSQL 14 to 16 client
+- QNAP SSH access requires `cluster-backup` user to be in the `administrators` group (QTS SSH access control list restriction)
 
 **Trade-offs**:
 - Duplicates some data (database files exist in both backups)
@@ -1871,7 +1881,7 @@ clusters/pi-k3s/pihole/
 - User-friendly request system for family members
 - All torrent traffic routed through VPN for privacy
 - Centralized indexer management reduces configuration duplication
-- NFS storage on Synology provides large media capacity
+- NFS storage on QNAP NAS provides large media capacity (migrated from Synology 2026-04-30)
 
 **Problem**:
 - Manual media acquisition and organization is time-consuming
@@ -1908,9 +1918,9 @@ clusters/pi-k3s/pihole/
 - Issue resolved: Initially Prowlarr didn't use proxy until tags matched
 
 **5. Sonarr and Radarr**
-- Sonarr: TV shows → /volume1/cluster/media/video/tv
-- Radarr: Movies → /volume1/cluster/media/video/movies
-- Both integrate with Prowlarr (indexers) and qBittorrent (download client)
+- Sonarr: TV shows → /cluster/media/video/tv (QNAP NFS)
+- Radarr: Movies → /cluster/media/video/Movies (QNAP NFS)
+- Both integrate with Prowlarr (indexers) and SABnzbd (usenet download client)
 - Automated file renaming and organization for Jellyfin compatibility
 
 **6. Jellyseerr Request Management**
@@ -1920,9 +1930,9 @@ clusters/pi-k3s/pihole/
 - Family members can request content without backend access
 
 **7. Storage Architecture**
-- NFS PVs manually provisioned on Synology NAS:
-  - media-downloads (10Gi) → /volume1/cluster/media/downloads
-  - media-library (500Gi) → /volume1/cluster/media/video
+- NFS PVs on QNAP NAS (storage.lab.mtgibbs.dev, migrated 2026-04-30):
+  - media-downloads → /cluster/media/downloads
+  - media-library → /cluster/media/video
 - Local-path PVCs for application configs (5Gi each)
 - Config persistence required: API keys, indexer settings, quality profiles
 
@@ -1953,15 +1963,15 @@ User Request (Jellyseerr)
   ↓
 Sonarr/Radarr receives request
   ↓
-Prowlarr searches configured indexers (1337x via FlareSolverr)
+Prowlarr searches configured indexers
   ↓
-qBittorrent downloads via ProtonVPN tunnel
+SABnzbd downloads via usenet
   ↓
-Files saved to NFS: /volume1/cluster/media/downloads
+Files saved to NFS: /cluster/media/downloads (QNAP)
   ↓
 Sonarr/Radarr renames and moves to library
   ↓
-Jellyfin detects new media in /volume1/cluster/media/video/{tv,movies}
+Jellyfin detects new media via 15-min scheduled scan
 ```
 
 **Trade-offs**:
@@ -1979,11 +1989,11 @@ Jellyfin detects new media in /volume1/cluster/media/video/{tv,movies}
 - API keys and VPN credentials stored in 1Password, synced via ExternalSecret
 
 **Integration with Jellyfin**:
-- Jellyfin already configured with media library paths:
-  - TV: /media/tv (NFS mount to /volume1/cluster/media/video/tv)
-  - Movies: /media/movies (NFS mount to /volume1/cluster/media/video/movies)
+- Jellyfin configured with media library paths (QNAP NFS, read-only):
+  - TV: /cluster/media/video/tv
+  - Movies: /cluster/media/video/Movies
 - Jellyseerr authenticates users via Jellyfin OAuth
-- Automatic library scanning when new media arrives
+- Library scanning via 15-minute scheduled task (inotify does not work over NFS)
 
 ## Observability Stack
 
@@ -2265,8 +2275,9 @@ LAN Clients (Dual-Stack)
 | Immich Metrics (server) | 8081 | TCP | ClusterIP (Prometheus scrapes) |
 | Immich Metrics (microservices) | 8082 | TCP | ClusterIP (Prometheus scrapes) |
 | Immich PostgreSQL | 5432 | TCP | ClusterIP (internal only, backup job access) |
-| Unifi Controller | 8443 | HTTPS | External (192.168.1.30) → Ingress (unifi.lab.mtgibbs.dev) |
-| Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) |
+| Unifi Controller | 443 | HTTPS | UDM Pro Max built-in (192.168.1.1) → Ingress (unifi.lab.mtgibbs.dev) |
+| Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) — retained, status TBD |
+| QNAP NAS | 8080 | HTTP | External (192.168.1.61) → Ingress (qnap.lab.mtgibbs.dev) |
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
 | CARL | 8080 | TCP | Ingress (carl.lab.mtgibbs.dev) |
 | Ollama | 11434 | TCP | ClusterIP (internal only, CARL access) |

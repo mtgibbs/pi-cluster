@@ -168,6 +168,40 @@ Look for:
 3.  **Adlists not loading**: Check `postStart` hook logs in Pi-hole pod.
 4.  **`test_dns_query` shows success but client fails**: Stale cache. Use `diagnose_dns` instead.
 
+## Pi-hole Custom DNS — GitOps Managed (CRITICAL)
+
+All local DNS records live in `clusters/pi-k3s/pihole/pihole-custom-dns.yaml` (ConfigMap). This ConfigMap is mounted by both `pihole` and `pihole-secondary`; Flux applies it to both instances simultaneously.
+
+Current layout:
+- Wildcard `*.lab.mtgibbs.dev` → `192.168.1.55` (ingress controller)
+- Specific overrides below the wildcard (dnsmasq is most-specific-match-wins)
+
+**DO NOT** add records via the Pi-hole web UI for anything cluster-managed — they will drift from GitOps and will not survive a pod restart. Always edit the ConfigMap and let Flux reconcile.
+
+## pi-k3s Master: Static DNS Fallback (CRITICAL — intentional design, DO NOT "fix")
+
+The `pi-k3s` master node is configured with public DNS (`1.1.1.1`, `8.8.8.8`) via NetworkManager. Worker nodes use Pi-hole.
+
+**Why**: Bootstrap resilience. Allows `pi-k3s` to pull container images (including Pi-hole itself) even when the cluster DNS is down. This is intentional. Do not change it.
+
+**Side effect**: `pi-k3s` does not resolve Pi-hole local overrides. Pods scheduled on `pi-k3s` that need a `*.lab.mtgibbs.dev` hostname get the public wildcard (`192.168.1.55`) instead of any Pi-hole-specific override. kubelet uses the host's `resolv.conf`, not CoreDNS.
+
+**Workaround for pi-k3s-local DNS names**: Add `/etc/hosts` entries on the `pi-k3s` host for any local-only name that pods on that node need. These are managed under Flux at `clusters/pi-k3s/coredns-custom/pi-k3s-hosts-overrides.yaml` (a ConfigMap mounted by a DaemonSet or postStart hook — verify current implementation in the manifest).
+
+Currently overridden: `storage.lab.mtgibbs.dev → 192.168.1.61`.
+
+Full notes in `memory/pi-k3s-dns-fallback.md`.
+
+## CoreDNS lab.mtgibbs.dev Forwarding (CRITICAL — permanent infrastructure)
+
+CoreDNS default config forwards ALL queries (including `lab.mtgibbs.dev`) to `1.1.1.1`/`8.8.8.8`. The `lab.mtgibbs.dev` zone has a **public wildcard record** — so without a local override, all `*.lab.mtgibbs.dev` in-cluster DNS resolves to the public wildcard answer rather than the Pi-hole local records.
+
+**Fix**: A `lab.mtgibbs.dev.server` block in the `coredns-custom` ConfigMap forwards local-domain queries to Pi-hole. This is under Flux at `clusters/pi-k3s/coredns-custom/`. Do NOT remove or edit it via kubectl.
+
+If this block is missing, all `*.lab.mtgibbs.dev` in-cluster DNS breaks silently.
+
+Full notes in `memory/coredns-forward-gotcha.md`.
+
 ## Relevant Files
 - `clusters/pi-k3s/pihole/pihole-deployment.yaml` — Primary Pi-hole
 - `clusters/pi-k3s/pihole/pihole-secondary-deployment.yaml` — Secondary Pi-hole
@@ -175,3 +209,4 @@ Look for:
 - `clusters/pi-k3s/pihole/unbound-secondary-deployment.yaml` — Secondary Unbound + Service
 - `clusters/pi-k3s/pihole/unbound-configmap.yaml` — Unbound config (shared by both, includes conf.d entries)
 - `clusters/pi-k3s/pihole/pihole-custom-dns.yaml` — Local DNS + IPv6 overrides
+- `clusters/pi-k3s/coredns-custom/` — CoreDNS lab.mtgibbs.dev forwarding + pi-k3s host overrides

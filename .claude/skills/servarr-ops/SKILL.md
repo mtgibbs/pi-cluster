@@ -27,6 +27,8 @@ All Servarr services follow:
 - **API key:** stored in 1Password vault `pi-cluster`, item title `<service>.lab.mtgibbs.dev`, field `api-key`
 - **Header:** `X-Api-Key: <key>` (Sonarr/Radarr/Prowlarr) or query param `?apikey=<key>` (SAB)
 
+> **Bazarr vault exception (current bug in helper):** Bazarr's API key actually lives at `op://pi-cluster/mcp-homelab/bazarr-api-key`, NOT at `op://pi-cluster/bazarr.lab.mtgibbs.dev/api-key` like the helper assumes. The helper currently fails for Bazarr — workaround: read the key directly via `BAZARR_KEY=$(op read 'op://pi-cluster/mcp-homelab/bazarr-api-key')`. Same will apply to any other service whose key was provisioned for the MCP server's bundled access rather than as a dedicated host-item.
+
 Source the helper at `.claude/skills/servarr-ops/api-key-helper.sh` (sibling file) and use `servarr_call`:
 
 ```sh
@@ -168,6 +170,148 @@ Bazarr only sees files **after** Sonarr/Radarr import them. If subtitles aren't 
 3. If item is missing entirely, the file probably hasn't been imported yet — check Sonarr/Radarr queue for `importBlocked`.
 
 > The Bazarr `get_subtitle_history` MCP tool is currently broken (returns HTML, not JSON — see filed issue). Use `get_subtitle_status` as the authoritative signal.
+
+## Recipe: re-sync mistimed external SRTs (ffsubsync)
+
+When Bazarr-downloaded external SRTs are 3-5s off (foreign-language films are most common), trigger ffsubsync via `PATCH /api/subtitles?action=sync`:
+
+```sh
+KEY=$(op read 'op://pi-cluster/mcp-homelab/bazarr-api-key')
+PATH_ENC=$(printf '%s' "/media/Movies/.../file.en.srt" | jq -sRr @uri)
+curl -X PATCH -H "X-API-KEY: $KEY" \
+  "https://bazarr.lab.mtgibbs.dev/api/subtitles?action=sync&type=movie&id=<radarrId>&language=en&path=$PATH_ENC&max_offset_seconds=60&no_fix_framerate=False&gss=True"
+```
+
+For episodes: `type=episode&id=<sonarrEpisodeId>`.
+
+### CRITICAL gotchas
+
+1. **ffsubsync is synchronous + extremely slow on Pi 5.** ~60-70 min per file (full Blu-ray movie via NFS read on ARM). Earlier "1-3 min" estimate was naive PC numbers — completely wrong for this cluster. Default nginx ingress timeout (60s) fires before completion. Bazarr's ingress now has `proxy_read_timeout: 600s` to mitigate (`clusters/pi-k3s/media/bazarr.yaml`). For bulk re-syncs (>3 titles), this is **infeasible** on Pi hardware — plan to migrate to the Beelink AI stack as a CronJob worker, OR avoid ffsubsync entirely by using embedded PGS subs (see "bypass external SRTs" recipe below).
+
+2. **Bazarr can OOM under sync load.** Default 512Mi limit is borderline; ffsubsync's PCM audio buffer + VAD model peaks ~250-400 MB. Bump to 1Gi if Bazarr crashes mid-sync.
+
+3. **Track running jobs via `/api/system/jobs` — NOT `/api/system/tasks`.**
+   - `/api/system/tasks` = scheduled crons (every 60 min, etc.) — not on-demand work.
+   - `/api/system/jobs` = interactive job queue, including in-flight syncs:
+     ```sh
+     curl -H "X-API-KEY: $KEY" 'https://bazarr.lab.mtgibbs.dev/api/system/jobs' \
+       | jq '.data[] | select(.status == "running") | {job_id, job_name, last_run_time}'
+     ```
+   This is the single most useful endpoint for tracking async Bazarr operations.
+
+4. **Settings POST requires lowercase `false`/`true`, form-encoded, with the `settings-<section>-<key>` prefix.** This is non-obvious and earlier sessions concluded the endpoint was a "black hole" — it isn't. The validator is just strict:
+
+   ```sh
+   # ✅ WORKS — form-encoded with lowercase false
+   curl -X POST -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/system/settings" \
+     --data-urlencode "settings-general-ignore_pgs_subs=false"
+   # → HTTP 204, value persists
+
+   # ❌ JSON body with real boolean → 204 returned, silently no-ops
+   curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
+     ".../api/system/settings" -d '{"general":{"ignore_pgs_subs":false}}'
+
+   # ❌ Form-encoded with capital "False" or "0" → HTTP 406, validator rejects
+   curl -X POST ... --data-urlencode "settings-general-ignore_pgs_subs=False"
+   # → "general.ignore_pgs_subs must is_type_of <class 'bool'> but it is False"
+   ```
+
+   Verify with `GET /api/system/settings | jq '.general.ignore_pgs_subs'`. Multiple keys can be flipped in a single POST.
+
+5. **The `subtitlesPath` from the movies/episodes API uses Bazarr's container path (`/media/Movies/...`), not Radarr's (`/movies/Movies/...`).** Always pass exactly what `GET /api/movies` returned in `subtitles[].path`.
+
+6. **Subtitle DELETE wants `path=`, not `subtitles_path=`.** Exact endpoint signature:
+
+   ```sh
+   curl -X DELETE -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/movies/subtitles" \
+     --data-urlencode "radarrid=$RID" \
+     --data-urlencode "language=en" \
+     --data-urlencode "forced=False" \
+     --data-urlencode "hi=True" \
+     --data-urlencode "path=/media/Movies/.../file.en.hi.srt" \
+     --data-urlencode "type=movie"
+   ```
+
+   For episodes: replace `radarrid` with `sonarrEpisodeId` and `type=movie` with `type=episode`. Note: `forced=False`/`hi=True` here are CAPITAL — different convention from `settings-` POST. Yes, this is inconsistent. Bazarr's API has multiple authors.
+
+7. **Manual subtitle download (replace a bad SRT with a specific candidate) — `POST /api/providers/movies`:**
+
+   ```sh
+   # 1. Pull all candidates for radarrId
+   curl -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/providers/movies?radarrid=$RID" \
+     | jq -r '.data | to_entries[] | "[\(.key)] score=\(.value.score) prov=\(.value.provider) release=\(.value.release_info)"'
+
+   # 2. Save the chosen candidate's `subtitle` blob (encoded pickle b64)
+   curl -H "X-Api-Key: $KEY" "...?radarrid=$RID" | jq -r '.data[<idx>].subtitle' > /tmp/sub.b64
+
+   # 3. POST it back
+   curl -X POST -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/providers/movies?radarrid=$RID" \
+     --data-urlencode "hi=False" \
+     --data-urlencode "forced=False" \
+     --data-urlencode "original_format=False" \
+     --data-urlencode "provider=<provider_name>" \
+     --data-urlencode "language=en" \
+     --data-urlencode "score=<score>" \
+     --data-urlencode "subtitle@/tmp/sub.b64"
+   ```
+
+   Bazarr scans the downloaded SRT and **auto-flags it as `.hi.srt` if it contains `[Music]` / `(door slams)` markers**, even if you sent `hi=False`. Old `.en.srt` is NOT replaced — both files coexist. Delete the old one explicitly (recipe #6 above) so Jellyfin picks the new one.
+
+## Recipe: bypass external SRTs — use embedded PGS subtitles
+
+For foreign-language Blu-ray rips, the file usually ships with an English **PGS** (image-based) subtitle track from the original Blu-ray master — perfectly timed against the original audio. Bazarr-downloaded external SRTs are typically scraped from public databases and timed against *some* release that may not match your encode, leading to the classic 3-5s lag.
+
+### The default that breaks this
+
+Bazarr ships with these defaults in `general` settings:
+
+| Key | Default | Effect |
+|---|---|---|
+| `use_embedded_subs` | `true` | Bazarr scans embedded subtitle tracks |
+| `embedded_subs_show_desired` | `true` | Embedded subs count toward "language fulfilled" |
+| `ignore_pgs_subs` | **`true`** | **PGS subs are skipped — treated as if absent** |
+| `ignore_vobsub_subs` | **`true`** | DVD VobSub subs also skipped |
+| `ignore_ass_subs` | `false` | ASS subs are counted (most BD-bundled ASS is fine) |
+
+> The combination "use embedded + ignore PGS" means Bazarr will see "no English embedded subtitle" for any BD rip and aggressively download external SRTs that then displace the perfectly-timed PGS in Jellyfin's preference order. This is the silent root cause behind every "subs are 3-5s off" report.
+
+### Fix — flip both ignore flags off
+
+```sh
+KEY=$(op read 'op://pi-cluster/mcp-homelab/bazarr-api-key')
+
+curl -X POST -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/system/settings" \
+  --data-urlencode "settings-general-ignore_pgs_subs=false" \
+  --data-urlencode "settings-general-ignore_vobsub_subs=false"
+
+# Verify
+curl -H "X-Api-Key: $KEY" "https://bazarr.lab.mtgibbs.dev/api/system/settings" \
+  | jq '{ignore_pgs_subs: .general.ignore_pgs_subs, ignore_vobsub_subs: .general.ignore_vobsub_subs}'
+```
+
+### Trade-offs
+
+> **Apple TV / modern Jellyfin clients** support PGS direct play — flipping these flags is a clear win.
+>
+> **Browser-based Jellyfin** can struggle with PGS; the server may need to transcode them, costing CPU. If your primary client is the Jellyfin web UI, weigh accordingly.
+>
+> **Hardcoded language**: PGS subs are images — text cannot be edited, fonts cannot be changed, and translation is fixed at ripping time. If you want different translations, leave the flags as default and live with external SRTs.
+
+### Auditing — which titles benefit
+
+To find titles where this fix would help, query Jellyfin (PGS-eng presence) and cross-reference with Bazarr (external SRT exists):
+
+```sh
+JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
+USER_ID=<your-user-id>
+
+# List movies with embedded English PGS
+curl -H "X-Emby-Token: $JF_KEY" \
+  "https://jellyfin.lab.mtgibbs.dev/Users/$USER_ID/Items?IncludeItemTypes=Movie&Recursive=true&Fields=MediaStreams&Limit=2000" \
+  | jq -r '.Items[] | select(.MediaStreams[]? | select(.Type=="Subtitle" and .Codec=="PGSSUB" and .Language=="eng")) | .Name'
+```
+
+Same query for series with `IncludeItemTypes=Episode`.
 
 ## Quality-profile rejection cheat sheet
 

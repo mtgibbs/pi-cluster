@@ -32,11 +32,13 @@ spec:
               mountPath: /media
           resources:
             requests:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
-              cpu: "300m"
+              # ffsubsync's PCM buffer + VAD model peak around 400 MB.
+              # Default 512Mi was OOM-killing during subtitle sync.
+              memory: "1Gi"
+              cpu: "500m"
       volumes:
         - name: config
           persistentVolumeClaim:

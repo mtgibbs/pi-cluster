@@ -115,3 +115,25 @@ Restart Claude Code and confirm the MCP server connects.
 - The K8s ServiceAccount has read-only access with limited write operations
 - Pod exec is scoped to jellyfin namespace only
 - No delete permissions on any resource
+
+## Known MCP Tool Bugs
+
+### `get_tailscale_status` reports `ready: false` on healthy Connector
+
+`mcp__homelab__get_tailscale_status` returns `ready: false` for the `pi-cluster-exit` Connector even when the underlying Kubernetes resource is healthy. Verified 2026-04-19 (post UDM Pro Max cutover): MCP reports `ready: false`, but `kubectl describe connector.tailscale.com pi-cluster-exit` shows `ConnectorReady: True` with `ObservedGeneration` matching `Generation`, and the exit node is confirmed working.
+
+**Do not treat this as a real problem without cross-checking the CR directly:**
+```bash
+kubectl describe connector.tailscale.com pi-cluster-exit
+# Look for: Status.Conditions[type=ConnectorReady].Status = True
+```
+
+Root cause: the MCP tool is likely reading a printer column or stale field from the CRD status rather than `.status.conditions`. Filed as issue against `mtgibbs/pi-cluster-mcp`.
+
+### `get_subtitle_history` returns HTML instead of JSON
+
+The Bazarr subtitle history endpoint returns HTML rather than JSON when called via MCP. Use `get_subtitle_status` as the authoritative signal for subtitle state instead.
+
+### `get_dns_status` stats broken
+
+DNS stats via `get_dns_status` are unreliable (see issue #17 in `mtgibbs/pi-cluster-mcp`). Use `diagnose_dns` for any troubleshooting work — it tests the full path including both Unbound instances directly.

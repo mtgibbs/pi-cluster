@@ -4,10 +4,14 @@
 UniFi network management via `go-unifi-mcp` — a local stdio MCP server running on the dev machine.
 
 ## Hardware
-- **Controller**: Cloud Key Gen1, firmware 6.1.71 (EOL — max ~7.2.x)
-- **IP**: 192.168.1.30:8443
+- **Controller**: UDM Pro Max (built-in controller, cutover 2026-04-19 — CK Gen1 retired)
+- **UDM Pro Max IP**: 192.168.1.1 (gateway + controller)
 - **Site**: `default`
-- **Auth**: Username/password only (no API key support on CK Gen1)
+- **Auth**: Username/password only
+
+> **Note**: The UDM Pro Max uses `/api/auth/login` (newer UniFi API), not the classic `/api/login` used by CK Gen1. If go-unifi-mcp auth fails, verify it is configured for the new endpoint. Core operations should work; some older endpoint patterns may need updating.
+
+> **CK Gen1 (retired)**: Was at 192.168.1.30:8443, firmware 6.1.71 (EOL). The `cmd:backup` on-demand backup hung indefinitely on 6.1.71. The CK Gen1 backup workaround (use `cmd:list-backups` + download from `/dl/autobackup/`) is no longer relevant — the UDM Pro Max backup flow may differ; verify before relying on it.
 
 ## MCP Tools
 
