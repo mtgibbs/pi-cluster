@@ -67,6 +67,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Tailscale / VPN** | `.claude/skills/tailscale-ops/SKILL.md` | `cluster-ops` |
 | **Prometheus / Grafana** | `.claude/skills/monitoring-ops/SKILL.md` | `cluster-ops` |
 | **Jellyfin / Immich** | `.claude/skills/media-services/SKILL.md` | `cluster-ops` |
+| **Sonarr / Radarr / Bazarr / SAB API** | `.claude/skills/servarr-ops/SKILL.md` | direct API via helper |
 | **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |

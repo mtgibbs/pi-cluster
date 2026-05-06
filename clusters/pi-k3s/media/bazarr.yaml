@@ -64,6 +64,10 @@ metadata:
   namespace: media
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    # ffsubsync (action=sync) runs synchronously inside Bazarr and can take
+    # 1-3 min per file. Default 60s nginx timeout 504s before sync completes.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
 spec:
   ingressClassName: nginx
   tls:
