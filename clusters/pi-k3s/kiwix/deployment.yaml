@@ -39,9 +39,10 @@ spec:
           image: ghcr.io/kiwix/kiwix-tools:latest
           command: ["kiwix-serve"]
           args:
-            - "--port=8080"
-            - "--blockExternal"
-            - "--library"
+            - "-p"
+            - "8080"
+            - "-b"
+            - "-l"
             - "/data/library.xml"
           ports:
             - containerPort: 8080
