@@ -27,4 +27,4 @@ spec:
   storageClassName: nfs-kiwix
   resources:
     requests:
-      storage: 250Gi
+      storage: 500Gi

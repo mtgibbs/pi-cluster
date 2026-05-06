@@ -37,7 +37,12 @@ spec:
               cd /data
               for url in \
                 https://download.kiwix.org/zim/wikipedia/wikipedia_en_simple_all_nopic_2026-02.zim \
-                https://download.kiwix.org/zim/wiktionary/wiktionary_en_all_nopic_2026-02.zim; do
+                https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-03.zim \
+                https://download.kiwix.org/zim/wiktionary/wiktionary_en_all_nopic_2026-02.zim \
+                https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-04.zim \
+                https://download.kiwix.org/zim/wikiquote/wikiquote_en_all_nopic_2026-04.zim \
+                https://download.kiwix.org/zim/wikisource/wikisource_en_all_nopic_2026-02.zim \
+                https://download.kiwix.org/zim/gutenberg/gutenberg_en_all_2025-11.zim; do
                 name=$(basename "$url")
                 if [ -f "$name" ]; then
                   echo "==> $name already present, skipping"
