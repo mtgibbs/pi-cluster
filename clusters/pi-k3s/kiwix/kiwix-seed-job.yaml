@@ -49,7 +49,14 @@ spec:
                   continue
                 fi
                 echo "==> downloading $name"
-                curl -fL --retry 3 --retry-delay 5 -o "$name.part" "$url"
+                # Stall-aware: abort if avg <512 KB/s for 2 min, retry up to 10x.
+                # Hard 4h ceiling per file. -C - resumes from existing .part.
+                curl -fL -C - \
+                  --connect-timeout 30 \
+                  --max-time 14400 \
+                  --speed-time 120 --speed-limit 524288 \
+                  --retry 10 --retry-delay 60 --retry-all-errors \
+                  -o "$name.part" "$url"
                 mv "$name.part" "$name"
               done
               echo "==> ZIMs on disk:"
