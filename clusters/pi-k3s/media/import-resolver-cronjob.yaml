@@ -113,7 +113,7 @@ spec:
                         }')
                       fi
 
-                      result=$(curl -sf -X POST -H "X-Api-Key: $key" \
+                      result=$(curl -sf --max-time 60 --connect-timeout 10 -X POST -H "X-Api-Key: $key" \
                         -H "Content-Type: application/json" \
                         "$base/api/v3/command" -d "$payload")
                       echo "    queued: $(echo "$result" | jq -r '"cmd=\(.id) status=\(.status)"')"
