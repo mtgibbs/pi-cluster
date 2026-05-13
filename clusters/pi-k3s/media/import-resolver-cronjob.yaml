@@ -57,7 +57,7 @@ spec:
 
                     # Pull queue, dedupe by downloadId
                     local dlids
-                    dlids=$(curl -sf -H "X-Api-Key: $key" \
+                    dlids=$(curl -sf --max-time 120 --connect-timeout 10 -H "X-Api-Key: $key" \
                       "$base/api/v3/queue?pageSize=200" \
                       | jq -r '.records[] | select(.trackedDownloadState == "importBlocked") | .downloadId' \
                       | sort -u)
@@ -70,7 +70,7 @@ spec:
                     for dlid in $dlids; do
                       echo "  processing $dlid"
                       local candidates payload result
-                      candidates=$(curl -sf -H "X-Api-Key: $key" \
+                      candidates=$(curl -sf --max-time 120 --connect-timeout 10 -H "X-Api-Key: $key" \
                         "$base/api/v3/manualimport?downloadId=$dlid")
                       local total clean
                       total=$(echo "$candidates" | jq 'length')
