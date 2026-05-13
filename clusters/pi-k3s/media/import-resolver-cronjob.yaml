@@ -1,0 +1,133 @@
+# Auto-resolve Sonarr/Radarr importBlocked queue items.
+#
+# Root cause this exists to fix:
+#   Sonarr/Radarr refuse to auto-import when the release title doesn't parse
+#   cleanly to the movie/series AND only the grab-history matched by ID.
+#   Examples: "Soso.no.Furiren" → Frieren, "Romeo.plus.Juliet" → Romeo + Juliet,
+#   season packs from "iVy" group, etc.
+#
+# Approach: every 15 minutes, scan both queues for trackedDownloadState ==
+# "importBlocked", and POST a ManualImport command for each. Same flow a human
+# does through the web UI — safe because the grab-history-by-ID match is
+# already correct.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: import-resolver
+  namespace: media
+spec:
+  schedule: "*/15 * * * *"  # every 15 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: resolver
+              image: alpine:3.21
+              env:
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-api-keys
+                      key: SONARR_API_KEY
+                - name: RADARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-api-keys
+                      key: RADARR_API_KEY
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache curl jq >/dev/null
+
+                  # Resolve importBlocked items for one servarr app.
+                  # $1 = app name (sonarr|radarr), $2 = base URL, $3 = api key
+                  # $4 = id-field name for files entry (seriesId|movieId)
+                  resolve_app() {
+                    local app="$1" base="$2" key="$3" id_field="$4"
+                    echo "=== ${app} ==="
+
+                    # Pull queue, dedupe by downloadId
+                    local dlids
+                    dlids=$(curl -sf -H "X-Api-Key: $key" \
+                      "$base/api/v3/queue?pageSize=200" \
+                      | jq -r '.records[] | select(.trackedDownloadState == "importBlocked") | .downloadId' \
+                      | sort -u)
+
+                    if [ -z "$dlids" ]; then
+                      echo "  no importBlocked items"
+                      return
+                    fi
+
+                    for dlid in $dlids; do
+                      echo "  processing $dlid"
+                      local candidates payload result
+                      candidates=$(curl -sf -H "X-Api-Key: $key" \
+                        "$base/api/v3/manualimport?downloadId=$dlid")
+                      local total clean
+                      total=$(echo "$candidates" | jq 'length')
+                      clean=$(echo "$candidates" | jq '[.[] | select(.rejections == [])] | length')
+                      echo "    candidates=$total clean=$clean"
+
+                      if [ "$clean" -eq 0 ]; then
+                        echo "    SKIP: no clean candidates (all rejected)"
+                        echo "$candidates" | jq -c '.[] | {rej: [.rejections[].reason]}' | head -3
+                        continue
+                      fi
+
+                      # Build ManualImport payload — TV vs movie key differs
+                      if [ "$id_field" = "seriesId" ]; then
+                        payload=$(echo "$candidates" | jq --arg dlid "$dlid" '{
+                          name: "ManualImport",
+                          files: [.[] | select(.rejections == []) | {
+                            path: .path,
+                            seriesId: .series.id,
+                            episodeIds: [.episodes[].id],
+                            quality: .quality,
+                            languages: .languages,
+                            releaseGroup: .releaseGroup,
+                            downloadId: $dlid
+                          }],
+                          importMode: "auto"
+                        }')
+                      else
+                        payload=$(echo "$candidates" | jq --arg dlid "$dlid" '{
+                          name: "ManualImport",
+                          files: [.[] | select(.rejections == []) | {
+                            path: .path,
+                            movieId: .movie.id,
+                            quality: .quality,
+                            languages: .languages,
+                            releaseGroup: .releaseGroup,
+                            downloadId: $dlid
+                          }],
+                          importMode: "auto"
+                        }')
+                      fi
+
+                      result=$(curl -sf -X POST -H "X-Api-Key: $key" \
+                        -H "Content-Type: application/json" \
+                        "$base/api/v3/command" -d "$payload")
+                      echo "    queued: $(echo "$result" | jq -r '"cmd=\(.id) status=\(.status)"')"
+                    done
+                  }
+
+                  resolve_app sonarr "http://sonarr.media.svc.cluster.local" "$SONARR_API_KEY" seriesId
+                  resolve_app radarr "http://radarr.media.svc.cluster.local" "$RADARR_API_KEY" movieId
+
+                  echo "done."
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

@@ -1,0 +1,102 @@
+# Weekly orphan reporter for /downloads/complete/usenet/.
+#
+# What it does:
+#   - Finds _UNPACK_* dirs and .[0-9]+ suffix dirs older than 14 days
+#   - Reports them (size, age) to stdout — captured by Loki
+#   - PHASE 1: report-only, no deletion. Once we trust the heuristic,
+#     we can add a --delete flag (or a separate CronJob).
+#
+# Why report-only first:
+#   Earlier audits showed many "orphans" still contained un-imported content.
+#   The import-resolver CronJob should be doing 80% of that work now, but
+#   we want visibility into what's left before automating destructive ops.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: orphan-sweep
+  namespace: media
+spec:
+  schedule: "0 6 * * 1"  # Mondays at 06:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sweep
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  cd /downloads/complete/usenet
+                  THRESHOLD_DAYS=14
+
+                  echo "=== Orphan sweep ($(date)) ==="
+                  echo "Threshold: ${THRESHOLD_DAYS} days"
+                  echo ""
+
+                  # _UNPACK_ dirs older than threshold
+                  echo "--- _UNPACK_* older than ${THRESHOLD_DAYS} days ---"
+                  found_count=0
+                  total_bytes=0
+                  for d in _UNPACK_*; do
+                    [ -d "$d" ] || continue
+                    if [ "$(find "$d" -maxdepth 0 -mtime +$THRESHOLD_DAYS 2>/dev/null)" ]; then
+                      size_bytes=$(du -sb "$d" 2>/dev/null | cut -f1)
+                      size_human=$(du -sh "$d" 2>/dev/null | cut -f1)
+                      mtime=$(stat -c '%y' "$d" 2>/dev/null | cut -d. -f1)
+                      printf "  %-8s  %s  %s\n" "$size_human" "$mtime" "$d"
+                      found_count=$((found_count + 1))
+                      total_bytes=$((total_bytes + size_bytes))
+                    fi
+                  done
+                  echo "  total: $found_count dirs"
+                  if [ "$found_count" -gt 0 ]; then
+                    printf "  reclaimable: %.1f GB\n" "$(echo "scale=2; $total_bytes / 1073741824" | awk -v b="$total_bytes" 'BEGIN{print b/1073741824}')"
+                  fi
+                  echo ""
+
+                  # Collision-rename duplicates older than threshold
+                  echo "--- *.[0-9]+ (collision retries) older than ${THRESHOLD_DAYS} days ---"
+                  dup_count=0
+                  dup_bytes=0
+                  for d in *.[0-9] *.[0-9][0-9]; do
+                    [ -d "$d" ] || continue
+                    if [ "$(find "$d" -maxdepth 0 -mtime +$THRESHOLD_DAYS 2>/dev/null)" ]; then
+                      size_bytes=$(du -sb "$d" 2>/dev/null | cut -f1)
+                      size_human=$(du -sh "$d" 2>/dev/null | cut -f1)
+                      mtime=$(stat -c '%y' "$d" 2>/dev/null | cut -d. -f1)
+                      printf "  %-8s  %s  %s\n" "$size_human" "$mtime" "$d"
+                      dup_count=$((dup_count + 1))
+                      dup_bytes=$((dup_bytes + size_bytes))
+                    fi
+                  done
+                  echo "  total: $dup_count dirs"
+
+                  echo ""
+                  echo "=== Summary ==="
+                  echo "  _UNPACK_ orphans: $found_count dirs"
+                  echo "  .N retries:       $dup_count dirs"
+                  echo "  report-only mode (no deletions)"
+              volumeMounts:
+                - name: downloads
+                  mountPath: /downloads
+                  readOnly: true  # report-only; flip when we add delete mode
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: downloads
+              persistentVolumeClaim:
+                claimName: media-downloads

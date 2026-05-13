@@ -1,0 +1,24 @@
+# API keys for Sonarr/Radarr — consumed by import-resolver-cronjob and any
+# other in-cluster jobs that need to call the servarr APIs without going
+# through Prowlarr's auth or hitting the ingress.
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: servarr-api-keys
+  namespace: media
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword
+  target:
+    name: servarr-api-keys
+    creationPolicy: Owner
+  data:
+    - secretKey: SONARR_API_KEY
+      remoteRef:
+        key: sonarr.lab.mtgibbs.dev/api-key
+    - secretKey: RADARR_API_KEY
+      remoteRef:
+        key: radarr.lab.mtgibbs.dev/api-key
