@@ -107,7 +107,9 @@ done
 
 > Same pattern works for Radarr. Replace `seriesId`/`episodeIds` with `movieId` and use `/api/v3/manualimport?downloadId=...`.
 
-**Permanent fix:** add a scene alias in Sonarr (Series → Edit → Tags / Alternative Titles) so future grabs auto-import. Otherwise this dance repeats every season.
+**Permanent fix: NOT scene aliases.** Tested 2026-05-13 on Sonarr v4.0.17 and Radarr v6.1.1 — `alternateTitles` is read-only TVDB/TMDB metadata. PUT with a user-added entry returns 200 OK but the value is silently dropped on persist. The UI shows the field but doesn't accept additions. Don't bother.
+
+**Permanent fix (actual):** the `import-resolver` CronJob at `clusters/pi-k3s/media/import-resolver-cronjob.yaml`. Runs every 15 min, scans both queues for `trackedDownloadState == "importBlocked"`, builds the ManualImport payload (filtering rejections), and POSTs the ManualImport command. Same flow this skill documents, just automated. **You probably don't need to manually fire ManualImport anymore** — the CronJob should resolve any stuck queue item within 15 min. Use this recipe only when debugging why the CronJob isn't catching something (typically a release with non-empty `rejections` like quality mismatch).
 
 ## Recipe: per-movie availability override
 
