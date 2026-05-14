@@ -111,6 +111,38 @@ done
 
 **Permanent fix (actual):** the `import-resolver` CronJob at `clusters/pi-k3s/media/import-resolver-cronjob.yaml`. Runs every 15 min, scans both queues for `trackedDownloadState == "importBlocked"`, builds the ManualImport payload (filtering rejections), and POSTs the ManualImport command. Same flow this skill documents, just automated. **You probably don't need to manually fire ManualImport anymore** — the CronJob should resolve any stuck queue item within 15 min. Use this recipe only when debugging why the CronJob isn't catching something (typically a release with non-empty `rejections` like quality mismatch).
 
+### CRITICAL gotcha: never rename `_UNPACK_X` → `X` inside a Sonarr-monitored path
+
+When SAB leaves an orphan `_UNPACK_*` dir, the obvious fix is `mv _UNPACK_X X` so Radarr/Sonarr stop rejecting with *"File is still being unpacked"*. **Don't do this for TV shows on a Sonarr-monitored download path.**
+
+What happens (observed 2026-05-13 on Avatar TLA S03):
+
+1. You rename `_UNPACK_Show.S03...` → `Show.S03...` in `/downloads/complete/usenet/`
+2. Sonarr's filesystem watcher fires immediately on the new dir name and scans it
+3. Sonarr parses the contents and decides the in-library files are upgradeable from this "new" release
+4. Sonarr deletes the existing in-library files **before** any explicit ManualImport runs
+5. If the renamed orphan's release is **incomplete** (missing some episodes the library had), those episodes are now permanently lost — no replacement gets imported, no recovery from the orphan
+
+The specific failure mode that bit Avatar TLA: the WiRd0 BluRay season pack had `S03E14E15.combined.mkv` and `S03E18E19E20E21.combined.mkv` files (multi-episode releases). The library had a *different* multi-episode file `S03E10.E11.The.Day.of.Black.Sun.mkv` that the orphan **did not** contain a replacement for. Sonarr's watcher rescanned, deleted the existing E10E11 file (thinking it was about to be replaced), and the import only covered E14E15 + E18-E21. **Net: 2 episodes lost.**
+
+**Safer pattern for orphan dirs containing TV content:**
+
+```sh
+# 1. Move to a path Sonarr is NOT watching
+kubectl exec -n media deployment/sabnzbd -- mv \
+  /downloads/complete/usenet/_UNPACK_Show.SeasonPack/ \
+  /downloads/manual-import-staging/Show.SeasonPack/
+
+# 2. Run manualimport + ManualImport command pointing at the staging path
+#    (Sonarr won't touch the staging path until you explicitly tell it to)
+
+# 3. After successful import, clean up the staging dir
+```
+
+If you have to operate on the in-place dir, **inspect the orphan's contents first** and confirm every episode the library already has is also present in the orphan. If not, abort.
+
+Movies (Radarr) are less risky here because there's typically only one file per movie — no fan-out potential for multi-episode files.
+
 ## Recipe: per-movie availability override
 
 Radarr won't search a movie until `isAvailable == true`, which is gated by `minimumAvailability` (`announced` < `inCinemas` < `released`). Default is `released` — keeps CAM/Telesync rips out for normal use.
