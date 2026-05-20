@@ -8,7 +8,7 @@ A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing
 
 **NAS**: QNAP TS-435XeU at `storage.lab.mtgibbs.dev` (192.168.1.61), cutover from Synology 2026-04-30. 3x 10TB WD Red Plus RAID 5, ~16 TB usable. All NFS PVs use `/cluster/...` path prefix.
 
-**Inference appliance (in progress)**: Beelink GTR9 Pro (`beelink-ai`, 192.168.1.70) — see `docs/beelink-ai-stack.md`.
+**Inference appliance**: Beelink GTR9 Pro (`beelink-ai`, 192.168.1.70). Ollama (Vulkan/RADV) + LiteLLM at `https://ai.lab.mtgibbs.dev`, Open WebUI at `https://chat.lab.mtgibbs.dev`. Five production models live. Phase 0 + 0.5 complete 2026-05-20. See `docs/beelink-ai-stack.md` and `docs/recaps/2026-05-20-beelink-ai-bringup.md`.
 
 ## Hardware
 

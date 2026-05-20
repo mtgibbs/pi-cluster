@@ -1,6 +1,6 @@
 # Beelink AI Stack — Architecture & Plan
 
-**Status:** In progress (started 2026-04-27)
+**Status:** Phase 0 + Phase 0.5 complete (2026-05-20). Next: Phase 1 (per-client keys + Authelia).
 **Hardware:** Beelink GTR9 Pro (Ryzen AI Max+ 395, 128 GB unified RAM, 1x Crucial P310 2 TB NVMe, dual 10GbE)
 **OS:** Ubuntu 26.04 Server LTS (Resolute)
 
@@ -23,10 +23,11 @@ This document captures the architecture, decisions, and phased plan for adding a
 **Beelink (single host, Ubuntu 26.04, Docker Compose, NOT in K3s)**
 
 - Ollama / llama.cpp serving local models
-- LiteLLM proxy on :4000 (OpenAI-compatible front door)
-- Open WebUI for adults at `chat.lab.mtgibbs.dev`
-- Open WebUI for kids at `kids.lab.mtgibbs.dev`, locked to Gemma, separate auth
-- Caddy + Authelia for TLS + SSO on adult-facing services
+- LiteLLM proxy behind Caddy at `https://ai.lab.mtgibbs.dev` (OpenAI-compatible front door)
+- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy)
+- Open WebUI for kids at `kids.lab.mtgibbs.dev` — deferred (Phase 1), locked to Gemma, separate auth
+- Caddy (locally built with xcaddy + Cloudflare DNS plugin) for TLS termination; Authelia deferred
+- Ollama running on Vulkan/RADV (`OLLAMA_VULKAN=1`) — NOT ROCm (see Decisions Log)
 - Tailscale for remote admin
 - node_exporter, AMD GPU exporter, cAdvisor for metrics
 - All config in Git, deployed via Ansible + systemd-timer git-pull
@@ -65,15 +66,16 @@ Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for exe
 
 ## Models
 
-| Model | Tier | Purpose |
-|---|---|---|
-| `qwen3-coder:30b-a3b` | — | Coding work, OpenCode backend |
-| `qwen3.5:35b-a3b` | Primary | n8n, Signal, IoT reasoning |
-| `qwen3.5:9b` | Triage | High-volume routing/classification |
-| `gemma3:27b` | Kids | Safety-tuned chat for kids' UI |
-| `nomic-embed-text` | Embeddings | RAG pipelines |
+| Model | Tier | Purpose | Status |
+|---|---|---|---|
+| `qwen3-coder:30b` | — | Coding work, OpenCode backend | Pulled + registered |
+| `qwen3.5:35b` | Primary | n8n, Signal, IoT reasoning | Pulled + registered |
+| `qwen3.5:9b` | Triage | High-volume routing/classification | Pulled + registered |
+| `gemma3:27b` | Kids | Safety-tuned chat for kids' UI | Pulled + registered |
+| `nomic-embed-text` | Embeddings | RAG pipelines | Pulled + registered |
+| `qwen3:0.6b` | Diagnostic | Smoke-test / fast probe | Pulled + registered |
 
-If `qwen3.5` GGUFs lag in Ollama, fallback: `qwen3:30b-a3b` (same architecture family).
+**Note on tag names:** The originally-planned MoE variants `qwen3.5:35b-a3b` and `qwen3-coder:30b-a3b` do not exist on the Ollama registry. The actual tags are `qwen3.5:35b` and `qwen3-coder:30b` (dense models). Both fit within 96 GB GPU VRAM and perform at expectation.
 
 ## Network Plan
 
@@ -114,18 +116,17 @@ for gfx1151 (Strix Halo). The ROCm 6.x runtime in that image is broken for this 
 **Workaround:** use the standard `ollama/ollama:0.17.7` image with `OLLAMA_VULKAN=1`.
 Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
 
-**Known limitations carried into Phase 0.5:**
-- Vulkan may hang on models above 30B parameters — needs ROCm 7.x image when ready
-- LiteLLM master key is a placeholder (`sk-litellm-smoke-2026`) — rotate before any real traffic
-- Plain HTTP only on `:4000` — Caddy + TLS coming in Phase 0.5
+**Resolution:** all Phase 0 limitations resolved in Phase 0.5 (same session, 2026-05-20). LiteLLM master key rotated, Caddy TLS live, Vulkan concern proven unwarranted — dense 35B serves cleanly.
 
-### Phase 0.5: User-Facing Layer (next session)
+### Phase 0.5: User-Facing Layer — ✅ COMPLETE 2026-05-20
 
-1. Cloudflare API token (Zone:DNS:Edit on `mtgibbs.dev`) → 1Password vault `pi-cluster`
-2. Caddy with Cloudflare DNS plugin in Compose stack, terminates TLS on `:443`
-3. Open WebUI (adults) at `chat.lab.mtgibbs.dev`
-4. Big model pulls: `qwen3.5:35b-a3b`, `qwen3-coder:30b-a3b`, `gemma3:27b`, `nomic-embed-text`
-5. Authelia/SSO: deferred further unless needed before kids' UI ships
+1. Cloudflare API token (`op://pi-cluster/cloudflare/beelink-api-token`) in Compose env — ✅
+2. Caddy built locally (xcaddy + Cloudflare DNS plugin), TLS via DNS-01 ACME, `resolvers 1.1.1.1 8.8.8.8` — ✅
+3. Open WebUI at `https://chat.lab.mtgibbs.dev`, `ENABLE_OLLAMA_API=false`, SQLite at `/srv/openwebui` — ✅
+4. LiteLLM master key rotated to 64-char hex in 1Password — ✅
+5. Pi-hole DNS: `chat.lab.mtgibbs.dev` → 192.168.1.70 committed via GitOps — ✅
+6. Production models pulled and registered (see Models table) — ✅
+7. Authelia/SSO: deferred to Phase 1 unless needed before kids' UI ships
 
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 
@@ -175,6 +176,18 @@ Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
 - Kids' Open WebUI on its own VLAN (when introduced) with explicit deny rules.
 
 ## Decisions Log
+
+### Vulkan over ROCm — FORCED WORKAROUND (2026-05-20)
+
+`ollama/ollama:0.17.7-rocm` OOMs in `hipStreamCreateWithFlags` during ggml-cuda init on gfx1151 (Strix Halo). This is a ROCm 6.x runtime bug for this specific iGPU architecture — not a VRAM shortage. **Workaround:** standard `ollama/ollama:0.17.7` with `OLLAMA_VULKAN=1`. Vulkan/RADV GFX1151 backend serves all six models including 35B dense without issue. ROCm host tools (`rocminfo`, `rocm-smi-lib`) remain installed for diagnostics. Revisit when a `-rocm` image ships with ROCm 7.x gfx1151 support.
+
+### Tailscale OAuth — One Client Per Tag Scope (2026-05-20)
+
+Tailscale OAuth clients enforce an all-or-nothing tag rule: a client with N tags must mint keys with ALL N tags. Single-device tagging requires a dedicated single-tag OAuth client. Pattern: `tailscale-beelink-device-auth` → `tag:inference` only; `gitops-acl-pi-cluster-repo` → `policy_file` scope only. Do not share OAuth clients across device classes.
+
+### Caddy: Locally Built Image — REQUIRED (2026-05-20)
+
+The Cloudflare DNS plugin for Caddy is not included in the official `caddy` Docker image. Community-published `caddy-cloudflare` images exist but are not trusted under this project's threat model (supply chain). Solution: 2-stage Dockerfile, `caddy:2-builder` + xcaddy, built locally on the Beelink. This adds a build step to `docker compose up` but keeps the image provenance clean.
 
 ### OpenClaw — REJECTED
 
