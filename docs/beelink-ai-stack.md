@@ -96,19 +96,28 @@ Firewall posture (when VLANs land):
 
 ## Phased Plan
 
-### Phase 0: Beelink Bring-Up
+### Phase 0: Beelink Bring-Up — ✅ COMPLETE 2026-05-20
 
-1. Ubuntu 26.04 Server install with static IP `192.168.1.70` — ✅ done
-2. SSH key auth, verify reachable — ✅ done
-3. Ansible inventory + base hardening role — ✅ done (00-bootstrap, 10-hardening)
-4. Docker + Compose installed — ✅ done (20-docker)
-5. LVM `lv-models` provisioned at `/srv/models` (1 TB)
-6. Tailscale on Beelink (30-tailscale Ansible stage)
-7. ROCm for AMD GPU Strix Halo (40-rocm Ansible stage — bleeding edge, expect curveballs)
-8. Ollama + LiteLLM Compose stack at `/opt/ai-stack/`, `OLLAMA_MODELS=/models`
-9. Pi-hole local DNS: `ai.lab.mtgibbs.dev` → `192.168.1.70` — ✅ staged in `clusters/pi-k3s/pihole/pihole-custom-dns.yaml`, pending `/deploy`
-10. Smoke test: pull small model (e.g. `qwen3:0.6b`), `curl http://ai.lab.mtgibbs.dev:4000/v1/models` from a Pi pod
-11. **Deferred to Phase 0.5 (next session):** Caddy + Cloudflare DNS-01 TLS, big model pulls, Open WebUI
+1. Ubuntu 26.04 Server install with static IP `192.168.1.70` — ✅
+2. SSH key auth, verify reachable — ✅
+3. Ansible inventory + base hardening role (00-bootstrap, 10-hardening) — ✅
+4. Docker + Compose installed (20-docker) — ✅
+5. LVM `lv-models` provisioned at `/srv/models` (1 TB ext4, 25-lvm-models) — ✅
+6. Tailscale joined as `tag:inference` at `100.123.94.31` (30-tailscale) — ✅
+7. ROCm host monitoring tools (`rocminfo`, `rocm-smi-lib`) installed (40-rocm) — ✅
+8. Ollama + LiteLLM Compose stack at `/opt/ai-stack/` (50-ai-stack) — ✅
+9. Pi-hole DNS: `ai.lab.mtgibbs.dev` → `192.168.1.70` — ✅ deployed
+10. Smoke test passed: Pi pod → DNS → LiteLLM → Ollama → GPU → response — ✅
+
+**Key surprise:** the `ollama/ollama:0.17.7-rocm` image OOMs on `hipStreamCreateWithFlags`
+for gfx1151 (Strix Halo). The ROCm 6.x runtime in that image is broken for this iGPU.
+**Workaround:** use the standard `ollama/ollama:0.17.7` image with `OLLAMA_VULKAN=1`.
+Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
+
+**Known limitations carried into Phase 0.5:**
+- Vulkan may hang on models above 30B parameters — needs ROCm 7.x image when ready
+- LiteLLM master key is a placeholder (`sk-litellm-smoke-2026`) — rotate before any real traffic
+- Plain HTTP only on `:4000` — Caddy + TLS coming in Phase 0.5
 
 ### Phase 0.5: User-Facing Layer (next session)
 
