@@ -1,0 +1,51 @@
+// Tailscale ACL — source of truth for the tailnet policy.
+//
+// This file is automatically applied to Tailscale on every push to main via
+// .github/workflows/tailscale-acl.yml (using tailscale/gitops-acl-action).
+// PRs run a dry-run validation; merged commits apply the policy.
+//
+// DO NOT edit the policy in the Tailscale admin console — changes there will
+// be overwritten on the next push. Edit this file, open a PR, merge.
+//
+// Tags:
+//   tag:k8s-operator  Pi K3s Tailscale operator + operator-managed proxies/exit-nodes.
+//   tag:inference     Beelink AI inference appliance (Ollama + LiteLLM).
+//
+// Grants summary:
+//   - Members can reach each other, k8s-operator nodes, the inference box,
+//     the internet (exit node), and the home LAN (192.168.1.0/24).
+//   - K8s operator can reach members (subnet routing).
+//   - Tailscale SSH allowed from members to their own devices (autogroup:self).
+
+{
+    "tagOwners": {
+        "tag:k8s-operator": ["autogroup:admin", "autogroup:member"],
+        "tag:inference":    ["autogroup:admin"],
+    },
+
+    "autoApprovers": {
+        "exitNode": ["tag:k8s-operator"],
+    },
+
+    "grants": [
+        {"src": ["autogroup:member"], "dst": ["autogroup:member"], "ip": ["*"]},
+        {"src": ["tag:k8s-operator"], "dst": ["autogroup:member"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["tag:k8s-operator"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["tag:inference"],    "ip": ["*"]},
+        {
+            "src": ["autogroup:member"],
+            "dst": ["autogroup:internet"],
+            "ip":  ["*"],
+        },
+        {"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]},
+    ],
+
+    "ssh": [
+        {
+            "action": "check",
+            "src":    ["autogroup:member"],
+            "dst":    ["autogroup:self"],
+            "users":  ["autogroup:nonroot", "root"],
+        },
+    ],
+}
