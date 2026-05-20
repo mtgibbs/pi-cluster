@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kiwix-mcp
+  namespace: kiwix-mcp
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "kiwix-mcp.lab.mtgibbs.dev"
+      secretName: kiwix-mcp-tls
+  rules:
+    - host: "kiwix-mcp.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kiwix-mcp
+                port:
+                  number: 3000

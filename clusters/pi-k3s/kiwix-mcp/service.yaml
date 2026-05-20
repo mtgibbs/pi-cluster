@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kiwix-mcp
+  namespace: kiwix-mcp
+spec:
+  selector:
+    app: kiwix-mcp
+  ports:
+    - port: 3000
+      targetPort: http
+      name: http

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kiwix-mcp
+  namespace: kiwix-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kiwix-mcp
+  template:
+    metadata:
+      labels:
+        app: kiwix-mcp
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: kiwix-mcp
+          image: ghcr.io/mtgibbs/kiwix-mcp:0.1.0 # {"$imagepolicy": "flux-system:kiwix-mcp"}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_PORT
+              value: "3000"
+            - name: KIWIX_BASE_URL
+              # In-cluster service shortcut: skip the public DNS + TLS round-trip.
+              value: "http://kiwix.kiwix.svc.cluster.local"
+            - name: MCP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kiwix-mcp-secrets
+                  key: mcp-api-key
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 384Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
