@@ -1,0 +1,23 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: local-llm-mcp
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/local-llm-mcp
+  interval: 5m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: local-llm-mcp
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: local-llm-mcp
+  filterTags:
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+  policy:
+    semver:
+      range: ">=0.1.0"

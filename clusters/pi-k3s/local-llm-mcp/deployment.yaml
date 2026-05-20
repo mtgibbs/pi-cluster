@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-llm-mcp
+  namespace: local-llm-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: local-llm-mcp
+  template:
+    metadata:
+      labels:
+        app: local-llm-mcp
+    spec:
+      # pi3-worker-2 has 1 GB RAM and is excluded from most workloads.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: local-llm-mcp
+          image: ghcr.io/mtgibbs/local-llm-mcp:0.1.0 # {"$imagepolicy": "flux-system:local-llm-mcp"}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_PORT
+              value: "3000"
+            - name: LITELLM_BASE_URL
+              # Internal cluster path: short-circuits public DNS/cert, no Caddy round-trip.
+              # If this needs to go through Caddy for TLS reasons later, swap to
+              # https://ai.lab.mtgibbs.dev/v1
+              value: "https://ai.lab.mtgibbs.dev/v1"
+            - name: MCP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-llm-mcp-secrets
+                  key: mcp-api-key
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-llm-mcp-secrets
+                  key: litellm-api-key
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10

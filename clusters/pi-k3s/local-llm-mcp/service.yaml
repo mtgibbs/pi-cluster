@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-llm-mcp
+  namespace: local-llm-mcp
+spec:
+  selector:
+    app: local-llm-mcp
+  ports:
+    - port: 3000
+      targetPort: http
+      name: http

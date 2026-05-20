@@ -543,3 +543,23 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 25. Local LLM MCP - delegates routine LLM work to local models via LiteLLM
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: local-llm-mcp
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/local-llm-mcp
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

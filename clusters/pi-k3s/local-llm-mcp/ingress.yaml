@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: local-llm-mcp
+  namespace: local-llm-mcp
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # SSE / streamable HTTP needs longer read timeouts than default 60s.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "local-llm-mcp.lab.mtgibbs.dev"
+      secretName: local-llm-mcp-tls
+  rules:
+    - host: "local-llm-mcp.lab.mtgibbs.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: local-llm-mcp
+                port:
+                  number: 3000
