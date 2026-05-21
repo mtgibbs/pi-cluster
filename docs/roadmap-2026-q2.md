@@ -10,19 +10,22 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 ## Horizon 1 — Cleanup + Foundation Hardening
 
-*~3-4 hrs, next session*
+*~45 min, next session*
 
 > Bring the house in order before adding rooms.
 
 | Item | Why | Effort |
 |---|---|---|
-| Delete orphan `clusters/pi-k3s/ollama/` (leftover from old CARL) | Dead code, confusing future-you | 15 min |
-| Repoint CARL → Beelink LiteLLM via scoped virtual key | Retires the orphan; CARL gets gemma3/qwen3 quality instead of llama3.2:1b | 45 min |
 | Adults' OWUI: master key → scoped virtual key | Least privilege; tiny risk reduction now, big help when we add more services | 30 min |
 | Wire `local-llm-mcp` + `kiwix-mcp` into Claude Code (`.mcp.json`) | Token savings + cluster reference tools available in sessions | 15 min |
-| **Authelia in front of Dewey + chat** | Kids' surface deserves real auth before family-sharing | 90-120 min |
 
-**Outcome:** every AI surface authenticates the same way, no orphans, master key only used by Caddy/LiteLLM-internal.
+> **Deferred:**
+> - `clusters/pi-k3s/ollama/` cleanup — needs verification that CARL doesn't depend on it before removing. User will revisit out-of-band.
+> - **Network-wide SSO (Authelia or similar)** — pulled out into its own evaluation track. See "Strategic Decisions" section below.
+
+**Outcome:** master key only used by Caddy/LiteLLM-internal; local models accessible from Claude Code sessions for token savings.
+
+> Horizon 1 is now small enough to pair with Horizon 2 (observability) or Horizon 3 (pipeline polish) in a single session if you want.
 
 ---
 
@@ -41,11 +44,13 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 ---
 
-## Horizon 3 — Pipeline Polish
+## Horizon 3 — Pipeline Polish + Personal Ops Pipeline
 
-*~2 hrs, 1 session*
+*~3-4 hrs, 1 session*
 
-> Make Dewey nicer for daily use.
+> Make Dewey nicer for daily use, and build a sibling pipeline for *you* — same pattern, different toolset.
+
+### 3a — Dewey polish
 
 - Parse text-format `<tool_call>` blocks as a fallback (qwen3 quirk)
 - Multi-turn tool loop improvements
@@ -53,7 +58,22 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 - Add 1-2 more tools: `kiwix_random` for serendipity, maybe a `today_in_history` thin wrapper
 - Light cosmetic: Dewey's WebUI theme/avatar/banner
 
-**Outcome:** kids actually want to use it.
+### 3b — Personal Ops Pipeline (new)
+
+> Same Dewey pattern. Different brain (qwen3-coder-30b). Different tools (mcp-homelab readonly).
+
+- New pipeline file alongside `dewey-pipeline.py` — selectable as a model in `chat.lab.mtgibbs.dev`
+- Model: `qwen3-coder-30b` (tool-capable, good at reasoning over structured cluster data)
+- Tool catalog: **readonly subset of mcp-homelab** — `get_*`, `diagnose_*`, `describe_*`, status checks. NO mutations in v1.
+- New scoped bearer token (`mcp-homelab-readonly`) so the pipeline can't restart pods or trigger backups
+- System prompt: "you are a cluster operator's assistant — investigate, summarize, suggest. Never claim to have taken action."
+- Use case examples: "what's the sonarr queue look like?", "any pods crashlooping?", "summarize today's pi-hole queries", "is the QNAP backup behind?"
+
+**Pattern B (follow-on, not in this horizon):**
+
+Once the pipeline proves which tool sequences are useful, add a `local_diagnose(question, scope)` tool to `local-llm-mcp`. Then Claude Code can delegate multi-step cluster investigation to the local agent (token savings + faster iteration). Sized separately — probably a new mini-horizon after 3.
+
+**Outcome:** kids actually want to use Dewey, and you can ask your own personal LLM "is anything broken?" without opening a kubectl shell.
 
 ---
 
@@ -134,7 +154,7 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 - **Morning summary cron** at 7am: doors locked? weather? school-day check? push to Signal
 - **Wake-up nudge for Ronin**: motion-aware, school-day aware, escalating intensity
-- **Canvas integration into Signal**: nightly check of missing assignments, push to whoever it concerns (could bridge CARL into the proactive flow stack)
+- **Canvas integration into Signal**: nightly check of missing assignments, push to whoever it concerns (fresh Canvas client — CARL stays the museum exhibit)
 - **Anomaly alerts**: motion at unexpected times, doors opening when nobody home — model summarizes camera frames (when vision model is ready)
 - **Email-driven flows that emit into Signal**: link the two surfaces
 
@@ -193,6 +213,33 @@ That's a real homelab AI platform.
 
 ---
 
+## Strategic Decisions (No Horizon Yet)
+
+These deserve thought before they get sized into a horizon. Listed here so they don't get lost.
+
+### Network-wide SSO
+
+**Question:** do we want one identity provider in front of *everything* (Dewey, chat, Sonarr, Radarr, Bazarr, SABnzbd, Jellyfin admin, Pi-hole, n8n, future Home Assistant), or do we keep per-service accounts forever?
+
+**Status quo works fine:** password manager handles separate accounts without friction. Pain is low.
+
+**When this becomes worth doing:**
+
+- When we expose anything beyond the LAN (email/Signal workflows in Horizons 4-5 force the question)
+- When the family-sharing surface grows past 2-3 services
+- When we want centralized audit logging across services
+- When a new service ships that we'd rather *not* manage another account for
+
+**Candidates to evaluate when the time comes:**
+
+- **Authelia** — lightweight, forward-auth via Caddy, well-documented, no LDAP requirement
+- **Authentik** — heavier but more featureful (OAuth/OIDC provider, more enterprise-y)
+- **Pocket-ID** — newer, ultra-minimal, WebAuthn-only
+
+**Scope when we tackle it:** must cover the *arr stack and Pi-hole, not just AI surfaces. That's the test that justifies the work.
+
+---
+
 ## Cross-Cutting Concerns To Watch
 
 These don't belong to a single horizon but should be revisited as we move:
@@ -200,7 +247,7 @@ These don't belong to a single horizon but should be revisited as we move:
 - **Backup coverage** — Dewey DB, Pipelines configs, LiteLLM Postgres, Authelia state are NOT in the current backup-ops scope. Add to `backup-ops` skill / CronJobs as each lands.
 - **Family onboarding flow** — how do Ronin/Rory/spouse get accounts? Document once Authelia is in. Likely a Signal message with a magic link + first-login walkthrough.
 - **Model evaluation** — qwen3.5-9b is the current Dewey base. If a better safety-tuned + tool-capable model ships (gemma3 with tool template, or something new), we should be able to swap in one Python file edit.
-- **CARL's future** — currently a daemon. Possible evolution: a Dewey "tool" that knows about Ronin's Canvas assignments, so kids can ask "what's due tomorrow?" Decision: keep CARL as separate daemon, or absorb into Dewey via tool? Revisit during Horizon 7.
+- **CARL's future** — museum exhibit. Stays as-is on his own tiny model. No-footprint when idle, so no reason to retire. If a Canvas-aware Dewey tool ever becomes interesting, build it fresh rather than re-plumbing CARL.
 
 ---
 
