@@ -43,6 +43,46 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 ---
 
+## Horizon 1.5 — Kill the `op`-unlock friction (automation credential)
+
+*~1 hr, 1 session — small but high-leverage*
+
+> The single gate that touches *everything*. Every secret-reading deploy needs an
+> interactive 1Password Touch ID unlock. It bit us **twice** on 2026-05-21 — a
+> background ansible run aborted mid-deploy when the `op` session lapsed and
+> `$(op read …)` returned empty. Fixing this unblocks autonomous/background deploys.
+
+**Scope (laptop/ansible side only — the cluster's External Secrets Operator already
+authenticates to 1Password non-interactively; this gap is the `beelink-ansible`
+deploy path + Claude Code's own `op read`s).**
+
+- **Create a 1Password Service Account** scoped **read-only** to the `pi-cluster` vault.
+  A service-account token (`OP_SERVICE_ACCOUNT_TOKEN`) makes `op read`/`op inject`
+  fully non-interactive — no desktop app, no Touch ID, no lapsing session.
+- **Store the token securely on the deploy host** — macOS **Keychain** (recommended)
+  or a root-owned `0600` file. Decide convenience vs. plaintext-at-rest.
+- **Wrapper** (e.g. `bin/deploy-beelink`) that loads the token into the env and runs
+  the play — turns the long `-e "$(op read …)"` invocation into one command.
+- **Hygiene** — read-only + single-vault scope, 1Password audit logging is automatic,
+  document a rotation cadence, and note it's instantly revocable in 1Password.
+
+**The decision to make at build time (the real tradeoff):**
+> A service-account token removes the **human-presence check** that Touch ID provides.
+> Today, reading any `pi-cluster` secret requires a deliberate biometric tap. With the
+> token in place, a compromised laptop session — **and Claude Code itself** — can read
+> all `pi-cluster` secrets and deploy with zero human in the loop. That's exactly the
+> goal (autonomous ops) *and* the risk. Choose deliberately:
+> - **Option A — full autonomy:** token always available; Claude Code deploys without prompting.
+> - **Option B — scoped autonomy:** token only in a dedicated automation shell / CI, not Claude Code's default env.
+> - **Option C — middle:** keep Touch ID for interactive work, use the token only for unattended/scheduled runs.
+
+**Outcome:** background and scheduled deploys stop failing on session lapse; the
+`beelink-ansible` run collapses to one command; and (per the chosen option) Claude Code
+can drive Beelink deploys end-to-end without a human unlock. Enables the "I build the
+rails, the local AI runs the trains" trajectory by removing the last manual gate on *building* the rails.
+
+---
+
 ## Horizon 2 — Observability
 
 *~3 hrs, 1 session*
