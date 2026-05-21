@@ -109,7 +109,7 @@ spec:
                   echo "--- Cleaning up old UniFi backups ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
-                    "find /cluster/backups/*/unifi -name '*.unf' -type f 2>/dev/null | sort -r | tail -n +5 | xargs -r rm -f"
+                    "find /share/cluster/backups/*/unifi -name '*.unf' -type f 2>/dev/null | sort -r | tail -n +5 | xargs -r rm -f" || true
 
                   echo ""
                   echo "=== UniFi Backup Complete ==="

@@ -76,7 +76,9 @@ spec:
                   echo "--- Cleaning up old backups ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
-                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf"
+                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf" || true
+                  # ^ best-effort: legacy pre-QNAP-cutover dirs are foreign-owned
+                  #   and may resist deletion; never fail a good backup on cleanup.
 
                   echo ""
                   echo "=== Backup Summary ==="
