@@ -6,17 +6,21 @@ Built around the principle: **harden what exists before adding new things**, the
 
 Each horizon is sized to fit a single working session unless flagged otherwise.
 
-> **✓ DONE (2026-05-21): Beelink backup coverage.** The Beelink AI stack's
-> stateful data is now backed up nightly to QNAP `/share/cluster/backups/<date>/beelink`
-> by a locked-down, profile-gated `beelink-backup` Compose container (systemd timer,
-> 03:30 + jitter): **LiteLLM Postgres** via a SELECT-only `backup_ro` role,
-> **`/srv/{openwebui,dewey-data,pipelines-data,ops-pipelines-data}`** via `:ro` mounts.
-> On success it writes `beelink_backup_last_success_timestamp_seconds` to the
-> node_exporter textfile collector; the **`BeelinkBackupStale`** alert (>36h) watches it
-> — the Beelink analogue of `BackupCronJobStale` (which can't see a non-cluster job).
-> Validated end-to-end on first run (1.69 GB to QNAP, metric scraped). Built in
-> `beelink-ansible` (`50-ai-stack.yml` + `files/beelink-backup.sh`) +
-> `pi-cluster` (`prometheusrule-beelink.yaml`, commit `0ff937a`).
+> **▶ NEXT SESSION (picked 2026-05-21): Horizon 3a — Dewey polish.** Kid-facing
+> improvements to the Dewey chat surface (`dewey.lab.mtgibbs.dev`, gemma3-27b +
+> kiwix via `files/dewey-pipeline.py` in `beelink-ansible`). Scope:
+> - **Per-kid OWUI accounts** — Ronin + Rory as separate users with their own
+>   conversation history (the Dewey OWUI already has `WEBUI_AUTH: true`,
+>   `DEFAULT_USER_ROLE: user`; decide signup flow, then disable open signup).
+> - **1–2 more kiwix tools** — `kiwix_random` (serendipity) and a `today_in_history`
+>   thin wrapper, added to the Dewey pipeline's tool catalog.
+> - **Text-format `<tool_call>` fallback parser** — port the qwen3 text-format
+>   tool-call parser (already in `files/ops-pipeline.py`) into the Dewey pipeline.
+> - **Light cosmetics** — Dewey theme / avatar / banner.
+>
+> All Beelink-side (`beelink-ansible`), re-deployed via the `50-ai-stack.yml` play.
+> Context: backup coverage completed 2026-05-21 — see
+> `docs/recaps/2026-05-21-beelink-backup-coverage.md`.
 
 ---
 
