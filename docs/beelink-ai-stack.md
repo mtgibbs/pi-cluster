@@ -1,6 +1,6 @@
 # Beelink AI Stack — Architecture & Plan
 
-**Status:** Phase 0 + Phase 0.5 complete (2026-05-20). Next: Phase 1 (per-client keys + Authelia).
+**Status:** Phase 0 + Phase 0.5 + Postgres complete (2026-05-20). Pi cluster MCP layer live (`local-llm-mcp`, `kiwix-mcp`). Next: Phase 1 (Authelia; Open WebUI master-key → virtual-key migration).
 **Hardware:** Beelink GTR9 Pro (Ryzen AI Max+ 395, 128 GB unified RAM, 1x Crucial P310 2 TB NVMe, dual 10GbE)
 **OS:** Ubuntu 26.04 Server LTS (Resolute)
 
@@ -24,12 +24,13 @@ This document captures the architecture, decisions, and phased plan for adding a
 
 - Ollama / llama.cpp serving local models
 - LiteLLM proxy behind Caddy at `https://ai.lab.mtgibbs.dev` (OpenAI-compatible front door)
-- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy)
+- **Postgres 16** (`litellm_db` named volume) — backs LiteLLM virtual key storage; required for `/key/generate` and per-client model allowlists. Password in 1Password (`litellm-postgres/password`).
+- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). **Note:** `OPENAI_API_KEY` is currently the LiteLLM master key — should be migrated to a scoped virtual key before the kids' UI ships (follow-up, not yet done).
 - Open WebUI for kids at `kids.lab.mtgibbs.dev` — deferred (Phase 1), locked to Gemma, separate auth
 - Caddy (locally built with xcaddy + Cloudflare DNS plugin) for TLS termination; Authelia deferred
 - Ollama running on Vulkan/RADV (`OLLAMA_VULKAN=1`) — NOT ROCm (see Decisions Log)
 - Tailscale for remote admin
-- node_exporter, AMD GPU exporter, cAdvisor for metrics
+- node_exporter, AMD GPU exporter, cAdvisor for metrics (deferred — not yet scraped by Prometheus)
 - All config in Git, deployed via Ansible + systemd-timer git-pull
 - Models live on LVM volume (single NVMe, LVM layout), bind-mounted into Ollama
 
@@ -47,9 +48,11 @@ Ollama config: `OLLAMA_MODELS=/models`, bind-mount `/srv/models:/models`. Compos
 
 **Pi cluster (existing K3s, managed via Flux from `mtgibbs/pi-cluster`)**
 
-- Namespace `automation`: n8n + Postgres, signal-cli, ntfy, audit DB
-- Namespace `home`: Home Assistant + add-ons
-- Namespace `mcp`: home-assistant-readonly, home-assistant-control, weather, canvas-lms, others as needs emerge
+- Namespace `mcp-homelab` (existing): `mcp-homelab` server — cluster ops, DNS, media, Flux
+- Namespace `local-llm-mcp` (live): `local-llm-mcp` server — token-saver tools for Claude Code sessions; calls Beelink LiteLLM via virtual key. Ingress: `https://local-llm-mcp.lab.mtgibbs.dev/mcp`
+- Namespace `kiwix-mcp` (live): `kiwix-mcp` server — offline reference tools backed by in-cluster kiwix-serve. Ingress: `https://kiwix-mcp.lab.mtgibbs.dev/mcp`
+- Namespace `automation` (planned): n8n + Postgres, signal-cli, ntfy, audit DB
+- Namespace `home` (planned): Home Assistant + add-ons
 - Namespace `edge` (existing): ingress, certs, Pi-hole DNS
 
 ### The Single API Contract
@@ -58,9 +61,11 @@ Every Pi-side service that needs an LLM hits LiteLLM, never Ollama directly.
 
 ```
 POST https://ai.lab.mtgibbs.dev/v1/chat/completions
-  Authorization: Bearer <per-client key>
+  Authorization: Bearer <per-client virtual key>
   body: standard OpenAI chat completions schema
 ```
+
+Virtual keys are now DB-backed (Postgres). Each client has its own key with a model allowlist and TPM/RPM limits. Live example: `local-llm-mcp` holds a key scoped to the 5 production models with `tpm_limit: 100000` and `rpm_limit: 60`. Requests for out-of-allowlist models are rejected by LiteLLM before reaching Ollama.
 
 Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for executing the tool against HA / MCP / etc. and looping the result back. Beelink does NOT execute tools — it only generates structured intent.
 
@@ -127,6 +132,16 @@ Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
 5. Pi-hole DNS: `chat.lab.mtgibbs.dev` → 192.168.1.70 committed via GitOps — ✅
 6. Production models pulled and registered (see Models table) — ✅
 7. Authelia/SSO: deferred to Phase 1 unless needed before kids' UI ships
+
+### Phase 0.6: Postgres + Virtual Keys + MCP Layer — ✅ COMPLETE 2026-05-20
+
+1. Postgres 16 added to Beelink Compose stack; `litellm_db` named volume; password in 1Password — ✅
+2. LiteLLM `DATABASE_URL` + `STORE_MODEL_IN_DB=True` configured; virtual key endpoint unblocked — ✅
+3. `local-llm-mcp` server built, CI/release pipeline, deployed to cluster as entry #25 in infrastructure.yaml — ✅
+4. `kiwix-mcp` server built, CI/release pipeline, deployed to cluster as entry #26 in infrastructure.yaml — ✅
+5. Per-client LiteLLM virtual key for `local-llm-mcp`, scoped allowlist + TPM/RPM limits — ✅
+6. GHCR packages set to public; no imagePullSecret required — ✅
+7. Open WebUI `OPENAI_API_KEY` still uses master key — FOLLOW-UP: migrate to scoped virtual key before kids' UI ships
 
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 

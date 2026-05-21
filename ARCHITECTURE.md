@@ -599,6 +599,54 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                   local-llm-mcp namespace                         │  │
+│  │                                                                   │  │
+│  │  local-llm-mcp (Claude Code token-saver MCP)                     │  │
+│  │  • Offloads bulk summarize/classify/explain tasks to local LLMs  │  │
+│  │  • Source: github.com/mtgibbs/local-llm-mcp (TypeScript)         │  │
+│  │  • Image: ghcr.io/mtgibbs/local-llm-mcp (public, multi-arch)    │  │
+│  │  • Ingress: local-llm-mcp.lab.mtgibbs.dev/mcp (600s timeout)    │  │
+│  │  • Bearer auth + LiteLLM virtual key from 1Password              │  │
+│  │                                                                   │  │
+│  │  Tools (6):                                                       │  │
+│  │  • local_summarize, local_classify, local_extract_structured      │  │
+│  │    → qwen3.5:9b (triage model)                                   │  │
+│  │  • local_explain_diff, local_explain_command → qwen3-coder:30b   │  │
+│  │  • local_chat → qwen3.5:35b                                      │  │
+│  │                                                                   │  │
+│  │  Backend: https://ai.lab.mtgibbs.dev/v1/ (Beelink LiteLLM)      │  │
+│  │  Virtual key: allowlist scoped, tpm_limit 100000, rpm_limit 60   │  │
+│  │                                                                   │  │
+│  │  Flux Image Automation:                                          │  │
+│  │  • Multi-arch CI builds on push to main (amd64 + arm64)          │  │
+│  │  • ImagePolicy auto-bumps deployment manifest on new version      │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    kiwix-mcp namespace                            │  │
+│  │                                                                   │  │
+│  │  kiwix-mcp (Offline Reference Library MCP)                       │  │
+│  │  • Exposes the 7-ZIM Kiwix library as MCP tools                  │  │
+│  │  • Source: github.com/mtgibbs/kiwix-mcp (TypeScript)             │  │
+│  │  • Image: ghcr.io/mtgibbs/kiwix-mcp (public, multi-arch)        │  │
+│  │  • Ingress: kiwix-mcp.lab.mtgibbs.dev/mcp                       │  │
+│  │  • Bearer auth from 1Password (kiwix-mcp/password)               │  │
+│  │                                                                   │  │
+│  │  Tools (5):                                                       │  │
+│  │  • kiwix_list_zims, kiwix_search, kiwix_get_article              │  │
+│  │  • kiwix_suggest, kiwix_search_books (Gutenberg wrapper)         │  │
+│  │                                                                   │  │
+│  │  Backend: http://kiwix.kiwix.svc.cluster.local (in-cluster DNS)  │  │
+│  │  NOT via public ingress — avoids TLS + ingress hop per query     │  │
+│  │  Catalog cache: 1h TTL, maps short names to dated ZIM paths      │  │
+│  │                                                                   │  │
+│  │  Flux dependency: requires kiwix Kustomization to be Ready first │  │
+│  │  Flux Image Automation: same CI/release pattern as local-llm-mcp │  │
+│  │                                                                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                     calendar namespace                            │  │
 │  │                                                                   │  │
 │  │  Calendar File Server                                            │  │
