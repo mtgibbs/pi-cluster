@@ -94,3 +94,31 @@ spec:
           annotations:
             summary: "Beelink model disk under 10% free"
             description: "/srv/models is nearly full — pulling more models will fail."
+
+        # --- Nightly backup freshness ---
+        # The beelink-backup container (nightly systemd timer) writes
+        # beelink_backup_last_success_timestamp_seconds to the node_exporter
+        # textfile collector ONLY after a fully successful pg_dump + tar + QNAP push.
+        # This is the Beelink analogue of backup-jobs' BackupCronJobStale — the
+        # in-cluster alert can't see a Beelink-side job, so freshness rides the metric.
+        - alert: BeelinkBackupStale
+          expr: |
+            time() - beelink_backup_last_success_timestamp_seconds > 36 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink backup has no successful run in over 36h"
+            description: "Last successful Beelink AI-stack backup (LiteLLM Postgres + OWUI/Dewey/pipelines → QNAP) was {{ $value | humanizeDuration }} ago. Nightly timer or QNAP push may be failing — check `journalctl -u beelink-backup` on the Beelink."
+
+        # Safety net: if the freshness metric is absent for a full nightly cycle,
+        # staleness alerting is blind. 30h `for` avoids firing on a fresh deploy
+        # before the first nightly run (the playbook also seeds it with a one-shot run).
+        - alert: BeelinkBackupMetricMissing
+          expr: absent(beelink_backup_last_success_timestamp_seconds)
+          for: 30h
+          labels:
+            severity: info
+          annotations:
+            summary: "Beelink backup freshness metric absent"
+            description: "beelink_backup_last_success_timestamp_seconds is not being reported — the backup may have never produced a metric, or the node_exporter textfile isn't being scraped. Staleness alerting is blind until this clears."
