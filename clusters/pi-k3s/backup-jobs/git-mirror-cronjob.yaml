@@ -31,6 +31,14 @@ spec:
 
                   GITHUB_USER="mtgibbs"
                   GITHUB_TOKEN=$(cat /github/token)
+                  export GITHUB_TOKEN
+                  export GIT_TERMINAL_PROMPT=0
+                  # Auth via a credential helper so the token is NEVER written into
+                  # any repo's config (and therefore never rsynced to the NAS).
+                  # Single quotes keep the LITERAL $GITHUB_TOKEN in ~/.gitconfig
+                  # (pod-local emptyDir, not synced); git expands it only at runtime.
+                  git config --global credential.helper \
+                    '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
                   NAS_PATH="/share/cluster/backups/git-mirrors"
@@ -78,22 +86,24 @@ spec:
                   REPOS=$(jq -r '.[].clone_url' /tmp/repos.json)
                   echo ""
 
-                  # Mirror each repo
+                  # Mirror each repo using CLEAN URLs only — auth comes from the
+                  # credential helper, so no token lands in any repo config.
+                  # The set-url on existing mirrors also SCRUBS any token baked in
+                  # by the previous version of this job (rewrites it token-less,
+                  # then the rsync below overwrites the NAS copy).
                   for REPO_URL in ${REPOS}; do
                     REPO_NAME=$(basename "${REPO_URL}" .git)
                     MIRROR_DIR="${WORK_DIR}/${REPO_NAME}.git"
-                    # Inject token into clone URL for private repos
-                    AUTH_URL=$(echo "${REPO_URL}" | sed "s|https://|https://${GITHUB_TOKEN}@|")
 
                     if [ -d "${MIRROR_DIR}" ]; then
                       echo "--- Updating mirror: ${REPO_NAME} ---"
                       cd "${MIRROR_DIR}"
-                      git remote set-url origin "${AUTH_URL}"
+                      git remote set-url origin "${REPO_URL}"
                       git remote update --prune
                       cd /
                     else
                       echo "--- Cloning new mirror: ${REPO_NAME} ---"
-                      git clone --mirror "${AUTH_URL}" "${MIRROR_DIR}"
+                      git clone --mirror "${REPO_URL}" "${MIRROR_DIR}"
                     fi
                   done
 
