@@ -307,3 +307,30 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  ai-litellm.json: |
+    {
+      "type": "http",
+      "name": "AI - LiteLLM API",
+      "url": "https://ai.lab.mtgibbs.dev/health/liveliness",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  ai-chat-webui.json: |
+    {
+      "type": "http",
+      "name": "AI - Adults Chat (Open WebUI)",
+      "url": "https://chat.lab.mtgibbs.dev/health",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  ai-dewey.json: |
+    {
+      "type": "http",
+      "name": "AI - Dewey (kids)",
+      "url": "https://dewey.lab.mtgibbs.dev/health",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }

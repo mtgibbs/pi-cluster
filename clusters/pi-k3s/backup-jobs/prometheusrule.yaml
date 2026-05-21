@@ -1,0 +1,47 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backup-jobs-alerts
+  namespace: backup-jobs
+  labels:
+    app.kubernetes.io/name: backup-jobs
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  groups:
+    - name: backup-jobs.rules
+      rules:
+        # THE one that would have caught 3 weeks of silently-dead backups.
+        # kube_cronjob_status_last_successful_time reflects the CronJob's
+        # .status.lastSuccessfulTime (scheduled runs only). Weekly schedule, so
+        # 8 days = one missed Sunday. Fires until a scheduled run succeeds.
+        - alert: BackupCronJobStale
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="backup-jobs"} > 8 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup '{{ $labels.cronjob }}' has no successful run in over 8 days"
+            description: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} last succeeded {{ $value | humanizeDuration }} ago. Backups may be silently failing."
+
+        # Catches a currently-failing backup job (active failure, not just staleness).
+        - alert: BackupJobFailed
+          expr: kube_job_failed{namespace="backup-jobs"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backup job '{{ $labels.job_name }}' failed"
+            description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} is in a failed state. Check logs: kubectl logs job/{{ $labels.job_name }} -n backup-jobs"
+
+        # Safety net: if kube_cronjob_status_last_successful_time is ever absent
+        # for a backup CronJob, we'd be blind to staleness — alert on that too.
+        - alert: BackupCronJobMetricMissing
+          expr: |
+            count(kube_cronjob_created{namespace="backup-jobs"}) unless count(kube_cronjob_status_last_successful_time{namespace="backup-jobs"})
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "Backup CronJob success metric missing"
+            description: "kube_cronjob_status_last_successful_time is absent for backup-jobs — staleness alerting may be blind."
