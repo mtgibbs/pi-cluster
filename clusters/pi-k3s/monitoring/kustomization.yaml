@@ -6,4 +6,6 @@ resources:
   - helmrelease.yaml
   - dashboard-pihole.yaml
   - dashboard-k8s-overview.yaml
+  - dashboard-beelink.yaml
+  - prometheusrule-beelink.yaml
   - ingress.yaml

@@ -1,0 +1,96 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: beelink-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beelink
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  groups:
+    - name: beelink.rules
+      rules:
+        # --- The exporter itself ---
+        - alert: BeelinkExporterDown
+          expr: up{job="beelink-node"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink metrics are down"
+            description: "node-exporter on the Beelink (192.168.1.70:9100) hasn't responded for 5m — flying blind on the AI box."
+
+        # --- GPU VRAM (96 GB iGPU carveout) ---
+        - alert: BeelinkVRAMHigh
+          expr: |
+            beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes > 0.92
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink VRAM over 92%"
+            description: "iGPU VRAM at {{ $value | humanizePercentage }} — model loads may fail or thrash. Consider `aimode family` or unloading a model."
+        - alert: BeelinkVRAMCritical
+          expr: |
+            beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes > 0.97
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Beelink VRAM over 97% — saturation imminent"
+            description: "iGPU VRAM at {{ $value | humanizePercentage }}. New inference will OOM or spill to GTT/system RAM and crawl."
+
+        # --- GPU thermals / power ---
+        - alert: BeelinkGPUHot
+          expr: beelink_gpu_temp_celsius > 90
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink iGPU hot ({{ $value }}°C)"
+            description: "iGPU has been above 90°C for 5m — approaching thermal throttle. Check airflow / sustained load."
+
+        # --- GPU sustained saturation (info: normal during heavy inference) ---
+        - alert: BeelinkGPUSaturated
+          expr: beelink_gpu_busy_percent > 95
+          for: 20m
+          labels:
+            severity: info
+          annotations:
+            summary: "Beelink iGPU pinned >95% for 20m"
+            description: "Sustained full GPU load — expected during long inference/ralph loops, but worth knowing if unexpected."
+
+        # --- System memory (only 32 GB after the 96 GB VRAM carveout) ---
+        - alert: BeelinkMemoryPressure
+          expr: |
+            (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}) > 0.90
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink system memory over 90%"
+            description: "System RAM (32 GB) at {{ $value | humanizePercentage }} — Compose stack may be under pressure."
+
+        # --- CPU saturation (load per core) ---
+        - alert: BeelinkCPUSaturated
+          expr: |
+            node_load5{instance="beelink"}
+              / count(count(node_cpu_seconds_total{instance="beelink"}) by (cpu)) > 2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink CPU load high"
+            description: "5m load average is {{ $value }}× core count — CPU-bound for 15m+."
+
+        # --- Disk: the 1 TB model volume ---
+        - alert: BeelinkModelDiskLow
+          expr: |
+            node_filesystem_avail_bytes{instance="beelink", mountpoint="/srv/models"}
+              / node_filesystem_size_bytes{instance="beelink", mountpoint="/srv/models"} < 0.10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink model disk under 10% free"
+            description: "/srv/models is nearly full — pulling more models will fail."

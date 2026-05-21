@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-beelink
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  beelink.json: |
+    {
+      "annotations": {"list": [{"builtIn": 1, "datasource": "Prometheus", "enable": true, "hide": true, "name": "Annotations & Alerts", "type": "dashboard"}]},
+      "description": "Beelink AI box load — iGPU (Strix Halo), VRAM, system, containers",
+      "editable": true,
+      "schemaVersion": 39,
+      "tags": ["beelink", "ai", "gpu"],
+      "title": "Beelink AI Load",
+      "uid": "beelink-ai-load",
+      "time": {"from": "now-6h", "to": "now"},
+      "refresh": "30s",
+      "templating": {"list": []},
+      "panels": [
+        {
+          "title": "VRAM Used %",
+          "type": "gauge",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "orange", "value": 92}, {"color": "red", "value": 97}]}}},
+          "targets": [{"datasource": "Prometheus", "expr": "100 * beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes", "refId": "A"}]
+        },
+        {
+          "title": "GPU Utilization %",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"fillOpacity": 20, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "beelink_gpu_busy_percent", "legendFormat": "GPU busy", "refId": "A"}]
+        },
+        {
+          "title": "GPU Temp / Power",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+          "fieldConfig": {"defaults": {"custom": {"fillOpacity": 10, "showPoints": "never"}}, "overrides": [{"matcher": {"id": "byName", "options": "Power (W)"}, "properties": [{"id": "unit", "value": "watt"}, {"id": "custom.axisPlacement", "value": "right"}]}, {"matcher": {"id": "byName", "options": "Temp (°C)"}, "properties": [{"id": "unit", "value": "celsius"}]}]},
+          "targets": [
+            {"datasource": "Prometheus", "expr": "beelink_gpu_temp_celsius", "legendFormat": "Temp (°C)", "refId": "A"},
+            {"datasource": "Prometheus", "expr": "beelink_gpu_power_watts", "legendFormat": "Power (W)", "refId": "B"}
+          ]
+        },
+        {
+          "title": "VRAM Used vs Total",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"fillOpacity": 20, "showPoints": "never"}}},
+          "targets": [
+            {"datasource": "Prometheus", "expr": "beelink_gpu_vram_used_bytes", "legendFormat": "VRAM used", "refId": "A"},
+            {"datasource": "Prometheus", "expr": "beelink_gpu_vram_total_bytes", "legendFormat": "VRAM total", "refId": "B"}
+          ]
+        },
+        {
+          "title": "System RAM Used %",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"fillOpacity": 20, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "100 * (1 - node_memory_MemAvailable_bytes{instance=\"beelink\"} / node_memory_MemTotal_bytes{instance=\"beelink\"})", "legendFormat": "RAM used", "refId": "A"}]
+        },
+        {
+          "title": "CPU Load (5m)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8},
+          "fieldConfig": {"defaults": {"custom": {"fillOpacity": 10, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "node_load5{instance=\"beelink\"}", "legendFormat": "load5", "refId": "A"}]
+        },
+        {
+          "title": "Container CPU (cores)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "none", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{instance=\"beelink\", name=~\".+\"}[5m]))", "legendFormat": "{{name}}", "refId": "A"}]
+        },
+        {
+          "title": "Container Memory",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (container_memory_working_set_bytes{instance=\"beelink\", name=~\".+\"})", "legendFormat": "{{name}}", "refId": "A"}]
+        }
+      ]
+    }

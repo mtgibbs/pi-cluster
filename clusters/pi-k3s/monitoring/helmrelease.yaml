@@ -85,6 +85,19 @@ spec:
               resources:
                 requests:
                   storage: 5Gi
+        # Scrape the Beelink AI box (outside the cluster) over the LAN.
+        # node-exporter :9100 (host + GPU textfile metrics), cAdvisor :8081.
+        additionalScrapeConfigs:
+          - job_name: beelink-node
+            static_configs:
+              - targets: ['192.168.1.70:9100']
+                labels:
+                  instance: beelink
+          - job_name: beelink-cadvisor
+            static_configs:
+              - targets: ['192.168.1.70:8081']
+                labels:
+                  instance: beelink
 
     # Alertmanager - send alerts to Discord
     alertmanager:
