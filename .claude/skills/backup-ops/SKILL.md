@@ -16,9 +16,9 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 | Job logs (check output) | `get_job_logs(namespace, job)` |
 
 ## Strategy
-All backups target the Synology NAS (`192.168.1.60`) using **rsync over SSH**.
+All backups target the QNAP NAS (`storage.lab.mtgibbs.dev` → 192.168.1.61) as user `cluster-backup` using **rsync over SSH**.
 Backups run weekly on Sundays, staggered to avoid overlap.
-Destination base: `/volume1/cluster/backups/`
+Destination base: `/share/cluster/backups/`
 
 ## Backup Jobs
 
@@ -27,7 +27,7 @@ Destination base: `/volume1/cluster/backups/`
 - **Node**: `pi-k3s`
 - **Scope**: Local-path PVCs on the master node
 - **PVCs**: `uptime-kuma_uptime-kuma-data`, `uptime-kuma_autokuma-data`, `pihole_pihole-etc`, `pihole_pihole-dnsmasq`, `monitoring_kube-prometheus-grafana`, `jellyfin_jellyfin-config`
-- **Destination**: `/volume1/cluster/backups/{date}/{pvc_name}/`
+- **Destination**: `/share/cluster/backups/{date}/{pvc_name}/`
 - **Retention**: Last 4 backups (auto-cleanup)
 
 ### 2. `worker2-backup` — Worker 2 PVCs
@@ -35,14 +35,14 @@ Destination base: `/volume1/cluster/backups/`
 - **Node**: `pi5-worker-2`
 - **Scope**: Local-path PVCs on worker 2
 - **PVCs**: `media_sabnzbd-config`, `media_bazarr-config`, `n8n_n8n-data`
-- **Destination**: `/volume1/cluster/backups/{date}/worker2/{pvc_name}/`
+- **Destination**: `/share/cluster/backups/{date}/worker2/{pvc_name}/`
 
 ### 3. `postgres-backup` — Immich Database
 - **Schedule**: Sundays 2:30 AM
 - **Node**: Any (connects to DB service)
 - **Scope**: Immich PostgreSQL database
 - **Format**: `pg_dump` custom format (compression level 9)
-- **Destination**: `/volume1/cluster/backups/{date}/postgres/`
+- **Destination**: `/share/cluster/backups/{date}/postgres/`
 - **Secret**: `immich-db-password` (from 1Password via ExternalSecret)
 
 ### 4. `media-backup` — Worker 1 Media Stack PVCs
@@ -50,13 +50,13 @@ Destination base: `/volume1/cluster/backups/`
 - **Node**: `pi5-worker-1`
 - **Scope**: All media service config PVCs on worker 1
 - **PVCs**: `media_prowlarr-config`, `media_sonarr-config`, `media_radarr-config`, `media_qbittorrent-config`, `media_jellyseerr-config`, `media_lazylibrarian-config`, `media_calibre-web-config`, `media_readarr-config`, `media_lidarr-config`
-- **Destination**: `/volume1/cluster/backups/{date}/media/{pvc_name}/`
+- **Destination**: `/share/cluster/backups/{date}/media/{pvc_name}/`
 
 ### 5. `git-mirror-backup` — GitHub Repository Mirrors
 - **Schedule**: Sundays 3:30 AM
 - **Node**: `pi-k3s`
 - **Scope**: All GitHub repos owned by `mtgibbs` (bare mirror clones)
-- **Destination**: `/volume1/cluster/backups/git-mirrors/`
+- **Destination**: `/share/cluster/backups/git-mirrors/`
 - **Secret**: `github-mirror-token` (from 1Password via ExternalSecret)
 - **Note**: Incremental — pulls existing mirrors from NAS before updating
 
@@ -112,7 +112,7 @@ kubectl logs job/<job-name> -n backup-jobs
 ```
 
 ### Restore Procedure (PVC)
-1. Identify the backup on NAS: `ssh mtgibbs@192.168.1.60 "ls /volume1/cluster/backups/"`
+1. Identify the backup on NAS: `ssh cluster-backup@storage.lab.mtgibbs.dev "ls /share/cluster/backups/"`
 2. Scale down the deployment using the PVC
 3. Rsync from NAS back to the PVC directory on the correct node
 4. Scale deployment back up

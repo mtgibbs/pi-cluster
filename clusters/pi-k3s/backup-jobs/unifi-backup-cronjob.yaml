@@ -30,7 +30,7 @@ spec:
                   SITE="default"
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
-                  NAS_PATH="/cluster/backups/${BACKUP_DATE}/unifi"
+                  NAS_PATH="/share/cluster/backups/${BACKUP_DATE}/unifi"
                   SSH_KEY="/ssh/id_ed25519"
                   COOKIE_JAR="/tmp/unifi_cookies"
 
