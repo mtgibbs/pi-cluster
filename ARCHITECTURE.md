@@ -8,7 +8,7 @@ A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing
 
 **NAS**: QNAP TS-435XeU at `storage.lab.mtgibbs.dev` (192.168.1.61), cutover from Synology 2026-04-30. 3x 10TB WD Red Plus RAID 5, ~16 TB usable. All NFS PVs use `/cluster/...` path prefix.
 
-**Inference appliance**: Beelink GTR9 Pro (`beelink-ai`, 192.168.1.70). Ollama (Vulkan/RADV) + LiteLLM at `https://ai.lab.mtgibbs.dev`, Open WebUI at `https://chat.lab.mtgibbs.dev`. Five production models live. Phase 0 + 0.5 complete 2026-05-20. See `docs/beelink-ai-stack.md` and `docs/recaps/2026-05-20-beelink-ai-bringup.md`.
+**Inference appliance**: Beelink GTR9 Pro (`beelink-ai`, 192.168.1.70). Ollama (Vulkan/RADV) + LiteLLM + Pipelines sidecar + Caddy. Adults: `https://chat.lab.mtgibbs.dev`. Kids (Dewey): `https://dewey.lab.mtgibbs.dev`. Five production models live. Phases 0–0.8 complete 2026-05-20. See `docs/beelink-ai-stack.md` and `docs/recaps/2026-05-20-dewey-bringup.md`.
 
 ## Hardware
 
@@ -702,6 +702,96 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Beelink AI Stack (Docker Compose, NOT in K3s)
+
+The Beelink is a separate host (`beelink-ai`, 192.168.1.70) running Ubuntu 26.04 with Docker Compose. It is NOT part of the K3s cluster. This isolation is intentional — if Flux pushes a bad manifest cluster-wide, AI inference keeps serving.
+
+Config lives in `mtgibbs/beelink-ansible`, deployed via Ansible + systemd-timer git-pull. All secrets from 1Password.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Beelink GTR9 Pro — Docker Compose (192.168.1.70)                    │
+│                                                                      │
+│  ┌────────────┐  ┌───────────────────────────────────────────────┐  │
+│  │   Caddy    │  │  TLS termination (DNS-01, Cloudflare)         │  │
+│  │ (locally   │  │  ai.lab.mtgibbs.dev  → LiteLLM :4000         │  │
+│  │  built,    │  │  chat.lab.mtgibbs.dev → open-webui :3000      │  │
+│  │ xcaddy +   │  │  dewey.lab.mtgibbs.dev → open-webui-dewey     │  │
+│  │ CF plugin) │  └───────────────────────────────────────────────┘  │
+│  └────────────┘                                                      │
+│                                                                      │
+│  ┌──────────────────────────┐  ┌──────────────────────────────────┐ │
+│  │  Ollama                  │  │  LiteLLM + Postgres 16           │ │
+│  │  Vulkan/RADV GFX1151     │  │  • Virtual keys (DB-backed)      │ │
+│  │  OLLAMA_MAX_LOADED=5     │  │  • Per-client model allowlists   │ │
+│  │  OLLAMA_NUM_PARALLEL=2   │  │  • ai.lab.mtgibbs.dev/v1/        │ │
+│  │  /srv/models (1TB LV)    │  │  • litellm_db named volume       │ │
+│  └──────────┬───────────────┘  └──────────────┬───────────────────┘ │
+│             │ :11434                           │ :4000               │
+│             └──────────────────────────────────┘                     │
+│                            ▲                                         │
+│              ┌─────────────┼──────────────────────┐                 │
+│              │             │                      │                 │
+│  ┌───────────┴──────┐  ┌───┴────────────────┐     │                 │
+│  │  open-webui      │  │  Pipelines sidecar │     │                 │
+│  │  (adults)        │  │  :9099             │     │                 │
+│  │  chat.*          │  │  dewey-pipeline.py │     │                 │
+│  │  → LiteLLM       │  └───────┬────────────┘     │                 │
+│  └──────────────────┘          │ OpenAI-compat     │                 │
+│                       ┌────────┴───────────┐       │                 │
+│                       │  open-webui-dewey  │       │                 │
+│                       │  (kids — Dewey)    ├───────┘                 │
+│                       │  dewey.*           │ → LiteLLM (via pipe)   │
+│                       │  OWUI → Pipelines  │                         │
+│                       │  ONLY (no direct   │                         │
+│                       │  LiteLLM access)   │                         │
+│                       └────────────────────┘                         │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Call Path: Dewey vs Adults
+
+**Adults (chat.lab.mtgibbs.dev):**
+```
+Browser → Caddy → open-webui → LiteLLM → Ollama
+```
+
+**Dewey (dewey.lab.mtgibbs.dev):**
+```
+Browser → Caddy → open-webui-dewey → Pipelines (:9099)
+                                          │
+                                          ├→ LiteLLM → Ollama (model: qwen3.5:9b)
+                                          │
+                                          └→ kiwix-mcp (Pi cluster, HTTPS)
+                                               → kiwix-serve (in-cluster svc)
+```
+
+Dewey has an extra hop — Pipelines — that Adults do not. This is intentional. Pipelines is the isolation boundary: Dewey cannot reach LiteLLM or Ollama directly. The tool loop (kiwix grounding) runs inside the pipe, not inside OWUI or LiteLLM.
+
+### Pi Cluster → Beelink
+
+Both `local-llm-mcp` and `carl` (on the Pi cluster) call Beelink LiteLLM via HTTPS with per-client virtual keys. Neither calls Ollama directly.
+
+```
+Pi K3s Cluster
+  local-llm-mcp  ──HTTPS→  ai.lab.mtgibbs.dev/v1/  →  LiteLLM  →  Ollama
+  carl           ──HTTP──►  ollama.ollama.svc.cluster.local:11434   (in-cluster Ollama,
+                                                                     evaluate migrating)
+  kiwix-mcp      ──(called by Dewey pipeline from Beelink side, not from cluster)
+```
+
+### Beelink Services Summary
+
+| Service | Image | Endpoint | Purpose |
+|---|---|---|---|
+| `ollama` | `ollama/ollama:latest` + `OLLAMA_VULKAN=1` | `:11434` (internal) | Model inference; Vulkan/RADV backend |
+| `litellm` | `ghcr.io/berriai/litellm` | `:4000` / `ai.lab.*` | Gateway; virtual keys; model routing |
+| `postgres` | `postgres:16-alpine` | `:5432` (internal) | LiteLLM virtual key storage |
+| `open-webui` | `ghcr.io/open-webui/open-webui` | `:3000` / `chat.lab.*` | Adults' chat UI → LiteLLM |
+| `pipelines` | `ghcr.io/open-webui/pipelines:main` | `:9099` (internal) | Tool-augmented model pipe for Dewey |
+| `open-webui-dewey` | `ghcr.io/open-webui/open-webui` | `dewey.lab.*` | Dewey (kids) chat UI → Pipelines only |
+| `caddy` | locally built (xcaddy + Cloudflare DNS) | `:80/:443` | TLS termination for all services |
 
 ## Key Design Decisions
 

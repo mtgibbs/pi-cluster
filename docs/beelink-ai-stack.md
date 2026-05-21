@@ -1,6 +1,6 @@
 # Beelink AI Stack — Architecture & Plan
 
-**Status:** Phase 0 + Phase 0.5 + Postgres complete (2026-05-20). Pi cluster MCP layer live (`local-llm-mcp`, `kiwix-mcp`). Next: Phase 1 (Authelia; Open WebUI master-key → virtual-key migration).
+**Status:** Phases 0 through 0.8 complete (2026-05-20). Postgres + virtual keys, `local-llm-mcp`, `kiwix-mcp`, Ollama multi-user tuning, Pipelines sidecar, and Dewey kid-facing chat all live. Next: Phase 1 (Authelia; Open WebUI master-key → virtual-key migration for adults' instance).
 **Hardware:** Beelink GTR9 Pro (Ryzen AI Max+ 395, 128 GB unified RAM, 1x Crucial P310 2 TB NVMe, dual 10GbE)
 **OS:** Ubuntu 26.04 Server LTS (Resolute)
 
@@ -10,7 +10,7 @@ This document captures the architecture, decisions, and phased plan for adding a
 
 | Topic | Decision |
 |---|---|
-| **Beelink role** | Inference appliance only. Models, LiteLLM, Open WebUI (adults + kids), monitoring agents. Nothing else. |
+| **Beelink role** | Inference appliance only. Models, LiteLLM, Pipelines sidecar, Open WebUI (adults at `chat.*`, Dewey at `dewey.*`), monitoring agents. Nothing else. |
 | **Pi cluster role** | Orchestration plane. n8n, Home Assistant, signal-cli, MCP servers, ntfy, audit DB. |
 | **Contract** | Pi cluster talks to Beelink only via HTTPS to LiteLLM at `https://ai.lan/v1/`. OpenAI-compatible. API key auth. |
 | **Why split** | Failure isolation, resource clarity, hardware specialization, swap either side independently, smaller attack surface. |
@@ -26,7 +26,8 @@ This document captures the architecture, decisions, and phased plan for adding a
 - LiteLLM proxy behind Caddy at `https://ai.lab.mtgibbs.dev` (OpenAI-compatible front door)
 - **Postgres 16** (`litellm_db` named volume) — backs LiteLLM virtual key storage; required for `/key/generate` and per-client model allowlists. Password in 1Password (`litellm-postgres/password`).
 - Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). **Note:** `OPENAI_API_KEY` is currently the LiteLLM master key — should be migrated to a scoped virtual key before the kids' UI ships (follow-up, not yet done).
-- Open WebUI for kids at `kids.lab.mtgibbs.dev` — deferred (Phase 1), locked to Gemma, separate auth
+- **Pipelines** sidecar (`ghcr.io/open-webui/pipelines:main`) — OpenAI-compatible API at `:9099`; holds `dewey-pipeline.py`
+- **Open WebUI Dewey** at `https://dewey.lab.mtgibbs.dev` — separate auth, separate SQLite at `/srv/dewey-data/`, talks ONLY to Pipelines (`ENABLE_OLLAMA_API=false`). Model: `qwen3.5:9b` via scoped LiteLLM virtual key. CARL and Dewey are siblings: CARL handles school/Canvas reminders, Dewey handles open-ended learning with kiwix reference grounding.
 - Caddy (locally built with xcaddy + Cloudflare DNS plugin) for TLS termination; Authelia deferred
 - Ollama running on Vulkan/RADV (`OLLAMA_VULKAN=1`) — NOT ROCm (see Decisions Log)
 - Tailscale for remote admin
@@ -76,7 +77,7 @@ Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for exe
 | `qwen3-coder:30b` | — | Coding work, OpenCode backend | Pulled + registered |
 | `qwen3.5:35b` | Primary | n8n, Signal, IoT reasoning | Pulled + registered |
 | `qwen3.5:9b` | Triage | High-volume routing/classification | Pulled + registered |
-| `gemma3:27b` | Kids | Safety-tuned chat for kids' UI | Pulled + registered |
+| `gemma3:27b` | Reserve | Originally planned for Dewey; rejected — Ollama template does not declare tool support. Retained in registry; not actively used. | Pulled + registered |
 | `nomic-embed-text` | Embeddings | RAG pipelines | Pulled + registered |
 | `qwen3:0.6b` | Diagnostic | Smoke-test / fast probe | Pulled + registered |
 
@@ -154,19 +155,42 @@ Triggered by the realization that two Open WebUIs (adults + kids) share one Olla
 | `OLLAMA_KEEP_ALIVE` | `-1` | `-1` | unchanged — loaded models never auto-unload |
 | `OLLAMA_FLASH_ATTENTION` | `1` | `1` | unchanged |
 
-**Pre-warming added to the playbook:** post-deploy Ansible task hits `POST /api/generate` with empty prompt and `keep_alive=-1` for `gemma3:27b`, forcing the kids' model into VRAM at deploy time. First kid message is no longer a 15-second cold load.
+**Pre-warming added to the playbook:** post-deploy Ansible task hits `POST /api/generate` with empty prompt and `keep_alive=-1` for `qwen3.5:9b` (the Dewey model), forcing it into VRAM at deploy time. First Dewey message is no longer a 15-second cold load. Pre-warm executes via `docker exec open-webui curl` (open-webui has curl; the ollama container does not).
 
 **VRAM math observed in production:** `gemma3:27b` loaded at the default 131K context window consumes ~42 GB VRAM (not just the 17 GB on-disk model). All five models simultaneously at full context would exceed our 111 GB GPU budget — if eviction starts happening anyway, the next tuning lever is `OLLAMA_CONTEXT_LENGTH` to cap per-model context, or per-model `num_ctx` overrides via LiteLLM. **Not done today**; revisit when metrics show contention.
 
-### Phase 0.8: Open WebUI Pipelines + Kids' Workspace (NEXT)
+### Phase 0.8: Open WebUI Pipelines + Dewey — ✅ COMPLETE 2026-05-20
 
-1. Add `pipelines` sidecar to Beelink Compose (`ghcr.io/open-webui/pipelines:main`)
-2. Write a Python pipeline that bridges Open WebUI tool_calls → `kiwix-mcp`
-3. Configure adults' Open WebUI to use Pipelines as an "OpenAI provider"
-4. Deploy second Open WebUI instance at `kids.lab.mtgibbs.dev`, separate SQLite, separate auth
-5. Lock kids' instance to `gemma3:27b` via scoped LiteLLM virtual key + `ENABLE_OLLAMA_API=false`
-6. Add Caddy route for `kids.lab.mtgibbs.dev`
-7. Decide on Authelia for the kids' UI (open question)
+The kids' surface shipped as **Dewey** (not "kids"), named for the library/reference angle. Lives at `https://dewey.lab.mtgibbs.dev`. CARL (Canvas Assignment Reminder Liaison) already served the kids' school workflow; Dewey is a sibling — same audience, different scope: open-ended learning with offline reference grounding.
+
+**Model:** `qwen3.5:9b` (NOT `gemma3:27b`). Gemma3 was the original plan but its Ollama template does not declare tool support — LiteLLM correctly refuses to send tool definitions to it. Switched to qwen3.5:9b, which supports tool calls correctly. The safety tradeoff (qwen3 is less aggressively aligned than gemma3) was accepted because the actual risk surface is bounded by the system prompt + kiwix grounding, not by base-model RLHF.
+
+**Services added to Beelink Compose:**
+
+- `pipelines` — `ghcr.io/open-webui/pipelines:main`, OpenAI-compatible sidecar at `:9099`. Mounts `/srv/pipelines-data/` → `/app/pipelines`. Holds `dewey-pipeline.py`.
+- `open-webui-dewey` — second OWUI instance. `OPENAI_API_BASE_URL=http://pipelines:9099`. `ENABLE_OLLAMA_API=false`. Separate SQLite at `/srv/dewey-data/`. `WEBUI_NAME=Dewey`.
+
+**Dewey pipeline (`files/dewey-pipeline.py`):** registers "Dewey" as a model in OWUI's dropdown. On each turn: appends system prompt → calls LiteLLM with 3 kiwix tool defs → if `tool_calls` emitted, executes against `https://kiwix-mcp.lab.mtgibbs.dev/mcp` → loops up to `MAX_TOOL_ITERATIONS`. Starts with `/no_think` to disable qwen3 thinking mode (which consumed tokens before any content appeared in tool-loop turns). Falls back to `reasoning_content` if `content` is empty.
+
+**Secrets (1Password `pi-cluster` vault, item `dewey`):**
+- `litellm-key` — virtual key scoped to `qwen3.5:9b` only; Dewey cannot reach other models
+- `password` — bearer between OWUI Dewey and the Pipelines sidecar
+- Pipeline → kiwix-mcp reuses `op://pi-cluster/kiwix-mcp/password`
+
+**System prompt:** names Ronin (14) and Rory (11) explicitly; mandates kiwix tool grounding before any factual claim; tells the truth about history without sanitizing; distinguishes actually-contested from fringe-but-loud claims; frames "ask your dad" as group learning, not refusal; adapts vocabulary depth to who's asking.
+
+**Isolation guarantee:** Dewey can only reach Pipelines (`:9099`). Pipelines calls LiteLLM with a key scoped to one model. Changing Dewey's model, tools, or system prompt is one Python file edit — no config cascade.
+
+**Verified end-to-end:** query "What city does the Tigris river run through?" → pipeline → `kiwix_search` tool call → kiwix-mcp execution → grounded answer naming Mosul, Tikrit, Samarra, Baghdad, Nasiriyah, Kufa.
+
+**Known quirk:** qwen3 sometimes emits a second tool call as a text `<tool_call>` block rather than a structured `tool_calls` object. Answer is still correct and sourced from the first loop; parsing text-format tool calls is a future pipeline improvement.
+
+**Commits:**
+- `8f3aa82` pi-cluster: feat(dewey): add dewey.lab.mtgibbs.dev DNS
+- `2886d5f` beelink-ansible: feat(50-ai-stack): tune Ollama for multi-user + pre-warm
+- `677ca5c` beelink-ansible: feat(dewey): add Pipelines sidecar + Open WebUI Dewey instance
+
+**Remaining gap:** adults' `chat.lab.mtgibbs.dev` `OPENAI_API_KEY` is still the LiteLLM master key — migrate to a scoped virtual key (follow-up, Phase 1).
 
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 
