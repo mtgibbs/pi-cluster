@@ -6,6 +6,15 @@ Built around the principle: **harden what exists before adding new things**, the
 
 Each horizon is sized to fit a single working session unless flagged otherwise.
 
+> **▶ NEXT SESSION (picked 2026-05-21): Beelink backup coverage.** The Pi-cluster
+> backups were restored 2026-05-21, but the Beelink AI stack's stateful data is
+> still unprotected. Add backup CronJobs (same `backup-jobs` pattern, → QNAP
+> `/share/cluster/backups`) for: **LiteLLM Postgres** (`pg_dump` — holds virtual
+> keys + usage), **`/srv/openwebui`** (adults' OWUI DB), **`/srv/dewey-data`**
+> (Dewey OWUI DB), and the **pipelines** configs. The `BackupCronJobStale` alert
+> shipped in H2 will then watch them automatically. Context: see recaps
+> `2026-05-21-backup-recovery-and-mirror-hardening.md` + `2026-05-21-observability-phase1.md`.
+
 ---
 
 ## Horizon 1 — Cleanup + Foundation Hardening
