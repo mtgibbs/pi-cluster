@@ -17,8 +17,10 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 ## Strategy
 All backups target the QNAP NAS (`storage.lab.mtgibbs.dev` → 192.168.1.61) as user `cluster-backup` using **rsync over SSH**.
-Backups run weekly on Sundays, staggered to avoid overlap.
+In-cluster jobs run weekly on Sundays, staggered to avoid overlap. The Beelink job runs **nightly** (it lives off-cluster — see below).
 Destination base: `/share/cluster/backups/`
+
+> **Two backup planes.** Jobs #1–#5 are Kubernetes CronJobs in the `backup-jobs` namespace — visible to the MCP tools and watched by the `BackupCronJobStale` alert. The **Beelink AI-stack backup** is NOT a cluster CronJob (its data is off-cluster); it's a systemd-timed Compose container ON the Beelink, watched by a separate metric-based alert. The MCP `get_backup_status`/`trigger_backup` tools do **not** see it.
 
 ## Backup Jobs
 
@@ -59,6 +61,24 @@ Destination base: `/share/cluster/backups/`
 - **Destination**: `/share/cluster/backups/git-mirrors/`
 - **Secret**: `github-mirror-token` (from 1Password via ExternalSecret)
 - **Note**: Incremental — pulls existing mirrors from NAS before updating
+
+## Beelink AI-stack Backup (OFF-CLUSTER — not a Kubernetes CronJob)
+
+The Beelink (`beelink-ai`, 192.168.1.70) holds stateful data that lives outside
+the cluster, so it's backed up by a systemd-timed Compose container ON the Beelink
+— NOT by a `backup-jobs` CronJob. Managed in the **`beelink-ansible`** repo
+(`playbooks/50-ai-stack.yml` + `files/beelink-backup.sh`), not in this one.
+
+- **Schedule**: nightly, `OnCalendar=03:30` + up to 15 min jitter (`beelink-backup.timer`)
+- **Service**: `beelink-backup` Compose service, profile `backup` (not started by `docker compose up`); fired by `beelink-backup.service` (`docker compose --profile backup run --rm`)
+- **Scope & method**:
+  - **LiteLLM Postgres** — `pg_dump` (custom format, compress 9) over the `ai-internal` Docker network as the SELECT-only **`backup_ro`** role (no DB port is exposed; the role cannot mutate anything)
+  - **`/srv/openwebui`** (adults' OWUI), **`/srv/dewey-data`** (kids' OWUI), **`/srv/pipelines-data`**, **`/srv/ops-pipelines-data`** — `tar -czf` from **`:ro`** bind mounts
+- **Destination**: `/share/cluster/backups/{date}/beelink/` (`litellm-{date}.dump` + four `*-{date}.tar.gz`)
+- **Retention**: last 14 nightly `beelink/` snapshots (prunes only the `beelink/` subdir, never the date dirs)
+- **Secrets**: `backup_ro` password = `op://pi-cluster/litellm-postgres-backup-ro/password` (passed as the `litellm_backup_ro_password` extra-var); QNAP key reuses `op://pi-cluster/synology_backup/private key` via the `QNAP_BACKUP_SSH_KEY` env var (multiline → env, not an inline extra-var)
+- **Lock-down**: no Docker socket, no host root mount. Only writable targets are the QNAP backup share and the node_exporter textfile.
+- **Monitoring**: on success the script writes `beelink_backup_last_success_timestamp_seconds` to the node_exporter textfile collector (`/textfile/beelink_backup.prom`). The **`BeelinkBackupStale`** alert (>36h) + **`BeelinkBackupMetricMissing`** (absent ≥30h) in `clusters/pi-k3s/monitoring/prometheusrule-beelink.yaml` watch it — this is the Beelink analogue of `BackupCronJobStale`, which can't see a non-cluster job.
 
 ## Configuration
 - **Namespace**: `backup-jobs`
@@ -110,6 +130,39 @@ get_job_logs(namespace="backup-jobs", job="<job-name>")  # Specific job output
 kubectl get jobs -n backup-jobs --sort-by=.metadata.creationTimestamp
 kubectl logs job/<job-name> -n backup-jobs
 ```
+
+### Beelink Backup Ops (off-cluster — run on the Beelink, not via MCP)
+
+Run on `beelink-ai` directly, or remotely with `ansible inference -m shell -a "..."`
+from the `beelink-ansible` repo.
+
+```bash
+# Trigger a backup now (oneshot)
+sudo systemctl start beelink-backup.service
+
+# Status / last result / next scheduled run
+journalctl -u beelink-backup.service -n 50 --no-pager
+systemctl list-timers beelink-backup.timer --no-pager
+
+# Confirm the freshness metric is being served (what the alert watches)
+curl -s localhost:9100/metrics | grep beelink_backup
+```
+
+### Restore Procedure (Beelink AI-stack)
+On the Beelink. Backups are at `cluster-backup@storage.lab.mtgibbs.dev:/share/cluster/backups/{date}/beelink/`.
+
+1. **LiteLLM Postgres** (DB-backed virtual keys + usage):
+   ```bash
+   # copy the dump to the postgres container and restore as the litellm superuser
+   docker exec -i postgres pg_restore -U litellm -d litellm --clean --if-exists < litellm-{date}.dump
+   ```
+2. **OWUI / Dewey / pipelines dirs**: stop the relevant container, untar over the dir, restart:
+   ```bash
+   cd /opt/ai-stack && docker compose stop open-webui
+   tar -xzf openwebui-{date}.tar.gz -C /srv/openwebui
+   docker compose start open-webui
+   ```
+   (same shape for `dewey-data`→`open-webui-dewey`, `pipelines-data`→`pipelines`, `ops-pipelines-data`→`pipelines-ops`)
 
 ### Restore Procedure (PVC)
 1. Identify the backup on NAS: `ssh cluster-backup@storage.lab.mtgibbs.dev "ls /share/cluster/backups/"`
