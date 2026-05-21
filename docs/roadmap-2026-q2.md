@@ -43,43 +43,67 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 ---
 
-## Horizon 1.5 — Kill the `op`-unlock friction (automation credential)
+## Horizon 1.5 — Make the Beelink GitOps-ready
 
-*~1 hr, 1 session — small but high-leverage*
+*~2-3 hrs, 1 session — an enabler, not an urgent op*
 
-> The single gate that touches *everything*. Every secret-reading deploy needs an
-> interactive 1Password Touch ID unlock. It bit us **twice** on 2026-05-21 — a
-> background ansible run aborted mid-deploy when the `op` session lapsed and
-> `$(op read …)` returned empty. Fixing this unblocks autonomous/background deploys.
+> **Why this exists.** The Beelink is the one piece of the homelab *outside* GitOps —
+> it's an imperative `ansible`-push box. That's the root cause of the `op`-unlock
+> friction that bit us twice on 2026-05-21 (a background deploy aborted when the laptop's
+> `op` session lapsed and `$(op read …)` returned empty), and it's why an agent would
+> otherwise need to *hold secrets* to change it. The cluster already does this right:
+> Flux + the `onepassword` ClusterSecretStore resolve secrets **in-cluster**, so the
+> agent's only cluster action is *edit YAML + commit*. We want the same property for the
+> Beelink.
+>
+> Not urgent (the stack is set up and rarely re-runs) — but it's the gate on letting an
+> agent safely operate the Beelink, so it belongs on the near horizon.
 
-**Scope (laptop/ansible side only — the cluster's External Secrets Operator already
-authenticates to 1Password non-interactively; this gap is the `beelink-ansible`
-deploy path + Claude Code's own `op read`s).**
+**The principle:** the agent acts on the **desired-state repo**; the *systems* (Flux,
+ESO, a box-local reconciler) enact that state with **their own** scoped identities. The
+agent proposes; the infrastructure enacts. The only credential the agent ever holds is
+**scoped git-write** — never a secret value.
 
-- **Create a 1Password Service Account** scoped **read-only** to the `pi-cluster` vault.
-  A service-account token (`OP_SERVICE_ACCOUNT_TOKEN`) makes `op read`/`op inject`
-  fully non-interactive — no desktop app, no Touch ID, no lapsing session.
-- **Store the token securely on the deploy host** — macOS **Keychain** (recommended)
-  or a root-owned `0600` file. Decide convenience vs. plaintext-at-rest.
-- **Wrapper** (e.g. `bin/deploy-beelink`) that loads the token into the env and runs
-  the play — turns the long `-e "$(op read …)"` invocation into one command.
-- **Hygiene** — read-only + single-vault scope, 1Password audit logging is automatic,
-  document a rotation cadence, and note it's instantly revocable in 1Password.
+**The spine (three pieces):**
 
-**The decision to make at build time (the real tradeoff):**
-> A service-account token removes the **human-presence check** that Touch ID provides.
-> Today, reading any `pi-cluster` secret requires a deliberate biometric tap. With the
-> token in place, a compromised laptop session — **and Claude Code itself** — can read
-> all `pi-cluster` secrets and deploy with zero human in the loop. That's exactly the
-> goal (autonomous ops) *and* the risk. Choose deliberately:
-> - **Option A — full autonomy:** token always available; Claude Code deploys without prompting.
-> - **Option B — scoped autonomy:** token only in a dedicated automation shell / CI, not Claude Code's default env.
-> - **Option C — middle:** keep Touch ID for interactive work, use the token only for unattended/scheduled runs.
+1. **Box-local 1Password identity** — a service account scoped to **only the Beelink's
+   ~11 secrets** (carve them into a narrow `beelink` vault — a mini "split the vault" so
+   the box-local token can NOT read the crown jewels: NAS admin, `hetzner`, `unifi`,
+   `flux-github-pat`, `litellm-postgres` superuser, `K3s Node Token`). Token stored on
+   the box (systemd `LoadCredential` or root `0600`). This is the ESO-analogue for the box.
+2. **Secrets rendered on the box** — `.env`/configs built by reading 1Password *locally*
+   via the SA token (`op read` / the `op` lookup, or `op inject`). Nothing is passed in
+   from a laptop or agent.
+3. **A reconciler watching git** — **`ansible-pull`** on a systemd timer runs the existing
+   `50-ai-stack.yml` *on the box* from a git checkout. Reuses the playbook as-is; we just
+   flip push → pull and move the secret reads onto the box. (Box needs `ansible` installed.)
 
-**Outcome:** background and scheduled deploys stop failing on session lapse; the
-`beelink-ansible` run collapses to one command; and (per the chosen option) Claude Code
-can drive Beelink deploys end-to-end without a human unlock. Enables the "I build the
-rails, the local AI runs the trains" trajectory by removing the last manual gate on *building* the rails.
+**Repo:** publish `beelink-ansible` to a **public GitHub repo** (currently local-only),
+matching `pi-cluster` (also public) and the rest of the homelab stack, and add it to the
+nightly **git-mirror** job. No secrets are committed (verified clean; `.gitignore` covers
+`secrets/`/`*.vault`) — `op://` *paths* are fine to expose, values never. Visibility is a
+recon/consistency question, not an exploitation one (Kerckhoffs: the design is public, the
+secrets are the secret).
+
+**Decisions / to verify when we build:**
+
+- **ESO auth mechanism** — confirm whether the cluster's `onepassword` ClusterSecretStore
+  uses 1Password **Connect** vs a **service account**, and mirror the right one on the box.
+- **Trigger cadence** — timer-only (applies on a delay) vs. timer + a manual/agent
+  "reconcile now" trigger.
+- **Exact `beelink` vault contents** — the ~11 secrets `50-ai-stack.yml` reads, and nothing more.
+
+**Pairs with (broader autonomy-safe posture — track separately, see Strategic Decisions):**
+the data backstops GitOps can't restore — PVC `reclaimPolicy: Retain`, immutable/retained
+NAS backup snapshots, scoped DB roles (the `backup_ro` SELECT-only pattern), and
+branch protection on the Flux branch. These bound *destructive data actions*, which remain
+the only real risk once the agent holds nothing but git-write.
+
+**Outcome:** changing the Beelink = committing to its repo; the box self-applies and pulls
+its own secrets. The laptop/agent `op` token becomes **unnecessary, not just scoped**, and
+the Touch ID gate is replaced by **separation of identity** (agent holds only git-write) +
+**GitOps reversibility** + **data-backstop irreversibility**. This is the "I build the
+rails, the local AI runs the trains" enabler — for the last non-GitOps box.
 
 ---
 
