@@ -56,14 +56,26 @@ spec:
                   rsync -az -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
                     ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/ ${WORK_DIR}/ 2>/dev/null || true
 
-                  # Fetch all repos from GitHub API (handles pagination)
+                  # Fetch all repos from GitHub API. FAIL LOUDLY on auth errors —
+                  # a silently-swallowed 401 previously made this a no-op that
+                  # reported success while mirroring nothing.
                   echo "--- Fetching repository list from GitHub ---"
-                  REPOS=$(curl -sf -H "Authorization: token ${GITHUB_TOKEN}" \
-                    "https://api.github.com/user/repos?per_page=100&affiliation=owner" \
-                    | jq -r '.[].clone_url')
-
-                  REPO_COUNT=$(echo "${REPOS}" | wc -l | tr -d ' ')
+                  HTTP_CODE=$(curl -s -o /tmp/repos.json -w "%{http_code}" \
+                    -H "Authorization: token ${GITHUB_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/user/repos?per_page=100&affiliation=owner")
+                  if [ "${HTTP_CODE}" != "200" ]; then
+                    echo "ERROR: GitHub API returned HTTP ${HTTP_CODE} — token invalid/expired?" >&2
+                    head -c 300 /tmp/repos.json >&2; echo >&2
+                    exit 1
+                  fi
+                  REPO_COUNT=$(jq 'length' /tmp/repos.json)
                   echo "Found ${REPO_COUNT} repositories"
+                  if [ "${REPO_COUNT}" -eq 0 ]; then
+                    echo "ERROR: 0 repositories returned — refusing to sync an empty mirror set" >&2
+                    exit 1
+                  fi
+                  REPOS=$(jq -r '.[].clone_url' /tmp/repos.json)
                   echo ""
 
                   # Mirror each repo
