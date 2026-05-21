@@ -31,14 +31,7 @@ spec:
 
                   GITHUB_USER="mtgibbs"
                   GITHUB_TOKEN=$(cat /github/token)
-                  export GITHUB_TOKEN
                   export GIT_TERMINAL_PROMPT=0
-                  # Auth via a credential helper so the token is NEVER written into
-                  # any repo's config (and therefore never rsynced to the NAS).
-                  # Single quotes keep the LITERAL $GITHUB_TOKEN in ~/.gitconfig
-                  # (pod-local emptyDir, not synced); git expands it only at runtime.
-                  git config --global credential.helper \
-                    '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
                   NAS_PATH="/share/cluster/backups/git-mirrors"
@@ -86,26 +79,36 @@ spec:
                   REPOS=$(jq -r '.[].clone_url' /tmp/repos.json)
                   echo ""
 
-                  # Mirror each repo using CLEAN URLs only — auth comes from the
-                  # credential helper, so no token lands in any repo config.
-                  # The set-url on existing mirrors also SCRUBS any token baked in
-                  # by the previous version of this job (rewrites it token-less,
-                  # then the rsync below overwrites the NAS copy).
+                  # Mirror each repo. Fetch using the token embedded in the URL
+                  # (works for public + private), then IMMEDIATELY rewrite the
+                  # remote to a clean, token-less URL before anything is rsynced
+                  # to the NAS. The token therefore lives only in the pod-local
+                  # /tmp config during the fetch and never lands off-pod.
+                  # Per-repo failures are recorded but do not abort the run, so
+                  # the scrub + rsync always happen.
+                  FAILED=""
                   for REPO_URL in ${REPOS}; do
                     REPO_NAME=$(basename "${REPO_URL}" .git)
                     MIRROR_DIR="${WORK_DIR}/${REPO_NAME}.git"
+                    AUTH_URL=$(echo "${REPO_URL}" | sed "s|https://|https://${GITHUB_TOKEN}@|")
 
                     if [ -d "${MIRROR_DIR}" ]; then
                       echo "--- Updating mirror: ${REPO_NAME} ---"
-                      cd "${MIRROR_DIR}"
-                      git remote set-url origin "${REPO_URL}"
-                      git remote update --prune
-                      cd /
+                      git -C "${MIRROR_DIR}" remote set-url origin "${AUTH_URL}"
+                      git -C "${MIRROR_DIR}" remote update --prune || FAILED="${FAILED} ${REPO_NAME}"
                     else
                       echo "--- Cloning new mirror: ${REPO_NAME} ---"
-                      git clone --mirror "${REPO_URL}" "${MIRROR_DIR}"
+                      git clone --mirror "${AUTH_URL}" "${MIRROR_DIR}" || FAILED="${FAILED} ${REPO_NAME}"
                     fi
+
+                    # Scrub the token from the persisted config BEFORE the rsync.
+                    [ -d "${MIRROR_DIR}/config" ] && \
+                      git -C "${MIRROR_DIR}" remote set-url origin "${REPO_URL}"
                   done
+
+                  if [ -n "${FAILED}" ]; then
+                    echo "WARNING: failed to update:${FAILED}" >&2
+                  fi
 
                   echo ""
                   echo "--- Syncing mirrors to NAS ---"
