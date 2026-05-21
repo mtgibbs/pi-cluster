@@ -25,7 +25,7 @@ This document captures the architecture, decisions, and phased plan for adding a
 - Ollama / llama.cpp serving local models
 - LiteLLM proxy behind Caddy at `https://ai.lab.mtgibbs.dev` (OpenAI-compatible front door)
 - **Postgres 16** (`litellm_db` named volume) — backs LiteLLM virtual key storage; required for `/key/generate` and per-client model allowlists. Password in 1Password (`litellm-postgres/password`).
-- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). **Note:** `OPENAI_API_KEY` is currently the LiteLLM master key — should be migrated to a scoped virtual key before the kids' UI ships (follow-up, not yet done).
+- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). `OPENAI_API_KEYS` uses a scoped LiteLLM virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — all models, no admin) as of 2026-05-21. The master key is no longer exposed to the UI.
 - **Pipelines** sidecar (`ghcr.io/open-webui/pipelines:main`) — OpenAI-compatible API at `:9099`; holds `dewey-pipeline.py`
 - **Open WebUI Dewey** at `https://dewey.lab.mtgibbs.dev` — separate auth, separate SQLite at `/srv/dewey-data/`, talks ONLY to Pipelines (`ENABLE_OLLAMA_API=false`). Model: `qwen3.5:9b` via scoped LiteLLM virtual key. CARL and Dewey are siblings: CARL handles school/Canvas reminders, Dewey handles open-ended learning with kiwix reference grounding.
 - Caddy (locally built with xcaddy + Cloudflare DNS plugin) for TLS termination; Authelia deferred
@@ -142,7 +142,7 @@ Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
 4. `kiwix-mcp` server built, CI/release pipeline, deployed to cluster as entry #26 in infrastructure.yaml — ✅
 5. Per-client LiteLLM virtual key for `local-llm-mcp`, scoped allowlist + TPM/RPM limits — ✅
 6. GHCR packages set to public; no imagePullSecret required — ✅
-7. Open WebUI `OPENAI_API_KEY` still uses master key — FOLLOW-UP: migrate to scoped virtual key before kids' UI ships
+7. Open WebUI `OPENAI_API_KEY` → scoped virtual key — ✅ DONE 2026-05-21 (H1; `op://pi-cluster/openwebui/litellm-key`)
 
 ### Phase 0.7: Ollama Tuning For Multi-User Concurrency — ✅ COMPLETE 2026-05-20
 
@@ -190,7 +190,7 @@ The kids' surface shipped as **Dewey** (not "kids"), named for the library/refer
 - `2886d5f` beelink-ansible: feat(50-ai-stack): tune Ollama for multi-user + pre-warm
 - `677ca5c` beelink-ansible: feat(dewey): add Pipelines sidecar + Open WebUI Dewey instance
 
-**Remaining gap:** adults' `chat.lab.mtgibbs.dev` `OPENAI_API_KEY` is still the LiteLLM master key — migrate to a scoped virtual key (follow-up, Phase 1).
+**Resolved 2026-05-21 (H1):** adults' `chat.lab.mtgibbs.dev` now authenticates to LiteLLM with a scoped virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — all models, no admin), verified `200` on `/v1/models` + `401` on `/key/generate`. The master key is now used only by litellm-internal + the ops sidecar bearer.
 
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 

@@ -24,16 +24,14 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 ---
 
-## Horizon 1 — Cleanup + Foundation Hardening
-
-*~45 min, next session*
+## Horizon 1 — Cleanup + Foundation Hardening ✓ COMPLETE (2026-05-21)
 
 > Bring the house in order before adding rooms.
 
-| Item | Why | Effort |
+| Item | Why | Status |
 |---|---|---|
-| Adults' OWUI: master key → scoped virtual key | Least privilege; tiny risk reduction now, big help when we add more services | 30 min |
-| Wire `local-llm-mcp` + `kiwix-mcp` into Claude Code (`.mcp.json`) | Token savings + cluster reference tools available in sessions | 15 min |
+| Adults' OWUI: master key → scoped virtual key | Least privilege; tiny risk reduction now, big help when we add more services | ✅ Done 2026-05-21 (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults`; all models, no admin). Master key now only used by litellm-internal + ops sidecar. |
+| Wire `local-llm-mcp` into Claude Code (`.mcp.json`) | Token savings + cluster reference tools available in sessions | ✅ Done (kiwix-mcp intentionally NOT wired — context cost) |
 
 > **Deferred:**
 > - `clusters/pi-k3s/ollama/` cleanup — needs verification that CARL doesn't depend on it before removing. User will revisit out-of-band.
