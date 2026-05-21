@@ -143,6 +143,31 @@ Vulkan backend (RADV GFX1151) loads cleanly and serves `qwen3:0.6b` at 100% GPU.
 6. GHCR packages set to public; no imagePullSecret required — ✅
 7. Open WebUI `OPENAI_API_KEY` still uses master key — FOLLOW-UP: migrate to scoped virtual key before kids' UI ships
 
+### Phase 0.7: Ollama Tuning For Multi-User Concurrency — ✅ COMPLETE 2026-05-20
+
+Triggered by the realization that two Open WebUIs (adults + kids) share one Ollama backend. Default settings (single loaded model, single concurrent request) would cause eviction storms and head-of-line blocking under real family use.
+
+| Setting | Old | New | Why |
+|---|---|---|---|
+| `OLLAMA_MAX_LOADED_MODELS` | default (1-3) | `5` | All five production models fit if VRAM allows; eliminates LRU eviction churn when adults + kids hit different models |
+| `OLLAMA_NUM_PARALLEL` | `1` | `2` | Two concurrent requests on the same model (e.g. two kids on `gemma3:27b`). Splits per-stream throughput but no head-of-line blocking |
+| `OLLAMA_KEEP_ALIVE` | `-1` | `-1` | unchanged — loaded models never auto-unload |
+| `OLLAMA_FLASH_ATTENTION` | `1` | `1` | unchanged |
+
+**Pre-warming added to the playbook:** post-deploy Ansible task hits `POST /api/generate` with empty prompt and `keep_alive=-1` for `gemma3:27b`, forcing the kids' model into VRAM at deploy time. First kid message is no longer a 15-second cold load.
+
+**VRAM math observed in production:** `gemma3:27b` loaded at the default 131K context window consumes ~42 GB VRAM (not just the 17 GB on-disk model). All five models simultaneously at full context would exceed our 111 GB GPU budget — if eviction starts happening anyway, the next tuning lever is `OLLAMA_CONTEXT_LENGTH` to cap per-model context, or per-model `num_ctx` overrides via LiteLLM. **Not done today**; revisit when metrics show contention.
+
+### Phase 0.8: Open WebUI Pipelines + Kids' Workspace (NEXT)
+
+1. Add `pipelines` sidecar to Beelink Compose (`ghcr.io/open-webui/pipelines:main`)
+2. Write a Python pipeline that bridges Open WebUI tool_calls → `kiwix-mcp`
+3. Configure adults' Open WebUI to use Pipelines as an "OpenAI provider"
+4. Deploy second Open WebUI instance at `kids.lab.mtgibbs.dev`, separate SQLite, separate auth
+5. Lock kids' instance to `gemma3:27b` via scoped LiteLLM virtual key + `ENABLE_OLLAMA_API=false`
+6. Add Caddy route for `kids.lab.mtgibbs.dev`
+7. Decide on Authelia for the kids' UI (open question)
+
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 
 1. Verify n8n persistence backend (SQLite vs Postgres). If SQLite, migrate to Postgres in `automation` ns.
