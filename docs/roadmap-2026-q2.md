@@ -6,14 +6,17 @@ Built around the principle: **harden what exists before adding new things**, the
 
 Each horizon is sized to fit a single working session unless flagged otherwise.
 
-> **▶ NEXT SESSION (picked 2026-05-21): Beelink backup coverage.** The Pi-cluster
-> backups were restored 2026-05-21, but the Beelink AI stack's stateful data is
-> still unprotected. Add backup CronJobs (same `backup-jobs` pattern, → QNAP
-> `/share/cluster/backups`) for: **LiteLLM Postgres** (`pg_dump` — holds virtual
-> keys + usage), **`/srv/openwebui`** (adults' OWUI DB), **`/srv/dewey-data`**
-> (Dewey OWUI DB), and the **pipelines** configs. The `BackupCronJobStale` alert
-> shipped in H2 will then watch them automatically. Context: see recaps
-> `2026-05-21-backup-recovery-and-mirror-hardening.md` + `2026-05-21-observability-phase1.md`.
+> **✓ DONE (2026-05-21): Beelink backup coverage.** The Beelink AI stack's
+> stateful data is now backed up nightly to QNAP `/share/cluster/backups/<date>/beelink`
+> by a locked-down, profile-gated `beelink-backup` Compose container (systemd timer,
+> 03:30 + jitter): **LiteLLM Postgres** via a SELECT-only `backup_ro` role,
+> **`/srv/{openwebui,dewey-data,pipelines-data,ops-pipelines-data}`** via `:ro` mounts.
+> On success it writes `beelink_backup_last_success_timestamp_seconds` to the
+> node_exporter textfile collector; the **`BeelinkBackupStale`** alert (>36h) watches it
+> — the Beelink analogue of `BackupCronJobStale` (which can't see a non-cluster job).
+> Validated end-to-end on first run (1.69 GB to QNAP, metric scraped). Built in
+> `beelink-ansible` (`50-ai-stack.yml` + `files/beelink-backup.sh`) +
+> `pi-cluster` (`prometheusrule-beelink.yaml`, commit `0ff937a`).
 
 ---
 
@@ -253,7 +256,7 @@ These deserve thought before they get sized into a horizon. Listed here so they 
 
 These don't belong to a single horizon but should be revisited as we move:
 
-- **Backup coverage** — Dewey DB, Pipelines configs, LiteLLM Postgres, Authelia state are NOT in the current backup-ops scope. Add to `backup-ops` skill / CronJobs as each lands.
+- **Backup coverage** — Beelink data (LiteLLM Postgres, adults' + Dewey OWUI DBs, pipeline configs) is now covered by the nightly `beelink-backup` container → QNAP (done 2026-05-21). Authelia state is still NOT covered — add to the backup path when Authelia lands.
 - **Family onboarding flow** — how do Ronin/Rory/spouse get accounts? Document once Authelia is in. Likely a Signal message with a magic link + first-login walkthrough.
 - **Model evaluation** — qwen3.5-9b is the current Dewey base. If a better safety-tuned + tool-capable model ships (gemma3 with tool template, or something new), we should be able to swap in one Python file edit.
 - **CARL's future** — museum exhibit. Stays as-is on his own tiny model. No-footprint when idle, so no reason to retire. If a Canvas-aware Dewey tool ever becomes interesting, build it fresh rather than re-plumbing CARL.
