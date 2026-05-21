@@ -31,7 +31,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: local-llm-mcp
-          image: ghcr.io/mtgibbs/local-llm-mcp:0.1.0 # {"$imagepolicy": "flux-system:local-llm-mcp"}
+          image: ghcr.io/mtgibbs/local-llm-mcp:0.1.1 # {"$imagepolicy": "flux-system:local-llm-mcp"}
           ports:
             - containerPort: 3000
               name: http
