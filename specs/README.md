@@ -52,5 +52,12 @@ templates that make a requirement testable instead of vibey:
 
 ## Index
 
+### In progress
 - [`homepage-refresh/`](homepage-refresh/spec.md) — refresh the Homepage dashboard
-  (arr status widgets, AI/chat section, Beelink telemetry). *First dogfood artifact.*
+  (arr status widgets, AI/chat section, Beelink telemetry). *First dogfood artifact; tuned
+  through a Round-1 qwen3-coder eval (see its §11).*
+
+### Backlog (ready for qwen3-coder)
+- [`decommission-carl-pi-ollama/`](decommission-carl-pi-ollama/spec.md) — retire CARL and the
+  Pi-side Ollama (overhead; CARL was Ollama's only consumer, inference moved to the Beelink).
+  Destructive teardown — PR-gated.

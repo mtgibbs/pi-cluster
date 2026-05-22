@@ -1,6 +1,6 @@
 # Spec: Homepage Dashboard Refresh
 
-- **Status:** Planned v0.2 (Open Questions resolved 2026-05-22 — see §10; ready to execute)
+- **Status:** Planned v0.3 (tuned after a Round-1 qwen3-coder eval — see §11)
 - **Owner:** Matt
 - **Constitution:** `/CLAUDE.md` Core Mandates (GitOps via Flux, secrets via 1Password/ESO, MCP-first, public-by-default, agent work PR-gated)
 - **Surface:** `https://home.lab.mtgibbs.dev` — Homepage (gethomepage)
@@ -65,6 +65,11 @@ A good landing page is **one-click links + glanceable health for everything we r
   `mcp-homelab` / servarr-ops tooling uses them) — **reuse those paths**.
 - AI surfaces & health endpoints (verified during the H2 Kuma work):
   `ai.lab.mtgibbs.dev/health/liveliness`, `chat.lab.mtgibbs.dev/health`, `dewey.lab.mtgibbs.dev/health`.
+- **Active-use reality (a widget is only worth it if the service is actually used):**
+  **qBittorrent is deployed but NOT in active use** — we run usenet via SABnzbd, not
+  torrents. A qBittorrent widget would render "inactive" and add noise. Treat it like
+  Jellyseerr: a `siteMonitor` link, no widget. (This is operational knowledge the model
+  cannot infer from the manifests — it must be stated here.)
 
 ## 6. Task breakdown
 
@@ -116,7 +121,7 @@ A good landing page is **one-click links + glanceable health for everything we r
 | Bazarr | `http://bazarr.media.svc.cluster.local:6767` | `bazarr` | `op://pi-cluster/mcp-homelab/bazarr-api-key` | ✅ exists (**exception** — not a `*.lab` item) |
 | Prowlarr | `http://prowlarr.media.svc.cluster.local:9696` | `prowlarr` | `op://pi-cluster/prowlarr.lab.mtgibbs.dev/api-key` | ✅ item exists |
 | SABnzbd | `http://sabnzbd.media.svc.cluster.local:8080` | `sabnzbd` | `op://pi-cluster/sabnzbd.lab.mtgibbs.dev/api-key` | ✅ exists (len 32) |
-| qBittorrent | `http://qbittorrent.media.svc.cluster.local:8080` | `qbittorrent` | `op://pi-cluster/qbit.lab.mtgibbs.dev/{username,password}` | ✅ exists (user/pass, not api-key) |
+| qBittorrent | `http://qbittorrent.media.svc.cluster.local:8080` | — | — | ⚠️ **deployed but not in active use** → keep as `siteMonitor` link, **omit widget** (it would just render "inactive"). We run usenet/SAB, not torrents. |
 | Jellyseerr | `http://jellyseerr.media.svc.cluster.local:5055` | `jellyseerr` | — | ❌ **no key in vault → keep as `siteMonitor` link, omit widget** (follow-up: provision key) |
 
 > Field name is `api-key` (confirmed for Sonarr/Radarr via the live `media/servarr-api-keys.yaml` ESO; assumed by convention for the rest — a wrong field name surfaces as an ESO sync failure, caught in verify).
@@ -124,7 +129,10 @@ A good landing page is **one-click links + glanceable health for everything we r
 ### Beelink telemetry — group "Beelink", `customapi` → Prometheus
 
 - Base: `http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=<promql>`
-- Value field path for mapping: `data.result.0.value.1`
+- **⚠️ The value is NESTED.** Prometheus returns `{"data":{"result":[{"value":[<ts>,"61"]}]}}`,
+  so the mapping field path **MUST be `data.result.0.value.1`** — NOT `value`. This is
+  **different from the existing Loki `customapi` widget** in this file (which maps
+  top-level fields like `streams`). Do not copy the Loki style here; use the nested path.
 
 | Tile | promql (wrapped in `round()` for clean display) | format |
 |---|---|---|
@@ -133,7 +141,23 @@ A good landing page is **one-click links + glanceable health for everything we r
 | GPU Temp °C | `round(beelink_gpu_temp_celsius)` | number |
 | Host RAM % | `round(100 * (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}))` | percent |
 
-Plus a link tile → Grafana **"Beelink AI Load"** dashboard (`grafana.lab.mtgibbs.dev`).
+**Worked example — copy this shape exactly for each tile (note the `field` path):**
+
+```yaml
+- Beelink VRAM Used %:
+    icon: mdi-memory
+    description: iGPU VRAM in use
+    widget:
+      type: customapi
+      url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=round(100%20*%20beelink_gpu_vram_used_bytes%20/%20beelink_gpu_vram_total_bytes)
+      mappings:
+        - field: data.result.0.value.1   # <-- nested; NOT "value"
+          label: VRAM %
+          format: percent
+```
+
+Plus a link tile → Grafana **"Beelink AI Load"** dashboard. **Use this literal href**
+(do NOT guess the dashboard UID): `https://grafana.lab.mtgibbs.dev/d/beelink-ai-load`.
 
 ### AI group
 
@@ -152,3 +176,28 @@ Plus a link tile → Grafana **"Beelink AI Load"** dashboard (`grafana.lab.mtgib
 
 ### Residual follow-up (out of this pass)
 - Provision a Jellyseerr API key in 1Password (`requests.lab.mtgibbs.dev/api-key` or similar) to upgrade it from link → widget.
+- Decide qBittorrent's fate (retire, or actually configure it) — until then it stays a link.
+
+---
+
+## 11. Tuning log (the eval → tune loop)
+
+**Round 1 (2026-05-22)** — handed v0.2 to `qwen3-coder-30b`, zero-shot, controlled
+generation of `configmap.yaml`. Result: ~7/9 acceptance criteria clean, valid YAML,
+all arr URLs/ports/widget types/key vars correct, **Jellyseerr correctly omitted** (AC#6
+honored). Two misses, both traced to *spec gaps, not model error*:
+
+1. **Beelink `customapi` used `field: value`** instead of the nested `data.result.0.value.1`.
+   Root cause: the model copied the existing **Loki** `customapi` style (top-level fields)
+   over the spec's path. → Fix: §10 now has a **worked example** + an explicit **contrast
+   with Loki**. *(Lesson: existing code beats prose; show, don't tell.)*
+2. **Invented a Grafana dashboard URL** (guessed the UID). → Fix: §10 now gives the
+   **literal href**. *(Lesson: never leave a linkable target as prose.)*
+3. **Built a qBittorrent widget** for a service we don't actually use → would show
+   "inactive". Caught by the human (operational knowledge not in the manifests). → Fix:
+   §5 + §10 now record qBittorrent as link-only. *(Lesson: the spec must carry
+   real-world/active-use facts the model can't infer.)*
+
+> Meta-lesson for the SDD practice: the model nailed everything backed by a concrete
+> pattern or a testable rule (EARS criteria, the §10 URL table), and only missed where
+> the spec described *intent* without a literal example or fact. **Specificity is the lever.**
