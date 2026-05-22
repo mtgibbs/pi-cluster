@@ -79,7 +79,7 @@ data:
           "datasource": "Prometheus",
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
           "fieldConfig": {"defaults": {"unit": "none", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
-          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{instance=\"beelink\", name=~\".+\"}[5m]))", "legendFormat": "{{name}}", "refId": "A"}]
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{instance=\"beelink\", name!=\"\"}[5m]))", "legendFormat": "{{name}}", "refId": "A"}]
         },
         {
           "title": "Container Memory",
@@ -87,7 +87,7 @@ data:
           "datasource": "Prometheus",
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
           "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
-          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (container_memory_working_set_bytes{instance=\"beelink\", name=~\".+\"})", "legendFormat": "{{name}}", "refId": "A"}]
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (container_memory_working_set_bytes{instance=\"beelink\", name!=\"\"})", "legendFormat": "{{name}}", "refId": "A"}]
         }
       ]
     }

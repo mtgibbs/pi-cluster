@@ -107,16 +107,21 @@ rails, the local AI runs the trains" enabler — for the last non-GitOps box.
 
 ---
 
-## Horizon 2 — Observability
+## Horizon 2 — Observability ✓ ESSENTIALLY COMPLETE (scaffolding 2026-05-21, finished 2026-05-22)
 
 *~3 hrs, 1 session*
 
 > Stop flying blind on the Beelink.
 
-- `node_exporter` + `radeon_exporter` (AMD GPU) + `cAdvisor` as Compose sidecars on the Beelink
-- Prometheus federated scrape from the cluster pulls Beelink metrics
-- Grafana dashboards: GPU VRAM utilization, model load events, LiteLLM token spend per virtual key, Ollama request latency
-- AutoKuma probes for Dewey, ai.lab, chat.lab, dewey.lab (+ existing services)
+- ✅ `node-exporter` + GPU textfile collector (`gpu-metrics.sh`, ROCm-free Strix Halo) + `cAdvisor` as Compose sidecars on the Beelink
+- ✅ Cluster Prometheus scrapes the Beelink over the LAN (`beelink-node` :9100, `beelink-cadvisor` :8081) — `additionalScrapeConfigs` in the monitoring HelmRelease
+- ✅ Grafana dashboard "Beelink AI Load" — VRAM %, GPU util/temp/power, system RAM, CPU load, per-container CPU/mem (`dashboard-beelink.yaml`)
+- ✅ 10 alerts — exporter down, VRAM high/critical, GPU hot/saturated, memory pressure, CPU saturated, model-disk low, backup stale/missing (`prometheusrule-beelink.yaml`)
+- ✅ AutoKuma probes for `ai.lab`, `chat.lab`, `dewey.lab` (+ all existing services)
+
+**2026-05-22 — verification + cAdvisor fix.** A live Prometheus verification caught a "green-config-but-dead-data" gap: cAdvisor v0.49.1 emitted **zero per-container series** under Docker 29's containerd image store (Storage Driver `overlayfs` / `io.containerd.snapshotter.v1`) — it expected the legacy `overlay2/layerdb` graphdriver layout and failed every container with "failed to identify the read-write layer ID." Fixed by bumping to `v0.55.1` + `cgroup: host` (proven on-box before committing). Per-container metrics now flow.
+
+**Remaining (optional): LiteLLM per-key spend + latency.** LiteLLM's *native* Prometheus `/metrics` is now an **Enterprise feature** (paywalled — `/metrics` returns 401 on the OSS build, confirmed on 1.85.1). The free path: a small **custom exporter sidecar** that polls LiteLLM's open-source `/spend` + `/key` API and re-exposes it as Prometheus metrics (no third-party image — built and vetted in-repo). Adds a scrape job + a "spend per virtual key" dashboard panel. Coarse latency already rides Uptime Kuma response times.
 
 **Outcome:** when something feels slow, you have the answer in 30 seconds. When LiteLLM rate-limits start firing, you see them coming.
 
