@@ -239,6 +239,35 @@ The kids' surface shipped as **Dewey** (not "kids"), named for the library/refer
 - Per-client LiteLLM API keys with model allowlists and per-key rate limits.
 - Kids' Open WebUI on its own VLAN (when introduced) with explicit deny rules.
 
+## Known Failure Modes & Runbook
+
+### iGPU Vulkan compute wedge (2026-05-22)
+
+**Symptom:** inference hangs — requests (LiteLLM *and* direct `ollama run`) never
+return; first responses crawl, then "crash city" on follow-ups (Dewey throws
+`httpx.ReadTimeout` at its 120s budget). Often follows heavy/concurrent use.
+
+**Signature (how to confirm it's THIS, fast):**
+- `docker exec ollama ollama ps` → model is **loaded** (`100% GPU`).
+- `curl localhost:9100/metrics | grep beelink_gpu_busy_percent` → **0** while a request hangs.
+- VRAM (`beelink_gpu_vram_used_bytes`) has headroom; GTT spill negligible → **not** memory.
+- `dmesg | grep -iE 'amdgpu|ring|reset|fault'` → **clean** (no kernel/hardware fault).
+- `docker logs ollama` → only health pings (`/api/tags`), **no `/api/generate`** lines.
+- A **`docker restart ollama` does NOT fix it** (amdgpu state is on the host, not the container).
+
+→ This is a RADV/Vulkan compute deadlock: the runner blocks on a GPU submission that never completes.
+
+**Recovery:** **reboot the Beelink** — `ansible inference -b -m reboot`. The container
+restart is insufficient; only a host reboot clears the iGPU/driver state. Then re-warm:
+`docker exec open-webui curl -s -X POST http://ollama:11434/api/generate -d '{"model":"gemma3:27b","prompt":"","keep_alive":-1}'`.
+
+**Mitigations applied (beelink-ansible `50-ai-stack.yml`, commit `b825458`):**
+- `OLLAMA_FLASH_ATTENTION=0` — flash-attn on RADV implicated in the deadlock.
+- `OLLAMA_MAX_LOADED_MODELS=3` (was 5) — 4 pinned models (~86 GB, `keep_alive=-1`) + 32k KV each stressed the scheduler.
+- Dewey pipeline: fewer tool iterations (3), smaller tool results (3000 chars), trimmed history, 180s timeout — cuts the context bloat that precedes/worsens it.
+
+> Watch `BeelinkGPUSaturated` / latency. If wedges recur even with FA off, next levers: lower `OLLAMA_NUM_PARALLEL`, or pin fewer models / shorter `keep_alive`.
+
 ## Decisions Log
 
 ### Vulkan over ROCm — FORCED WORKAROUND (2026-05-20)
