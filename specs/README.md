@@ -37,6 +37,13 @@ the actual skill (and the product/eng-collaboration lesson):
 > spec left a gap. Tier 1 says "match conventions, cite your source"; Tier 2 points at the
 > *right* example and gives literal values; the PR gate is the backstop.
 
+> **Tier 1 is sized to the model.** A local model (qwen, ~32k window) cannot afford the
+> context budget Claude can — so it gets its **own lean entry file** (`AGENTS.md`, loaded
+> by opencode), NOT the full `CLAUDE.md` (which carries Claude-Code-only protocol + a big
+> tool stack). Same underlying truth (`specs/constitution.md`), two model-sized projections:
+> rich for Claude, tight for qwen. Keeping the local model's window clean is a feature, not
+> a shortcut.
+
 ## The constitution (operative principles, summarized)
 
 These are the non-negotiables every spec inherits — canonical text in [`constitution.md`](constitution.md):

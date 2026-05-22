@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "beelink": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Beelink (LiteLLM)",
+      "options": {
+        "baseURL": "https://ai.lab.mtgibbs.dev/v1",
+        "apiKey": "{env:OPENCODE_QWEN_KEY}"
+      },
+      "models": {
+        "qwen3-coder-30b": {
+          "name": "Qwen3-Coder 30B (local, Beelink)",
+          "limit": { "context": 32768, "output": 8192 }
+        }
+      }
+    }
+  },
+  "model": "beelink/qwen3-coder-30b",
+  "instructions": ["AGENTS.md"],
+  "permission": { "edit": "allow", "bash": "allow", "webfetch": "deny" }
+}
