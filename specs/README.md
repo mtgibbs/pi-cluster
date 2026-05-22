@@ -14,15 +14,32 @@ with Claude, or by handing it to a local agent (qwen3-coder in a Ralph loop).
 
 | Layer | What | Where it lives |
 |---|---|---|
-| **Constitution** | Non-negotiable principles every spec inherits | `/CLAUDE.md` Core Mandates + memory feedback |
-| **Spec** | Per-feature: outcomes, scope, constraints, EARS acceptance criteria, tasks | `specs/<feature>/spec.md` |
+| **Constitution** | Non-negotiable principles + house architecture, every spec inherits | [`specs/constitution.md`](constitution.md) (distilled from `/CLAUDE.md` + `ARCHITECTURE.md`) |
+| **Spec** | Per-feature: outcomes, scope, constraints, EARS acceptance criteria, tasks | `specs/<feature>/spec.md` — copy [`TEMPLATE.md`](TEMPLATE.md) |
 | **Plan** | Resolved unknowns + technical approach (fills the spec's open questions) | a `## Plan` section appended to the spec, or `plan.md` |
 | **Execute** | Do the work, one task at a time | by hand / Claude / Ralph loop on qwen3 |
 | **Verify** | Self-check harness + PR gate | `verify.sh` (per feature) + human PR review |
 
+## What we ship to an agent — the context budget
+
+You can't ship everything: `ARCHITECTURE.md` alone (~2,500 lines) would blow a local
+model's context window. So context is **tiered** — and choosing what goes in each tier is
+the actual skill (and the product/eng-collaboration lesson):
+
+| Tier | What | When |
+|---|---|---|
+| **1 — Constitution** | [`constitution.md`](constitution.md): house rules + key architecture + "reuse, don't invent" | **every** handoff |
+| **2 — Spec §4/§5** | the feature's architectural *slice* + worked examples | per spec |
+| **3 — Deep reference** | `ARCHITECTURE.md`, `.claude/skills/*` | on demand (agent reads) |
+
+> Why this works: an eval showed the model **prefers to reuse existing patterns** — the
+> failure mode isn't wild invention, it's copying the *wrong* example or guessing where the
+> spec left a gap. Tier 1 says "match conventions, cite your source"; Tier 2 points at the
+> *right* example and gives literal values; the PR gate is the backstop.
+
 ## The constitution (operative principles, summarized)
 
-These are the non-negotiables every spec inherits — full text in `/CLAUDE.md`:
+These are the non-negotiables every spec inherits — canonical text in [`constitution.md`](constitution.md):
 
 - **GitOps only** — changes go through Flux-managed YAML, never web-UI/manual edits.
 - **Secrets via 1Password + ExternalSecrets** — never inline a secret value.
@@ -44,7 +61,7 @@ templates that make a requirement testable instead of vibey:
 
 ## Lifecycle
 
-1. Write `spec.md` (Draft). Capture what's known; list unknowns as **Open Questions**.
+1. Copy [`TEMPLATE.md`](TEMPLATE.md) → `specs/<feature>/spec.md` (Draft). Capture what's known; list unknowns as **Open Questions**.
 2. **Plan**: resolve the open questions (look up real URLs, verify keys exist), record
    decisions back into the spec — it's a *living document*.
 3. **Execute** against the task breakdown.
