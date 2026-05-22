@@ -181,6 +181,18 @@ The kids' surface shipped as **Dewey** (not "kids"), named for the library/refer
 
 **Isolation guarantee:** Dewey can only reach Pipelines (`:9099`). Pipelines calls LiteLLM with a key scoped to one model. Changing Dewey's model, tools, or system prompt is one Python file edit — no config cascade.
 
+#### Dewey rearchitected → deterministic RAG + streaming (UPDATE 2026-05-22)
+
+The model-driven tool loop above proved fragile on qwen3.5:9b (text-format tool calls, narration, runaway hidden reasoning that `/no_think` couldn't suppress, 120s timeouts). Rebuilt as **deterministic RAG** — the *pipeline* drives retrieval, the model only does language:
+
+1. **Keyword step** (`qwen3-4b-instruct` = Qwen3-4B-Instruct-2507) — distills the question to a search term, resolves pronouns from history, returns `NONE` for small talk.
+2. **Retrieve** (pipeline, no model tools) — `kiwix_search` → top hit → `kiwix_get_article` (≤4000 chars).
+3. **Answer** (`qwen3-30b-instruct` = Qwen3-30B-A3B-Instruct-2507) — **streamed** so the kid sees it type out (~7s to first token vs the old ~42s spinner). Only the exact provided link is used (no URL-pattern guessing). Guaranteed "📚 Read it yourself" footer.
+
+**Model choices** from `docs/model-eval-2026-05.md` — both **dedicated non-thinking "-Instruct" MoE** checkpoints (hybrid-thinking models leak reasoning through our Ollama+LiteLLM `drop_params` setup). RAG removed the tool-calling requirement that originally forced qwen3.5:9b.
+
+**Per-box setup (state, not in the playbook):** `ollama pull hf.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL` + `Qwen3-4B-Instruct-2507-GGUF:Q8_0`, `ollama cp` to `qwen3-30b-instruct` / `qwen3-4b-instruct`, register both via LiteLLM `/model/new` (DB-backed, persisted in Postgres → in the nightly backup), and add both to the `dewey` key allowlist. Dewey key scope is now those two Instruct models.
+
 **Verified end-to-end:** query "What city does the Tigris river run through?" → pipeline → `kiwix_search` tool call → kiwix-mcp execution → grounded answer naming Mosul, Tikrit, Samarra, Baghdad, Nasiriyah, Kufa.
 
 **Known quirk:** qwen3 sometimes emits a second tool call as a text `<tool_call>` block rather than a structured `tool_calls` object. Answer is still correct and sourced from the first loop; parsing text-format tool calls is a future pipeline improvement.
