@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# oc — launch opencode with a LiteLLM/qwen key pulled from 1Password at startup.
+# One biometric prompt, nothing persisted in your shell (the key lives only in
+# opencode's process env, then exec's away).
+#
+# General-purpose: use it in any project, not just this repo. It depends on the
+# local stack (1Password CLI + opencode + a reachable LiteLLM endpoint), so it's
+# documented and bootstrapped from here — see scripts/README.md.
+#
+#   oc                 # interactive TUI
+#   oc run "do thing"  # headless one-shot
+#
+# Per-machine / per-project override the vault path:
+#   OC_KEY_REF="op://work-vault/opencode/key" oc
+set -euo pipefail
+
+KEY_REF="${OC_KEY_REF:-op://pi-cluster/opencode-coder/password}"
+
+if ! KEY="$(op read "$KEY_REF" 2>/dev/null)" || [ -z "$KEY" ]; then
+  echo "oc: couldn't read $KEY_REF from 1Password." >&2
+  echo "    Unlock 1Password (or enable the CLI integration), then retry." >&2
+  exit 1
+fi
+
+# Hand off to opencode; the key is only in its environment, never the parent shell.
+OPENCODE_QWEN_KEY="$KEY" exec opencode "$@"
