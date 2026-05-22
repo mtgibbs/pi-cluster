@@ -98,6 +98,13 @@ spec:
               - targets: ['192.168.1.70:8081']
                 labels:
                   instance: beelink
+          # Custom LiteLLM usage exporter (OSS /spend API → Prometheus; native
+          # /metrics is Enterprise-gated). Token throughput + latency per virtual key.
+          - job_name: beelink-litellm
+            static_configs:
+              - targets: ['192.168.1.70:9101']
+                labels:
+                  instance: beelink
 
     # Alertmanager - send alerts to Discord
     alertmanager:

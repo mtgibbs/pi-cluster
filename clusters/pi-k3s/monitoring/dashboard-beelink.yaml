@@ -88,6 +88,30 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
           "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
           "targets": [{"datasource": "Prometheus", "expr": "sum by (name) (container_memory_working_set_bytes{instance=\"beelink\", name!=\"\"})", "legendFormat": "{{name}}", "refId": "A"}]
+        },
+        {
+          "title": "LiteLLM Tokens/sec (key / model)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "fieldConfig": {"defaults": {"unit": "none", "custom": {"fillOpacity": 20, "showPoints": "never", "stacking": {"mode": "normal"}}}},
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (key_alias, model) (rate(litellm_tokens_total[5m]))", "legendFormat": "{{key_alias}} / {{model}}", "refId": "A"}]
+        },
+        {
+          "title": "LiteLLM Requests/sec (by key)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 24},
+          "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (key_alias) (rate(litellm_requests_total[5m]))", "legendFormat": "{{key_alias}}", "refId": "A"}]
+        },
+        {
+          "title": "LiteLLM Avg Latency (by model)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 24},
+          "fieldConfig": {"defaults": {"unit": "ms", "custom": {"fillOpacity": 10, "showPoints": "never"}}},
+          "targets": [{"datasource": "Prometheus", "expr": "sum by (model) (rate(litellm_request_duration_ms_sum[5m])) / clamp_min(sum by (model) (rate(litellm_requests_total[5m])), 0.001)", "legendFormat": "{{model}}", "refId": "A"}]
         }
       ]
     }
