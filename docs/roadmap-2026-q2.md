@@ -107,7 +107,7 @@ rails, the local AI runs the trains" enabler — for the last non-GitOps box.
 
 ---
 
-## Horizon 2 — Observability ✓ ESSENTIALLY COMPLETE (scaffolding 2026-05-21, finished 2026-05-22)
+## Horizon 2 — Observability ✓ COMPLETE (scaffolding 2026-05-21, finished 2026-05-22)
 
 *~3 hrs, 1 session*
 
@@ -121,7 +121,7 @@ rails, the local AI runs the trains" enabler — for the last non-GitOps box.
 
 **2026-05-22 — verification + cAdvisor fix.** A live Prometheus verification caught a "green-config-but-dead-data" gap: cAdvisor v0.49.1 emitted **zero per-container series** under Docker 29's containerd image store (Storage Driver `overlayfs` / `io.containerd.snapshotter.v1`) — it expected the legacy `overlay2/layerdb` graphdriver layout and failed every container with "failed to identify the read-write layer ID." Fixed by bumping to `v0.55.1` + `cgroup: host` (proven on-box before committing). Per-container metrics now flow.
 
-**Remaining (optional): LiteLLM per-key spend + latency.** LiteLLM's *native* Prometheus `/metrics` is now an **Enterprise feature** (paywalled — `/metrics` returns 401 on the OSS build, confirmed on 1.85.1). The free path: a small **custom exporter sidecar** that polls LiteLLM's open-source `/spend` + `/key` API and re-exposes it as Prometheus metrics (no third-party image — built and vetted in-repo). Adds a scrape job + a "spend per virtual key" dashboard panel. Coarse latency already rides Uptime Kuma response times.
+**2026-05-22 — LiteLLM per-key usage (custom exporter).** LiteLLM's *native* Prometheus `/metrics` is now an **Enterprise feature** (paywalled — `/metrics` returns 401 on the OSS build, confirmed on 1.85.1). Built a stdlib-only **custom exporter** (`beelink-ansible/files/litellm-exporter.py`, bind-mounted onto `python:alpine` — no third-party image) that polls the open-source `/spend/keys` + `/spend/logs` and re-exposes per-key/model **token throughput, request rate, and latency** as Prometheus counters. Reads with a read-only `proxy_admin_viewer` key (`op://pi-cluster/litellm-spend-exporter/password`) — the `backup_ro` analogue for LiteLLM. Scraped via the `beelink-litellm` job (:9101); three dashboard panels added. Dollar-spend reads ~0 (local models are unpriced); tokens + latency are the real signals.
 
 **Outcome:** when something feels slow, you have the answer in 30 seconds. When LiteLLM rate-limits start firing, you see them coming.
 
