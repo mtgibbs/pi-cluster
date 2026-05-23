@@ -7,20 +7,47 @@
 # local stack (1Password CLI + opencode + a reachable LiteLLM endpoint), so it's
 # documented and bootstrapped from here — see scripts/README.md.
 #
-#   oc                 # interactive TUI
-#   oc run "do thing"  # headless one-shot
+#   oc                 # interactive TUI (no timeout)
+#   oc run "do thing"  # headless one-shot — guarded by a watchdog timeout
 #
 # Per-machine / per-project override the vault path:
 #   OC_KEY_REF="op://work-vault/opencode/key" oc
+# Headless watchdog (seconds); a stalled `oc run` is killed instead of hanging:
+#   OC_RUN_TIMEOUT=900 oc run "big task"     # default 600s
 set -euo pipefail
 
 KEY_REF="${OC_KEY_REF:-op://pi-cluster/opencode-coder/password}"
+OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-600}"
 
 if ! KEY="$(op read "$KEY_REF" 2>/dev/null)" || [ -z "$KEY" ]; then
   echo "oc: couldn't read $KEY_REF from 1Password." >&2
   echo "    Unlock 1Password (or enable the CLI integration), then retry." >&2
   exit 1
 fi
+export OPENCODE_QWEN_KEY="$KEY"
 
-# Hand off to opencode; the key is only in its environment, never the parent shell.
-OPENCODE_QWEN_KEY="$KEY" exec opencode "$@"
+# Interactive TUI (no `run` subcommand) → hand off directly, no timeout.
+if [ "${1:-}" != "run" ]; then
+  exec opencode "$@"
+fi
+
+# Headless `run` → guard with a watchdog so a stalled stream can't hang for hours
+# (a local agentic session stalled for 2h once with no timeout — never again).
+opencode "$@" &
+oc_pid=$!
+(
+  sleep "$OC_RUN_TIMEOUT"
+  if kill -0 "$oc_pid" 2>/dev/null; then
+    echo "oc: 'run' exceeded ${OC_RUN_TIMEOUT}s — killing (likely a stalled session)." >&2
+    kill "$oc_pid" 2>/dev/null
+    sleep 3
+    kill -9 "$oc_pid" 2>/dev/null
+  fi
+) &
+watchdog_pid=$!
+
+set +e
+wait "$oc_pid"; rc=$?
+set -e
+kill "$watchdog_pid" 2>/dev/null || true
+exit "$rc"
