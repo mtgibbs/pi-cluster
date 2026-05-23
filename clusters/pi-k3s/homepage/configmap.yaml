@@ -17,10 +17,16 @@ data:
       Cluster:
         style: row
         columns: 4
+      Beelink:
+        style: row
+        columns: 4
       Network:
         style: row
         columns: 2
       Monitoring:
+        style: row
+        columns: 3
+      AI:
         style: row
         columns: 3
       Media:
@@ -86,6 +92,52 @@ data:
             icon: raspberry-pi.png
             description: Worker Node (Pi 3)
 
+    - Beelink:
+        - Beelink VRAM Used %:
+            icon: mdi-memory
+            description: iGPU VRAM in use
+            widget:
+              type: customapi
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=beelink_gpu_vram_used_bytes%20/%20beelink_gpu_vram_total_bytes
+              mappings:
+                - field: data.result.0.value.1
+                  label: VRAM %
+                  format: percent
+        - Beelink GPU Busy %:
+            icon: mdi-memory
+            description: GPU utilization
+            widget:
+              type: customapi
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=beelink_gpu_busy_percent%20/%20100
+              mappings:
+                - field: data.result.0.value.1
+                  label: GPU %
+                  format: percent
+        - Beelink GPU Temp °C:
+            icon: mdi-thermometer
+            description: GPU temperature
+            widget:
+              type: customapi
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=round(beelink_gpu_temp_celsius)
+              mappings:
+                - field: data.result.0.value.1
+                  label: Temp °C
+                  format: number
+        - Beelink Host RAM %:
+            icon: mdi-memory
+            description: Host RAM in use
+            widget:
+              type: customapi
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=(1%20-%20node_memory_MemAvailable_bytes%7Binstance%3D%22beelink%22%7D%20/%20node_memory_MemTotal_bytes%7Binstance%3D%22beelink%22%7D)
+              mappings:
+                - field: data.result.0.value.1
+                  label: RAM %
+                  format: percent
+        - Beelink AI Load Dashboard:
+            icon: grafana.png
+            href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load
+            description: Beelink AI Load Dashboard
+
     - Network:
         - Unifi Controller:
             icon: unifi.png
@@ -127,6 +179,23 @@ data:
               type: prometheus
               url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
               fields: ["targets_up", "targets_down", "targets_total"]
+
+    - AI:
+        - Dewey (kids):
+            icon: mdi-account-child
+            href: https://dewey.lab.mtgibbs.dev
+            description: Kid-safe chat (qwen3 + kiwix)
+            siteMonitor: https://dewey.lab.mtgibbs.dev/health
+        - Adults Chat:
+            icon: mdi-robot-happy
+            href: https://chat.lab.mtgibbs.dev
+            description: Open WebUI (adults)
+            siteMonitor: https://chat.lab.mtgibbs.dev/health
+        - LiteLLM API:
+            icon: mdi-api
+            href: https://ai.lab.mtgibbs.dev
+            description: OpenAI-compatible inference API
+            siteMonitor: https://ai.lab.mtgibbs.dev/health/liveliness
 
     - Media:
         - Jellyfin:
@@ -180,27 +249,42 @@ data:
             icon: sonarr.png
             href: https://sonarr.lab.mtgibbs.dev
             description: TV Shows
-            siteMonitor: https://sonarr.lab.mtgibbs.dev
+            widget:
+              type: sonarr
+              url: http://sonarr.media.svc.cluster.local:8989
+              key: "{{HOMEPAGE_VAR_SONARR_API_KEY}}"
         - Radarr:
             icon: radarr.png
             href: https://radarr.lab.mtgibbs.dev
             description: Movies
-            siteMonitor: https://radarr.lab.mtgibbs.dev
+            widget:
+              type: radarr
+              url: http://radarr.media.svc.cluster.local:7878
+              key: "{{HOMEPAGE_VAR_RADARR_API_KEY}}"
         - Lidarr:
             icon: lidarr.png
             href: https://lidarr.lab.mtgibbs.dev
             description: Music
-            siteMonitor: https://lidarr.lab.mtgibbs.dev
+            widget:
+              type: lidarr
+              url: http://lidarr.media.svc.cluster.local:8686
+              key: "{{HOMEPAGE_VAR_LIDARR_API_KEY}}"
         - Bazarr:
             icon: bazarr.png
             href: https://bazarr.lab.mtgibbs.dev
             description: Subtitles
-            siteMonitor: https://bazarr.lab.mtgibbs.dev
+            widget:
+              type: bazarr
+              url: http://bazarr.media.svc.cluster.local:6767
+              key: "{{HOMEPAGE_VAR_BAZARR_API_KEY}}"
         - SABnzbd:
             icon: sabnzbd.png
             href: https://sabnzbd.lab.mtgibbs.dev
             description: Usenet Client
-            siteMonitor: https://sabnzbd.lab.mtgibbs.dev
+            widget:
+              type: sabnzbd
+              url: http://sabnzbd.media.svc.cluster.local:8080
+              key: "{{HOMEPAGE_VAR_SABNZBD_API_KEY}}"
         - qBittorrent:
             icon: qbittorrent.png
             href: https://qbit.lab.mtgibbs.dev
@@ -210,7 +294,10 @@ data:
             icon: prowlarr.png
             href: https://prowlarr.lab.mtgibbs.dev
             description: Indexer Manager
-            siteMonitor: https://prowlarr.lab.mtgibbs.dev
+            widget:
+              type: prowlarr
+              url: http://prowlarr.media.svc.cluster.local:9696
+              key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
 
     - Logs:
         - Loki:
