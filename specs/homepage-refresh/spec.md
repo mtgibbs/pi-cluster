@@ -129,17 +129,20 @@ A good landing page is **one-click links + glanceable health for everything we r
 ### Beelink telemetry — group "Beelink", `customapi` → Prometheus
 
 - Base: `http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=<promql>`
-- **⚠️ The value is NESTED.** Prometheus returns `{"data":{"result":[{"value":[<ts>,"61"]}]}}`,
-  so the mapping field path **MUST be `data.result.0.value.1`** — NOT `value`. This is
-  **different from the existing Loki `customapi` widget** in this file (which maps
-  top-level fields like `streams`). Do not copy the Loki style here; use the nested path.
+- **⚠️ TWO gotchas:**
+  1. **The value is NESTED.** Prometheus returns `{"data":{"result":[{"value":[<ts>,"0.61"]}]}}`,
+     so the mapping field path **MUST be `data.result.0.value.1`** — NOT `value`. (Different
+     from the existing Loki `customapi`, which maps top-level fields — don't copy that style.)
+  2. **`format: percent` expects a 0–1 FRACTION.** Homepage uses `Intl.NumberFormat` style
+     `percent`, which multiplies by 100. So return the raw ratio — do **NOT** pre-multiply by
+     100, or it renders "6100%". `0.61` → "61%". (Verified against Homepage's formatter.)
 
-| Tile | promql (wrapped in `round()` for clean display) | format |
+| Tile | promql (raw fraction for percent — no ×100) | format |
 |---|---|---|
-| VRAM Used % | `round(100 * beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes)` | percent |
-| GPU Busy % | `round(beelink_gpu_busy_percent)` | percent |
+| VRAM Used % | `beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes` | percent |
+| GPU Busy % | `beelink_gpu_busy_percent / 100` | percent |
 | GPU Temp °C | `round(beelink_gpu_temp_celsius)` | number |
-| Host RAM % | `round(100 * (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}))` | percent |
+| Host RAM % | `1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}` | percent |
 
 **Worked example — copy this shape exactly for each tile (note the `field` path):**
 
@@ -149,11 +152,11 @@ A good landing page is **one-click links + glanceable health for everything we r
     description: iGPU VRAM in use
     widget:
       type: customapi
-      url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=round(100%20*%20beelink_gpu_vram_used_bytes%20/%20beelink_gpu_vram_total_bytes)
+      url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=beelink_gpu_vram_used_bytes%20/%20beelink_gpu_vram_total_bytes
       mappings:
         - field: data.result.0.value.1   # <-- nested; NOT "value"
           label: VRAM %
-          format: percent
+          format: percent                 # <-- value is a 0-1 fraction (Homepage ×100)
 ```
 
 Plus a link tile → Grafana **"Beelink AI Load"** dashboard. **Use this literal href**
@@ -201,3 +204,21 @@ honored). Two misses, both traced to *spec gaps, not model error*:
 > Meta-lesson for the SDD practice: the model nailed everything backed by a concrete
 > pattern or a testable rule (EARS criteria, the §10 URL table), and only missed where
 > the spec described *intent* without a literal example or fact. **Specificity is the lever.**
+
+**Round 2 (2026-05-23)** — handed the tuned v0.3 to qwen3-coder **agentically** via opencode
+(it edits files itself, in a worktree). Findings:
+
+- **Tuned lessons held under agentic execution:** nested field path ✓, literal Grafana URL ✓,
+  Jellyseerr + qBittorrent link-only ✓, correct arr URLs/ports/keys ✓.
+- **It executed a *spec bug* faithfully:** §10 said `round(100 * …)` + `format: percent`, but
+  Homepage's percent formatter ×100 (expects 0–1) → would render "6100%". The model had no
+  judgment to catch our error — **it amplifies spec mistakes.** Fixed §10 to raw fractions.
+- **No taste on the unspecified:** reused `mdi-memory` for 3 of 4 tiles (icons weren't specified).
+- **No self-verification + a 2h stall:** it never ran §8 verify, left the AI group in the layout
+  with no services, then hung on one streaming request (no timeout). GPU/model were healthy —
+  the gap was an un-timed-out agentic loop. → added a watchdog to the `oc` launcher.
+
+> Round-2 meta-lesson: for the local model, **one-shot generation is reliable; open-ended
+> agentic autonomy is not** (it stalls, doesn't self-check, brings no taste). Externalize
+> verification to the harness, bound the scope per iteration, timebox every run, and keep
+> specs *correct* — the model won't save you from your own bugs.
