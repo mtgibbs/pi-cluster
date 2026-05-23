@@ -53,10 +53,23 @@
      Each one must be checkable by the verification harness in §8. If you can't test it,
      rewrite it until you can. Include the "what if a thing is missing" cases. -->
 
-## 8. Verification (the harness)
-<!-- How §7 is proven. Concrete commands: lint, build/dry-run, the MCP/CLI checks,
-     the post-apply spot-checks. This is what the agent self-checks against and what
-     the reviewer runs. (Mitchell Hashimoto's "harness engineering".) -->
+## 8. Verification (the harness) — SHIP A `verify.sh`
+<!-- §7 acceptance criteria, COMPILED into a runnable, deterministic gate: a `verify.sh`
+     in the spec dir that exits 0 only if the work is acceptable. Mandatory for any spec
+     handed to an agent loop. Two tiers:
+       - STATIC (no deploy): lint, build/dry-run, structural/semantic greps. This is what
+         gates each loop iteration — must be deterministic + offline.
+       - LIVE (post-deploy): renders-with-data, secrets-synced, health. Human/Flux; NOT
+         gated in the loop.
+     The LOOP runs verify.sh — the model NEVER self-certifies "done". Write each §7
+     criterion so it maps to a verify.sh assertion. (Hashimoto harness-engineering / TDD-for-agents.) -->
+
+## 8b. Loop execution (handing to a local model)
+<!-- Local models (qwen) are faithful literal executors with no stamina/taste/self-check.
+     Run via scripts/ralph-qwen.sh: ONE task per iteration, FRESH context each time,
+     timeboxed (watchdog), gated on verify.sh, retry-with-feedback, stop-for-human when
+     stuck. Decompose §6 into a tasks.txt. Bound scope = small context = reliable. Never
+     hand the model the whole repo or whole spec at once. -->
 
 ## 9. Open questions
 <!-- Honest unknowns. Don't fabricate — flag them, resolve in the Plan phase, then fold

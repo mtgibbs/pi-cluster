@@ -40,6 +40,19 @@ to innovate.
 - **Stay in scope.** Do exactly what the spec's §3 says; don't "helpfully" refactor or
   touch adjacent things.
 
+## Specs & verification (for whoever authors a spec for an agent)
+
+- **Worked examples must be tested before handoff.** A local model executes your example
+  *faithfully* — bugs and all. An untested example is a bug you've outsourced. (We once
+  shipped a `round(100 * …)` + `format: percent` example that renders "6100%"; the model
+  copied it verbatim. Verify examples against reality first.)
+- **Verification is external and mandatory.** Every spec handed to an agent ships a
+  `verify.sh` — the §7 acceptance criteria compiled into a deterministic gate (exit 0 =
+  acceptable). The loop runs it; **the model never self-certifies "done".**
+- **One task per loop iteration, fresh context.** Decompose; never hand the model the whole
+  repo or whole spec at once. Small scope = small context = reliable, fast, cheap. The
+  fixture (loop) carries the rigor, not the model. See `scripts/ralph-qwen.sh`.
+
 ## The stack in one breath
 
 Pi 5 K3s cluster (Flux GitOps, 1Password/ESO, Pi-hole+Unbound DNS, ingress-nginx +
