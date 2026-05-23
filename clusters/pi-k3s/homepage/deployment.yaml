@@ -65,6 +65,9 @@ spec:
             - secretRef:
                 name: homepage-tailscale
                 optional: true
+            - secretRef:
+                name: homepage-servarr
+                optional: true
           ports:
             - containerPort: 3000
               name: http
