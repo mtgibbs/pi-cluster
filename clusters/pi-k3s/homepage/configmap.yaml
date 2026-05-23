@@ -19,7 +19,7 @@ data:
         columns: 4
       Beelink:
         style: row
-        columns: 4
+        columns: 1
       Network:
         style: row
         columns: 2
@@ -93,50 +93,35 @@ data:
             description: Worker Node (Pi 3)
 
     - Beelink:
-        - Beelink VRAM Used %:
-            icon: mdi-memory
-            description: iGPU VRAM in use
-            widget:
-              type: customapi
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=beelink_gpu_vram_used_bytes%20/%20beelink_gpu_vram_total_bytes
-              mappings:
-                - field: data.result.0.value.1
-                  label: VRAM %
-                  format: percent
-        - Beelink GPU Busy %:
-            icon: mdi-memory
-            description: GPU utilization
-            widget:
-              type: customapi
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=beelink_gpu_busy_percent%20/%20100
-              mappings:
-                - field: data.result.0.value.1
-                  label: GPU %
-                  format: percent
-        - Beelink GPU Temp °C:
-            icon: mdi-thermometer
-            description: GPU temperature
-            widget:
-              type: customapi
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=round(beelink_gpu_temp_celsius)
-              mappings:
-                - field: data.result.0.value.1
-                  label: Temp °C
-                  format: number
-        - Beelink Host RAM %:
-            icon: mdi-memory
-            description: Host RAM in use
-            widget:
-              type: customapi
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=(1%20-%20node_memory_MemAvailable_bytes%7Binstance%3D%22beelink%22%7D%20/%20node_memory_MemTotal_bytes%7Binstance%3D%22beelink%22%7D)
-              mappings:
-                - field: data.result.0.value.1
-                  label: RAM %
-                  format: percent
-        - Beelink AI Load Dashboard:
-            icon: grafana.png
+        - Beelink GTR9 Pro:
+            icon: mdi-chip
             href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load
-            description: Beelink AI Load Dashboard
+            description: AI inference box — Strix Halo iGPU
+            widget:
+              type: prometheusmetric
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
+              refreshInterval: 10000
+              metrics:
+                - label: VRAM
+                  query: round(100 * beelink_gpu_vram_used_bytes / beelink_gpu_vram_total_bytes)
+                  format:
+                    type: number
+                    suffix: "%"
+                - label: GPU
+                  query: round(beelink_gpu_busy_percent)
+                  format:
+                    type: number
+                    suffix: "%"
+                - label: Temp
+                  query: round(beelink_gpu_temp_celsius)
+                  format:
+                    type: number
+                    suffix: "°C"
+                - label: RAM
+                  query: round(100 * (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}))
+                  format:
+                    type: number
+                    suffix: "%"
 
     - Network:
         - Unifi Controller:
@@ -265,10 +250,7 @@ data:
             icon: lidarr.png
             href: https://lidarr.lab.mtgibbs.dev
             description: Music
-            widget:
-              type: lidarr
-              url: http://lidarr.media.svc.cluster.local:8686
-              key: "{{HOMEPAGE_VAR_LIDARR_API_KEY}}"
+            siteMonitor: https://lidarr.lab.mtgibbs.dev
         - Bazarr:
             icon: bazarr.png
             href: https://bazarr.lab.mtgibbs.dev
@@ -294,10 +276,7 @@ data:
             icon: prowlarr.png
             href: https://prowlarr.lab.mtgibbs.dev
             description: Indexer Manager
-            widget:
-              type: prowlarr
-              url: http://prowlarr.media.svc.cluster.local:9696
-              key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
+            siteMonitor: https://prowlarr.lab.mtgibbs.dev
 
     - Logs:
         - Loki:

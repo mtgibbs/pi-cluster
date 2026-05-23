@@ -35,9 +35,9 @@ awk '/- Jellyseerr:/{f=1} f&&/^        - /&&!/Jellyseerr/{f=0} f&&/type:/{print}
 awk '/- qBittorrent:/{f=1} f&&/^        - /&&!/qBittorrent/{f=0} f&&/type: qbittorrent/{print}' "$CM" | grep -q . \
   && no "qbittorrent-link-only (has a widget!)" || ok "qbittorrent-link-only"
 
-# 4. Beelink customapi correctness — the two gotchas the model gets wrong
-grep -q 'field: data.result.0.value.1' "$CM" && ok "beelink-nested-field" || no "beelink-nested-field"
-grep -q 'query=round(100' "$CM" && no "beelink-percent-x100 (must be 0-1 fraction!)" || ok "beelink-percent-fraction"
+# 4. Beelink telemetry: one prometheusmetric perf card (not 4 fat customapi cards)
+grep -q 'type: prometheusmetric' "$CM" && ok "beelink-metric-widget" || no "beelink-metric-widget"
+grep -q 'beelink_gpu_vram_used_bytes' "$CM" && ok "beelink-vram-metric" || no "beelink-vram-metric"
 
 # 5. never invent links / leak secrets (AC#7)
 grep -qE 'sk-[A-Za-z0-9]{16,}' "$CM" && no "leaked-secret-key" || ok "no-leaked-secrets"
