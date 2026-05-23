@@ -69,8 +69,13 @@ templates that make a requirement testable instead of vibey:
 ## Lifecycle
 
 1. Copy [`TEMPLATE.md`](TEMPLATE.md) → `specs/<feature>/spec.md` (Draft). Capture what's known; list unknowns as **Open Questions**.
-2. **Plan**: resolve the open questions (look up real URLs, verify keys exist), record
-   decisions back into the spec — it's a *living document*.
+2. **Plan**: resolve the open questions, record decisions back into the spec (*living
+   document*). Resolve THREE kinds of unknown, not one:
+   - **correctness** — real URLs, ports, exact values;
+   - **granularity** — verify the *exact field/value* a criterion needs, not a proxy (an
+     item existing ≠ its `api-key` field existing — the prowlarr lesson);
+   - **design** — the idiomatic, *tasteful* pattern in the target system (see
+     [`design-principles.md`](design-principles.md)), not just the first thing that works.
 3. **Execute** against the task breakdown.
 4. **Verify** with the harness, open a PR, review against the acceptance criteria, merge.
 

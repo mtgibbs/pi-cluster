@@ -52,6 +52,14 @@ to innovate.
 - **One task per loop iteration, fresh context.** Decompose; never hand the model the whole
   repo or whole spec at once. Small scope = small context = reliable, fast, cheap. The
   fixture (loop) carries the rigor, not the model. See `scripts/ralph-qwen.sh`.
+- **Verify the exact thing a criterion depends on — not a proxy.** An ExternalSecret needs a
+  *field*; checking the *item* exists isn't enough (the prowlarr/lidarr lesson: the items
+  existed, the `api-key` field didn't). Resolve at the right granularity in the Plan phase —
+  and don't let tooling friction (e.g. a flaky `op` biometric) silently downgrade your check
+  from field-level to item-level. If you can't verify it now, it's an open question, not a fact.
+- **Research the idiomatic, *tasteful* pattern before specifying** — not just the first correct
+  one. The Plan phase resolves design unknowns too, per `design-principles.md`. Taste needs an
+  eye on the rendered artifact; static gates can't see "this looks dumb".
 
 ## The stack in one breath
 
