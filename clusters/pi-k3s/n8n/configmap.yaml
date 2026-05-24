@@ -22,12 +22,14 @@ data:
   DB_POSTGRESDB_DATABASE: "n8n"
   DB_POSTGRESDB_USER: "n8n"
 
-  # ---- Binary data -> Cloudflare R2 (S3-compatible) ----
-  # Keeps attachment bytes out of Postgres/the queue; webhook+worker share via R2.
-  N8N_DEFAULT_BINARY_DATA_MODE: "s3"
-  N8N_EXTERNAL_STORAGE_S3_HOST: "8b93ae435cb999b141bb950cb781ae67.r2.cloudflarestorage.com"
-  N8N_EXTERNAL_STORAGE_S3_BUCKET_NAME: "mtgibbs-mail-attachments"
-  N8N_EXTERNAL_STORAGE_S3_BUCKET_REGION: "auto"
+  # ---- Binary data ----
+  # NOTE: n8n's S3 external binary backend (N8N_DEFAULT_BINARY_DATA_MODE=s3) is an
+  # ENTERPRISE-licensed feature — community edition rejects it FATALLY. We don't need it:
+  # attachments are offloaded to R2 by the edge Worker, the webhook payload is refs-only,
+  # and each execution runs on a single worker that pulls bytes from R2 via an n8n S3
+  # credential. So n8n's binary backend only holds transient per-execution bytes ->
+  # default filesystem mode is sufficient and needs no license.
+  # (R2 access keys remain in n8n-secret; they're used by the workflow's S3 node credential.)
 
   # ---- URLs ----
   N8N_PROTOCOL: "https"
