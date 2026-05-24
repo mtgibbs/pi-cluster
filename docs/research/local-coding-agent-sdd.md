@@ -131,7 +131,7 @@ qwen3-coder-30b as an executor = a **fast, faithful, literal stamper**:
 | 3 | Verification granularity | prowlarr — verified *item*, not *field* | ✅ banked: verify the exact thing |
 | 4 | Agentic stamina | 2h silent hang | ✅ fixed: `oc` watchdog |
 | 5 | Self-verification | qwen never self-checks | ✅ banked: `verify.sh` external/mandatory |
-| 6 | **op friction** | blocked read/run/**ssh** ×6+ AND degraded rigor (caused #3) | ❌ **open** (SA fix declined) |
+| 6 | **op friction** | blocked read/run/**ssh** ×6+ AND degraded rigor (caused #3) | ✅ **resolved 2026-05-23** — local device→tool creds (see below) |
 | 7 | Spec/verify/config drift | design change forced 3 hand-edits, no link between them | ⚠️ unaddressed |
 | 8 | Blind loops | only found the 2h hang when the user asked | ⚠️ partial — heartbeat idea (§6) not built |
 | 9 | Skipped formal PR | merged to main on live review, vs the PR-gated principle | ⚠️ deviation noted |
@@ -155,8 +155,16 @@ T2 + fixed the percent/encoding bugs in review. Relevant commits on `main` throu
 
 ## 10. Open decisions (PENDING — the user is deciding)
 
-1. **op friction (#6, keystone):** 1Password Service Account token (headless, fixes everything)
-   vs keep-1Password-unlocked vs Beelink-GitOps-ready (Horizon 1.5). *Declined SA so far.*
+1. **op friction (#6, keystone): ✅ RESOLVED 2026-05-23.** Decision: the laptop↔Beelink-qwen
+   link is a **device-to-tool** connection on a trusted machine (not a cluster credential), so
+   its *working* creds live **locally** while **canonical copies stay in 1Password** for
+   re-bootstrap. Implemented: (a) `oc` reads the LiteLLM/qwen key from the **macOS Keychain**
+   (service `opencode-qwen`), 1Password fallback — no biometric on the agent hot path; (b) a
+   private SSH key on disk (`~/.ssh/beelink-ai`, 0600) with `IdentityAgent none` for that host,
+   bypassing the 1Password SSH agent. Crown-jewel / cluster-acting creds stay biometric.
+   **Consequence to remember:** this enables *supervised* friction-free runs; truly unattended
+   loops still need a persistent cred (these creds ARE persistent-but-local now, so unattended
+   is technically possible — but gate it behind the loop's maturity + PR review, not just auth).
 2. **Heartbeat watchdog:** upgrade `ralph-qwen.sh` / `oc` from a flat timeout to monitoring
    opencode's `step-start`/`step-finish` events (stall = a start with no finish in N min).
 3. **Live preamble capture:** stand up a logging proxy to see the verbatim system prompt + tool
