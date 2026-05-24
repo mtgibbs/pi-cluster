@@ -47,7 +47,7 @@ check_homepage() {
     && ok "B4: valid YAML (outer + embedded docs)" || bad "B4: YAML does not parse"
   have 'https://controlpanel\.lab\.mtgibbs\.dev/aimode' "$CM" && ok "B1: /aimode customapi url" || bad "B1: missing /aimode url"
   have 'type:\s*customapi'        "$CM" && ok "B1: customapi widget present" || bad "B1: no customapi widget"
-  have 'https://controlpanel\.lab\.mtgibbs\.dev/?($|["'\'' ])' "$CM" && ok "B2: panel bookmark url" || bad "B2: missing panel bookmark"
+  have 'controlpanel\.lab\.mtgibbs\.dev/\?token=' "$CM" && ok "B2: tokened panel bookmark" || bad "B2: missing tokened panel bookmark"
   have 'HOMEPAGE_VAR_AI_CONTROLPANEL_TOKEN' "$CM" && ok "B2: token via HOMEPAGE_VAR" || bad "B2: token var not used"
   # exactly two references to the host (the /aimode url + the / bookmark) — guards scope creep
   n=$(grep -Eo 'controlpanel\.lab\.mtgibbs\.dev' "$CM" 2>/dev/null | wc -l | tr -d ' ')
