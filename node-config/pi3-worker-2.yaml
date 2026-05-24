@@ -1,0 +1,17 @@
+# k3s node config for pi3-worker-2 (the 1GB Pi 3).
+# DEPLOY TO: /etc/rancher/k3s/config.yaml  ON pi3-worker-2 (192.168.1.51)
+# Applied on the next k3s (re)start / node rejoin. The live taint is also set
+# directly, so this file's job is REBUILD PERSISTENCE.
+#
+# Role: pi3-worker-2 is a BATCH-ONLY runner — weekly/one-off jobs and throwaway
+# containers, never serving/ingress/monitoring. The taint keeps everything off it
+# unless a workload explicitly tolerates role=batch; the label lets batch jobs
+# target it via nodeSelector { role: batch }.
+#
+# Why: it was overloaded with ingress-nginx + monitoring + a Next.js app and
+# OOM-flapped, taking ingress down. See docs/incidents/2026-05-24-pi3-worker-2-overload.md.
+
+node-taint:
+  - "role=batch:NoSchedule"
+node-label:
+  - "role=batch"

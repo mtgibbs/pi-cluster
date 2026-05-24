@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-24, ~19:06–19:15 (flap window)
 - **Severity:** Medium — intermittent, network-wide service blips; no data loss
-- **Status:** Root cause identified; **remediation pending** (node-role enforcement — see §6)
+- **Status:** ✅ **Resolved 2026-05-24** — pi3 tainted `role=batch:NoSchedule` + codified (`node-config/pi3-worker-2.yaml`); `homepage`/`mtgibbs-site` affinity stripped; ingress-nginx/monitoring moved to the Pi 5s; alertmanager reprovisioned off the pi3-pinned PV. pi3 now runs only `node-exporter` (DaemonSet). See §6.
 - **Detected via:** routine health check (user reported Immich offline, homepage problems, SABnzbd intermittently disappearing, AI-mode link failing)
 
 ---
