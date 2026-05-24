@@ -16,16 +16,10 @@ spec:
         app: homepage
     spec:
       serviceAccountName: homepage
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: In
-                    values:
-                      - pi3-worker-2
+      # NOTE: previously had nodeAffinity preferring pi3-worker-2 (1GB Pi 3) as a
+      # "lightweight" service — removed 2026-05-24. The Pi 3 is a batch-only runner
+      # (tainted role=batch:NoSchedule); serving apps belong on the 8GB Pi 5s.
+      # See docs/incidents/2026-05-24-pi3-worker-2-overload.md.
       initContainers:
         - name: copy-config
           image: busybox:latest

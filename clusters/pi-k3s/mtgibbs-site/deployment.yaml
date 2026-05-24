@@ -13,16 +13,11 @@ spec:
       labels:
         app: mtgibbs-site
     spec:
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: In
-                    values:
-                      - pi3-worker-2
+      # NOTE: previously had nodeAffinity preferring pi3-worker-2 (1GB Pi 3) — removed
+      # 2026-05-24. A Next.js runtime is NOT lightweight (it OOM-thrashed there, 50
+      # restarts). The Pi 3 is now batch-only (tainted role=batch:NoSchedule); this
+      # serving app belongs on the 8GB Pi 5s.
+      # See docs/incidents/2026-05-24-pi3-worker-2-overload.md.
       containers:
         - name: mtgibbs-site
           image: ghcr.io/mtgibbs/mtgibbs.xyz:20260130214303 # {"$imagepolicy": "flux-system:mtgibbs-site"}
