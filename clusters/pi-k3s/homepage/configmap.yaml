@@ -122,6 +122,17 @@ data:
                   format:
                     type: number
                     suffix: "%"
+        - AI Mode:
+            icon: mdi-swap-horizontal
+            description: Family / Work mode (Beelink AI stack)
+            widget:
+              type: customapi
+              url: https://controlpanel.lab.mtgibbs.dev/aimode
+              refreshInterval: 10000
+              mappings:
+                - field: mode
+                  label: Mode
+                  format: text
 
     - Network:
         - Unifi Controller:
@@ -368,6 +379,10 @@ data:
         - Flux CD:
             - icon: flux-cd.png
               href: https://fluxcd.io/docs/
+    - AI:
+        - AI Controls:
+            - icon: mdi-tune-vertical
+              href: https://controlpanel.lab.mtgibbs.dev/?token={{HOMEPAGE_VAR_AI_CONTROLPANEL_TOKEN}}
     - Network:
         - Tailscale Admin:
             - icon: tailscale.png
