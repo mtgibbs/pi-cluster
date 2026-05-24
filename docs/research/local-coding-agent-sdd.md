@@ -213,35 +213,69 @@ accumulating history → overflows 32k → lossy auto-compaction → drift → s
   cross-cutting changes).
 - **Path B — more context (hold spec + code together).** The model supports far more than our
   32k cap (we capped it to protect the iGPU KV cache — documented gotcha). So it's a VRAM +
-  latency question: `aimode work` (sole-tenant) frees VRAM; the catch is **prefill latency** —
-  bandwidth-bound iGPU, 15–26k prefills took 17–57s, so re-processing a big window every turn =
-  minutes UNLESS **prompt/prefix caching** reuses the stable prefix. Plus the long-context
-  degradation tax. Make-or-break: does our Ollama support KV/prefix caching across turns?
+  latency question: `aimode work` (sole-tenant) frees VRAM; the catch is **prefill latency** on
+  the bandwidth-bound iGPU. **Now measured (2026-05-24, see below)** — the three Path-B
+  questions are answered.
 
-**Synthesis (NOT yet decided — see §13):** tier it. (1) Trim unused tools now (free). (2)
-Decomposition is the default (robust + quality-optimal). (3) Bigger context is the escape hatch
-for the ~10% genuinely cross-cutting specs — and only a *modest* bump (32k→64k work-mode +
-caching), NOT 128k. "Less, sharper context + orchestrator decomposition" usually beats "give it
-more context."
+### Measured: qwen3-coder:30b prefill/quality, 32k vs 64k (2026-05-24)
 
-## 13. WHERE WE LEFT OFF (post-compaction pickup — 2026-05-24)
+Probed sole-tenant via Ollama `/api/generate` (timing fields), 30B reloaded at `num_ctx=65536`
+(31.9 GB VRAM — fits the 96 GB carveout fine; **Q8 at 64k would risk >96 GB, so NOT done**):
 
-We were mid-discussion on the **context-budget strategy (§12)** when we approached our own
-context limit and compacted. Thread state:
+| Prompt tokens | Prefill tok/s | Wall |
+|---|---|---|
+| 403 | 778 | 0.5s |
+| 5,734 | 635 | 9s |
+| 15,615 | 331 | 47s |
+| 28,615 | 194 | 148s |
+| **57,991** | **99** | **583s (~9.7 min)** |
 
-- **Just measured** the preamble breakdown (§12) — confirmed the user's "fired up oc, 30%
-  already taken, wtf" observation: it's the fixed preamble (~10k), ~60% tool schemas.
-- **NOT YET DECIDED:** Path A (decompose) vs Path B (more context). Leaning "A as default, B as
-  escape hatch," but the user wants Path B's *feasibility* explored before committing.
-- **Immediate next actions we agreed on (pick up HERE):**
-  1. **Trim unused opencode tools** (`skill`, `task`, `todowrite`) to reclaim ~2.6k tokens —
-     **verify opencode's current tool-disable syntax first** (don't trust stale knowledge),
-     then measure the before/after preamble floor.
-  2. **Research Path B viability** — the 3 questions: (a) does our Ollama/LiteLLM support
-     prefix/KV caching across turns? (b) prefill latency at 64k sole-tenant on the Beelink?
-     (c) qwen3-coder quality curve past 32–64k? These decide if "more context" is usable on
-     this hardware.
-- **User's mental model:** elaborate specs overflow qwen; we either decompose into *very
-  specific small changes* (brain iterates) OR get *more context* so it holds spec + code at
-  once. Honest engineering lean: decomposition is usually better (sharper context), but verify
-  whether prompt caching makes a modest context bump cheap enough to serve as the escape hatch.
+- **(a) Prefix caching: YES, dramatic.** Identical prompt, 2nd call: `4.15s → 0.02s` — the
+  unchanged prefix is reused for ~free (flash-attention on, `keep_alive=-1`).
+- **(b) Prefill latency: brutal & super-linear.** ~8× collapse (778→99 tok/s); a near-full 58k
+  context = **~10 min** to prefill before the first token. A cache *miss* = that stall.
+- **(c) Quality at depth: HELD.** A needle (`port 8443` / `svc-dewey-prober-x9`) at ~50% of a
+  49k context was retrieved **exactly**. No lost-in-the-middle failure on retrieval. Big context
+  is **not** quality-disqualified.
+
+**Synthesis — DECIDED:** tier it. (1) Trimmed unused tools (`skill`/`task`/`todowrite`) — done.
+(2) **Path A (decompose) is the default** — small fresh contexts are cheap to prefill *and* need
+no cache to survive eviction; immune to both failure modes on the shared box; quality-optimal.
+(3) **Path B is a deliberate escape hatch**, viable ONLY under `aimode work` sole-tenancy (protects
+the cache slot) **and** a stable prefix — for the ~10% genuinely cross-cutting specs. Proven
+usable (quality holds), but expensive on first prefill and fragile to eviction.
+**"Loop with power" now has two flavors** (opencode follows `hot-coder`): **Q8 @ 32k** (smarter,
+must decompose — the recommended power default) vs **30B @ 64k** (weaker judgment, holds a big
+spec — niche, for "read whole spec + one file" one-shots, NOT iterative loops). Note: a 30B@64k
+mode would also need opencode's `limit.context` raised to 64k (it caps at 32k today) — deliberately
+NOT built, since the data says it's niche.
+
+## 13. RESOLVED + current state (2026-05-24)
+
+The context-budget question (§12) is **settled** — Path A is the default, Path B is a
+sole-tenant escape hatch (full reasoning + measured data in §12).
+
+**Shipped this session:**
+- **Tools trimmed** — `opencode.json` `"tools": {skill,task,todowrite: false}`. (Reclaim
+  unverified — opencode docs don't say if `false` strips the schema or just denies; confirm
+  with a capture before banking the exact floor.)
+- **opencode → `hot-coder`** — `opencode.json` model is now `beelink/hot-coder`, so `oc`/ralph
+  **follow `aimode`**: 30B in family, Q8 in work. Toggle finally reaches the loop. (30B kept as
+  `qwen3-coder-30b` pinned fallback. Both 32k.)
+- **`aimode` bugs fixed** (`beelink-ansible/files/aimode.sh`, deployed): `warm()` used
+  `docker exec ollama curl` but **the ollama image has no curl** → warm-ups were a silent
+  no-op for the life of the toggle. Now uses `docker exec open-webui curl` (proven path). And
+  the warm-set pointed at stale models (gemma3/qwen3.5) — corrected to Dewey's REAL pair
+  (`qwen3-30b-instruct` + `qwen3-4b-instruct`, per `dewey-pipeline.py` defaults; verified via
+  LiteLLM `/model/info` + container env, no `DEWEY_MODEL` override).
+
+**Open follow-ups (not blocking):**
+1. **Deploy-time warmup drift** — `50-ai-stack.yml` still pre-warms `gemma3:27b`, not Dewey's
+   pair. Same bug class as aimode. Left as-is pending: is gemma3 still a real WebUI surface, or
+   fully superseded by the Dewey pipeline? Decide, then align the warmup.
+2. **Homepage `aimode` toggle** — surface `aimode status` + a flip button on the dashboard. Good
+   bounded qwen dogfood (the "next qwen project").
+3. **Verify the tool-trim reclaim** — re-run the preamble capture to confirm `false` actually
+   strips schemas.
+4. **`aimode bigctx` deliberately NOT built** — 30B@64k is niche per the benchmark; revisit only
+   if a real cross-cutting spec needs it (would also require opencode `limit.context` → 64k).

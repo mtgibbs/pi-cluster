@@ -16,7 +16,7 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 |---|---|---|
 | Harness | `opencode` 1.15.6 (Homebrew, on the laptop) | provider-agnostic; only ever points at qwen, never Claude |
 | Brain | `qwen3-coder-30b` on the Beelink | via LiteLLM `https://ai.lab.mtgibbs.dev/v1` |
-| Provider config | `opencode.json` (repo root) | custom `beelink` provider; `instructions: ["AGENTS.md"]` (lean, qwen-sized) |
+| Provider config | `opencode.json` (repo root) | custom `beelink` provider; model = `beelink/hot-coder` (**follows `aimode`**: 30B family / Q8 work); `instructions: ["AGENTS.md"]`; unused tools (`skill`/`task`/`todowrite`) disabled to shrink the preamble |
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
@@ -75,6 +75,8 @@ relocate those.
 | Widget/config wrong despite "correct" spec | model executed a **spec bug** faithfully | specs must be correct; **test worked examples** before handoff |
 | ExternalSecret won't sync | verified the *item*, not the *field* | check the exact field exists (the prowlarr lesson) |
 | Biometric lockout mid-session | a cluster-gated cred crept onto the hot path | hot-path creds belong in Keychain/on-disk (above); crown jewels stay biometric |
+| Dewey cold after `aimode family` | `aimode warm()` was a no-op (ollama image has no curl) — fixed 2026-05-24 to use `docker exec open-webui curl` + Dewey's real models | redeploy `beelink-ansible/files/aimode.sh`; warm path must hit ollama from a container that *has* curl |
+| Want the loop on the Q8 | `oc` follows `hot-coder` → run `aimode work` (sole-tenant Q8 @ 32k). 30B@64k is niche (slow prefill, see research §12) — prefer Q8 + decompose | `aimode work` then `oc`; `aimode family` to restore |
 
 ## Pointers
 

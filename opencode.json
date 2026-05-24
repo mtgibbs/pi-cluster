@@ -9,14 +9,19 @@
         "apiKey": "{env:OPENCODE_QWEN_KEY}"
       },
       "models": {
+        "hot-coder": {
+          "name": "Hot Coder (aimode-following: 30B in family, Q8 in work)",
+          "limit": { "context": 32768, "output": 8192 }
+        },
         "qwen3-coder-30b": {
-          "name": "Qwen3-Coder 30B (local, Beelink)",
+          "name": "Qwen3-Coder 30B (local, Beelink, explicit/pinned)",
           "limit": { "context": 32768, "output": 8192 }
         }
       }
     }
   },
-  "model": "beelink/qwen3-coder-30b",
+  "model": "beelink/hot-coder",
   "instructions": ["AGENTS.md"],
+  "tools": { "skill": false, "task": false, "todowrite": false },
   "permission": { "edit": "allow", "bash": "allow", "webfetch": "deny" }
 }
