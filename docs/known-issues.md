@@ -1,5 +1,11 @@
 # Known Issues
 
+### Immich OFFLINE — immich-server scaled to 0 (OPEN, 2026-05-24)
+- **Issue**: `immich-server` deployment is at `replicas: 0` → Immich web/API is down (postgresql + valkey are up). Surfaced during the 2026-05-24 health check.
+- **Cause**: out-of-band scale-down (drift — the Helm chart intends 1; not set in git). Likely parked manually when the cluster was memory-tight (pre-CARL/Pi-Ollama decommission).
+- **Impact**: Immich fully unavailable. No data risk (DB intact).
+- **Resolution (TODO, deprioritized by user)**: scale `immich-server` back to 1 **and pin `replicas: 1` in `clusters/pi-k3s/immich/helmrelease.yaml`** so it can't silently drift to 0 again. Memory headroom now exists (Pi-Ollama + CARL removed 2026-05-24).
+
 ### Immich High CPU Usage
 - **Issue**: Immich causing ~2 CPU cores usage on Pi 5 due to ML job retry loop
 - **Cause**: Machine learning disabled but jobs still queued and retrying
