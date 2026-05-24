@@ -1,6 +1,6 @@
 # Spec: Decommission CARL + Pi-side Ollama
 
-- **Status:** Backlog (ready for plan phase — earmarked for qwen3-coder execution)
+- **Status:** ✅ Done — executed 2026-05-24 (Claude-driven; destructive + cross-cutting teardown, kept off the qwen loop). CARL + Pi-Ollama pruned via GitOps (commit `12ba63d`); pods confirmed gone, Beelink Ollama untouched.
 - **Owner:** Matt
 - **Constitution:** `/CLAUDE.md` Core Mandates (GitOps via Flux, secrets via 1Password/ESO, agent work PR-gated). **This is a destructive teardown — see §4.**
 - **Touches:** `clusters/pi-k3s/carl/`, `clusters/pi-k3s/ollama/`, `flux-system/infrastructure.yaml`, `homepage/configmap.yaml`, DNS, AutoKuma.
