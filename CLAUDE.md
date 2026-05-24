@@ -73,6 +73,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
+| **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)
