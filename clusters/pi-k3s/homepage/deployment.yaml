@@ -68,6 +68,9 @@ spec:
             - secretRef:
                 name: homepage-servarr
                 optional: true
+            - secretRef:
+                name: homepage-ai-controlpanel
+                optional: true
           ports:
             - containerPort: 3000
               name: http

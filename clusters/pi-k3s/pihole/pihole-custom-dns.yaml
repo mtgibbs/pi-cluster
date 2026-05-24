@@ -18,12 +18,14 @@ data:
     # QNAP appliance direct (MCP and other raw protocols) — hardware-pinned
     address=/qnap-mcp.lab.mtgibbs.dev/192.168.1.61
     # Beelink AI inference appliance — Caddy terminates TLS on :443
-    # ai.lab    → LiteLLM (OpenAI-compatible API)
-    # chat.lab  → Open WebUI (adults' chat UI)
-    # dewey.lab → Open WebUI Dewey instance (kid-safe, gemma3:27b + kiwix tools)
+    # ai.lab          → LiteLLM (OpenAI-compatible API)
+    # chat.lab        → Open WebUI (adults' chat UI)
+    # dewey.lab       → Open WebUI Dewey instance (kid-safe, gemma3:27b + kiwix tools)
+    # controlpanel.lab → ai-controlpanel (aimode toggle + status)
     address=/ai.lab.mtgibbs.dev/192.168.1.70
     address=/chat.lab.mtgibbs.dev/192.168.1.70
     address=/dewey.lab.mtgibbs.dev/192.168.1.70
+    address=/controlpanel.lab.mtgibbs.dev/192.168.1.70
   # Block AAAA (IPv6) for domains with broken/slow IPv6 routing
   # Returns :: (null IPv6) so clients immediately fall back to IPv4
   # See: docs/known-issues.md for AT&T IPv6 routing problems
