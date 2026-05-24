@@ -16,12 +16,21 @@
 #   OC_RUN_TIMEOUT=900 oc run "big task"     # default 600s
 set -euo pipefail
 
-KEY_REF="${OC_KEY_REF:-op://pi-cluster/opencode-coder/password}"
 OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-600}"
 
-if ! KEY="$(op read "$KEY_REF" 2>/dev/null)" || [ -z "$KEY" ]; then
-  echo "oc: couldn't read $KEY_REF from 1Password." >&2
-  echo "    Unlock 1Password (or enable the CLI integration), then retry." >&2
+# Key source, in order: the local macOS Keychain copy (a device->tool cred — no biometric,
+# so the agent loop never gets locked out), then 1Password (the canonical copy, for first
+# run / re-bootstrap). Re-seed the Keychain any time with:
+#   security add-generic-password -U -s opencode-qwen -a oc -T /usr/bin/security \
+#     -w "$(op read 'op://pi-cluster/opencode-coder/password')"
+KEY="$(security find-generic-password -s opencode-qwen -w 2>/dev/null || true)"
+if [ -z "$KEY" ]; then
+  KEY_REF="${OC_KEY_REF:-op://pi-cluster/opencode-coder/password}"
+  KEY="$(op read "$KEY_REF" 2>/dev/null || true)"
+fi
+if [ -z "$KEY" ]; then
+  echo "oc: no qwen key found — not in the Keychain (service 'opencode-qwen') nor 1Password." >&2
+  echo "    Seed the Keychain (see the comment above), or unlock 1Password." >&2
   exit 1
 fi
 export OPENCODE_QWEN_KEY="$KEY"
