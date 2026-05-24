@@ -379,45 +379,7 @@ spec:
   wait: true
   timeout: 10m
 ---
-# 17. CARL - Canvas Assignment Reminder Liaison
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: carl
-  namespace: flux-system
-spec:
-  dependsOn:
-    - name: external-secrets-config
-    - name: ingress
-    - name: cert-manager-config
-  interval: 10m
-  path: ./clusters/pi-k3s/carl
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-  wait: true
-  timeout: 5m
----
-# 18. Ollama - Local LLM server for CARL
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: ollama
-  namespace: flux-system
-spec:
-  dependsOn:
-    - name: external-secrets-config
-  interval: 10m
-  path: ./clusters/pi-k3s/ollama
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-  wait: true
-  timeout: 10m
----
-# 19. n8n - Workflow automation
+# n8n - Workflow automation
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
