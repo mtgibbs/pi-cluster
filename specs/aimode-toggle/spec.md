@@ -1,6 +1,6 @@
 # Spec: AI control panel (`ai-controlpanel`) — aimode module + homepage status
 
-- **Status:** Draft v0.2
+- **Status:** ✅ Done v1.0 — shipped + verified live 2026-05-24
 - **Owner:** Matt (orchestrated by Claude; bounded pieces executed by qwen)
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md` Core Mandates)
 - **Touches:**
@@ -167,8 +167,13 @@ diff (correctness + the out-of-scope guardrails) before the glue (Task C) and th
   Task C; does not block qwen.)*
 - **OQ2 — sudo for the service.** Service user gets `NOPASSWD` for `/usr/local/bin/aimode` only
   (tight sudoers), or run the unit as root. Least-privilege that works. *(Claude, Task C.)*
-- **OQ3 — token rotation.** One static token is fine for v0.2 (LAN, reversible). Revisit if it ever
-  leaves the LAN. *(Deferred.)*
+- **OQ3 — token exposure / rotation. RESOLVED (accepted interim).** The flip token is carried in
+  the homepage card + bookmark URL → it renders into the homepage DOM and lands in Caddy logs.
+  Accepted because the gated action is *reversible + LAN-only* (worst case: someone toggles AI mode).
+  **Not** a pattern for sensitive actions. Tracked in the roadmap's "interim auth ledger"; retire
+  when network-wide SSO fronts `controlpanel.lab` (then drop the token entirely). SSO itself is
+  deliberately deferred — layering auth across Jellyfin/*arr/Pi-hole's native logins is a design
+  problem, not a bolt-on.
 
 ## Worked-example checklist (before handing to an agent)
 

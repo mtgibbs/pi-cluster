@@ -321,6 +321,12 @@ These deserve thought before they get sized into a horizon. Listed here so they 
 
 **Scope when we tackle it:** must cover the *arr stack and Pi-hole, not just AI surfaces. That's the test that justifies the work.
 
+**Why it's still deferred (2026-05-24):** the hard part isn't deploying an IdP — it's *layering* it across services that each carry their own auth (Jellyfin has its own users, the *arr stack has its own logins, Pi-hole its own admin). Bolting forward-auth in front of all of it without breaking those native logins is a design problem, not a one-session deploy. Decision: **don't do SSO piecemeal.** Until there's a holistic plan, per-service interim auth is accepted.
+
+**Interim auth ledger (the debt SSO would retire)** — track these so they get cleaned up when SSO lands:
+
+- **`controlpanel.lab` (ai-controlpanel)** — flip is gated by a static token carried in the homepage card/bookmark URL. Accepted because the action is *reversible + LAN-only* (worst case: someone toggles AI mode, you toggle back). Token is rendered into the homepage DOM + lands in Caddy logs — fine for this blast radius, **not** a pattern to reuse for anything sensitive. Retire when SSO fronts `controlpanel.lab` (drop the token entirely). See `specs/aimode-toggle/spec.md`.
+
 ---
 
 ## Cross-Cutting Concerns To Watch
