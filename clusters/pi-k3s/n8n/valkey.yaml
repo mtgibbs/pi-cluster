@@ -1,0 +1,100 @@
+---
+# Valkey = the durable job queue (Bull/Redis-compatible). Persistence (AOF) ON so
+# queued jobs survive a Valkey restart — the inner durability ring.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-valkey-data
+  namespace: n8n
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      # Generous headroom for a deep backlog (payloads are refs-only, so small).
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n-valkey
+  namespace: n8n
+  labels:
+    app: n8n-valkey
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: n8n-valkey
+  template:
+    metadata:
+      labels:
+        app: n8n-valkey
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+                      - pi5-worker-2
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          args:
+            - "--appendonly"
+            - "yes"
+            - "--dir"
+            - "/data"
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: n8n-valkey-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n-valkey
+  namespace: n8n
+  labels:
+    app: n8n-valkey
+spec:
+  selector:
+    app: n8n-valkey
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  type: ClusterIP

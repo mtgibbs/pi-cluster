@@ -1,0 +1,24 @@
+---
+# Scrape n8n's Prometheus metrics (N8N_METRICS=true) from the main + webhook tiers.
+# Queue-depth metrics (N8N_METRICS_INCLUDE_QUEUE_METRICS) come off the main tier —
+# this is how we watch backlog + drain rate live during the flood test.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: n8n
+  namespace: n8n
+  labels:
+    app: n8n
+    release: kube-prometheus   # match the Prometheus Operator selector
+spec:
+  selector:
+    matchLabels:
+      n8n-metrics: "true"
+  namespaceSelector:
+    matchNames:
+      - n8n
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

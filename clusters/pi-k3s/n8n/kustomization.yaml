@@ -4,9 +4,14 @@ namespace: n8n
 resources:
   - namespace.yaml
   - external-secret.yaml
+  - configmap.yaml
   - pvc.yaml
   - nfs-pv.yaml
   - postgresql.yaml
+  - valkey.yaml
   - deployment.yaml
+  - worker.yaml
+  - webhook.yaml
   - service.yaml
   - ingress.yaml
+  - servicemonitor.yaml

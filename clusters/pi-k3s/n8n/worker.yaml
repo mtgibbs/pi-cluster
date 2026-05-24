@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: n8n
+  name: n8n-worker
   namespace: n8n
   labels:
-    app: n8n
+    app: n8n-worker
 spec:
+  # START SMALL: 1 worker so we don't crash the Pi 5 boxes. Scale replicas up
+  # once Grafana shows RAM headroom under the flood test.
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: n8n
+      app: n8n-worker
   template:
     metadata:
       labels:
-        app: n8n
+        app: n8n-worker
     spec:
-      # n8n runs as 'node' user (UID 1000) internally.
-      # Prefer Pi 5 workers (8GB); the 1GB Pi 3 is excluded by its batch-only taint.
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -31,10 +31,12 @@ spec:
                       - pi5-worker-1
                       - pi5-worker-2
       containers:
-        - name: n8n
+        - name: n8n-worker
           image: n8nio/n8n:latest
-          # MAIN tier: serves the editor UI, registers webhooks, runs the queue/scheduler.
-          # No args == default `n8n` (main) process.
+          # WORKER tier: pulls jobs off the queue and executes workflows.
+          # --concurrency = max parallel jobs in THIS worker. Start gentle (3) so
+          # we don't fire parallel inference at the single-GPU Beelink. Tune here.
+          args: ["worker", "--concurrency=3"]
           ports:
             - containerPort: 5678
               name: http
@@ -44,17 +46,15 @@ spec:
             - secretRef:
                 name: n8n-secret
           volumeMounts:
-            - name: data
+            # Workers are stateless (state in Postgres/Valkey/R2) — ephemeral home dir.
+            - name: n8n-home
               mountPath: /home/node/.n8n
-            # Legacy ICS share (currently empty/parked; Radicale will supersede it).
-            - name: calendar
-              mountPath: /calendar
           resources:
             requests:
-              cpu: 150m
+              cpu: 200m
               memory: 384Mi
             limits:
-              cpu: 1000m
+              cpu: 1500m
               memory: 768Mi
           readinessProbe:
             httpGet:
@@ -69,9 +69,5 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 30
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: n8n-data
-        - name: calendar
-          persistentVolumeClaim:
-            claimName: n8n-calendar
+        - name: n8n-home
+          emptyDir: {}

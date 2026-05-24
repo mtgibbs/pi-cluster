@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: n8n
   namespace: n8n
+  labels:
+    app: n8n
+    n8n-metrics: "true"   # scraped by the n8n ServiceMonitor
 spec:
   selector:
     app: n8n

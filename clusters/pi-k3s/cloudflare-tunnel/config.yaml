@@ -12,17 +12,20 @@ data:
       - hostname: logs.mtgibbs.dev
         service: http://vector.log-aggregation.svc.cluster.local:8080
 
-      # n8n - Workflow automation (external webhooks)
-      # NOTE: UI host below is scheduled for LAN-only lockdown at the queue-mode cutover.
-      - hostname: n8n.mtgibbs.dev
-        service: http://n8n.n8n.svc.cluster.local:5678
+      # n8n UI (n8n.mtgibbs.dev) is intentionally NOT exposed publicly anymore.
+      # The editor is LAN-only via n8n.lab.mtgibbs.dev (nginx ingress). Any public
+      # hit on n8n.mtgibbs.dev falls through to the catch-all 404 below.
 
-      # n8n inbound-mail webhook (queue mode) - dedicated webhook tier.
-      # Backend service (n8n-webhook) is created in the queue-mode conversion PR;
-      # this route 502s until then, which is harmless (Worker not deployed yet, and
-      # the Worker's throw-on-failure ring makes the sender retry anyway).
+      # n8n inbound-mail webhook (queue mode) -> dedicated webhook tier.
+      # PATH-RESTRICTED: only the inbound-mail webhook is public. This is critical —
+      # the webhook tier serves ALL n8n production webhooks (incl. future Family Board
+      # endpoints), so without this filter they'd leak to the internet on this host.
+      # Any other path on n8n-hook.mtgibbs.dev -> 404 (rule below).
       - hostname: n8n-hook.mtgibbs.dev
+        path: ^/webhook/inbound-mail.*$
         service: http://n8n-webhook.n8n.svc.cluster.local:5678
+      - hostname: n8n-hook.mtgibbs.dev
+        service: http_status:404
 
       # Calendar - ICS feed for family calendar subscriptions
       - hostname: calendar.mtgibbs.dev

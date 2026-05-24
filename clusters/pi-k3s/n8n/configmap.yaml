@@ -1,0 +1,54 @@
+---
+# Shared n8n config for ALL tiers (main / worker / webhook).
+# This is the single "tinker here" surface — change a knob, every tier inherits it
+# (each Deployment pulls this via envFrom). Secret values live in the n8n-secret
+# ExternalSecret, NOT here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-config
+  namespace: n8n
+data:
+  # ---- Queue mode (durable executions) ----
+  EXECUTIONS_MODE: "queue"
+  QUEUE_BULL_REDIS_HOST: "n8n-valkey"
+  QUEUE_BULL_REDIS_PORT: "6379"
+  QUEUE_HEALTH_CHECK_ACTIVE: "true"
+
+  # ---- Database: Postgres (queue mode requires a real DB, not SQLite) ----
+  DB_TYPE: "postgresdb"
+  DB_POSTGRESDB_HOST: "n8n-postgresql"
+  DB_POSTGRESDB_PORT: "5432"
+  DB_POSTGRESDB_DATABASE: "n8n"
+  DB_POSTGRESDB_USER: "n8n"
+
+  # ---- Binary data -> Cloudflare R2 (S3-compatible) ----
+  # Keeps attachment bytes out of Postgres/the queue; webhook+worker share via R2.
+  N8N_DEFAULT_BINARY_DATA_MODE: "s3"
+  N8N_EXTERNAL_STORAGE_S3_HOST: "8b93ae435cb999b141bb950cb781ae67.r2.cloudflarestorage.com"
+  N8N_EXTERNAL_STORAGE_S3_BUCKET_NAME: "mtgibbs-mail-attachments"
+  N8N_EXTERNAL_STORAGE_S3_BUCKET_REGION: "auto"
+
+  # ---- URLs ----
+  N8N_PROTOCOL: "https"
+  N8N_PORT: "5678"
+  N8N_HOST: "n8n.lab.mtgibbs.dev"
+  N8N_EDITOR_BASE_URL: "https://n8n.lab.mtgibbs.dev"   # internal UI host (LAN-only)
+  WEBHOOK_URL: "https://n8n-hook.mtgibbs.dev"          # public webhook host (path-restricted at the tunnel)
+
+  # ---- Timezone ----
+  GENERIC_TIMEZONE: "America/New_York"
+  TZ: "America/New_York"
+
+  # ---- Observability (watch queue depth + drain rate during the flood test) ----
+  N8N_METRICS: "true"
+  N8N_METRICS_INCLUDE_QUEUE_METRICS: "true"
+  N8N_METRICS_INCLUDE_DEFAULT_METRICS: "true"
+
+  # ---- Execution-data pruning (keeps Postgres/Valkey bounded under a flood) ----
+  EXECUTIONS_DATA_PRUNE: "true"
+  EXECUTIONS_DATA_MAX_AGE: "336"            # hours == 14 days
+  EXECUTIONS_DATA_PRUNE_MAX_COUNT: "20000"
+
+  # NOTE: worker concurrency is set via the --concurrency flag in worker.yaml
+  # (the reliable mechanism), not here. Start = 1 worker x concurrency 3.
