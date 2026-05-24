@@ -49,9 +49,9 @@ check_homepage() {
   have 'type:\s*customapi'        "$CM" && ok "B1: customapi widget present" || bad "B1: no customapi widget"
   have 'controlpanel\.lab\.mtgibbs\.dev/\?token=' "$CM" && ok "B2: tokened panel bookmark" || bad "B2: missing tokened panel bookmark"
   have 'HOMEPAGE_VAR_AI_CONTROLPANEL_TOKEN' "$CM" && ok "B2: token via HOMEPAGE_VAR" || bad "B2: token var not used"
-  # exactly two references to the host (the /aimode url + the / bookmark) — guards scope creep
+  # exactly three host refs: card widget /aimode url + card href + bookmark href — guards scope creep
   n=$(grep -Eo 'controlpanel\.lab\.mtgibbs\.dev' "$CM" 2>/dev/null | wc -l | tr -d ' ')
-  [ "$n" = "2" ] && ok "B3: exactly 2 host refs" || bad "B3: expected 2 host refs, found $n"
+  [ "$n" = "3" ] && ok "B3: exactly 3 host refs" || bad "B3: expected 3 host refs, found $n"
   # no literal token leaked into the homepage config
   if grep -Eq 'op://|[A-Za-z0-9]{24,}' "$CM" && ! have 'HOMEPAGE_VAR_AI_CONTROLPANEL_TOKEN' "$CM"; then
     bad "B2: possible literal token in config"

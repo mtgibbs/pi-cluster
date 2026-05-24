@@ -124,6 +124,7 @@ data:
                     suffix: "%"
         - AI Mode:
             icon: mdi-swap-horizontal
+            href: https://controlpanel.lab.mtgibbs.dev/?token={{HOMEPAGE_VAR_AI_CONTROLPANEL_TOKEN}}
             description: Family / Work mode (Beelink AI stack)
             widget:
               type: customapi
