@@ -83,6 +83,31 @@ Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for exe
 
 **Note on tag names:** The originally-planned MoE variants `qwen3.5:35b-a3b` and `qwen3-coder:30b-a3b` do not exist on the Ollama registry. The actual tags are `qwen3.5:35b` and `qwen3-coder:30b` (dense models). Both fit within 96 GB GPU VRAM and perform at expectation.
 
+### Mode flips (`aimode`) — measured timings (2026-05-24)
+
+`sudo aimode {work|family|status}` toggles between **family** (Dewey + 30B coder, multi-tenant)
+and **work** (Q8 Qwen3-Coder-Next, sole tenant). The `hot-coder` LiteLLM alias is the single
+knob — flipping repoints opencode/`oc`, the Ops pipe, and MCP downstream automatically.
+
+| Flip | Wall time | Notes |
+|---|---|---|
+| **→ Work** | **~54s** | evict Ollama → start llama-server → load ~85 GB Q8 → repoint. First Q8 call after = **~0.5s** (already warm). |
+| **→ Family** | **~9s** | repoint + stop llama-server + warm Dewey's pair. First *coder* call = **~6s** (coder isn't pre-warmed — `MAX_LOADED=3`, Dewey is the priority resident). |
+
+**Per-model heat-up** (Ollama `load_duration`, page-cache-warm):
+
+| Model | Size | Heat-up |
+|---|---|---|
+| `qwen3-coder:30b` (Q4) | 25 GB | 6.4s |
+| `qwen3-30b-instruct` | 24 GB | 5.9s |
+| `qwen3-4b-instruct` | 15 GB | 1.9s |
+| Q8 (Qwen3-Coder-Next, llama-server) | 85 GB | ~50s |
+
+> **Caveat:** these are *page-cache-warm* (GGUFs recently resident). **True-cold** (post-reboot)
+> is disk-bound (~1.7 GB/s observed) — a 25 GB model ≈ ~15s cold, the Q8 toward the 60–120s budget.
+> Steady-state in normal use: **~1 min to power, ~10s home.** Dewey is unavailable for the whole
+> time work mode is held.
+
 ## Network Plan
 
 **Current:** flat `192.168.1.0/24` on UDM Pro Max. VLANs deferred to v2.
