@@ -6,6 +6,7 @@ resources:
   - external-secret.yaml
   - pvc.yaml
   - nfs-pv.yaml
+  - postgresql.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

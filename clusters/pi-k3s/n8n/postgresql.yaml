@@ -1,0 +1,110 @@
+---
+# Dedicated Postgres for n8n queue mode.
+# Plain single-instance Deployment (matches the Immich pattern; no CNPG operator in this cluster).
+# n8n has no data to migrate (only stood up), so this is a clean target — the cutover from
+# SQLite -> Postgres happens in the queue-mode conversion PR, not here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: n8n-postgresql-data
+  namespace: n8n
+  annotations:
+    # Prevent Flux from deleting this PVC (protects data)
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n-postgresql
+  namespace: n8n
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: n8n-postgresql
+  template:
+    metadata:
+      labels:
+        app: n8n-postgresql
+    spec:
+      # Keep the DB on a Pi 5 (8GB) worker, not the 1GB Pi 3.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+                      - pi5-worker-2
+      containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: n8n
+            - name: POSTGRES_USER
+              value: n8n
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: n8n-secret
+                  key: DB_POSTGRESDB_PASSWORD
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums"
+            # Keep shared_buffers modest for the Pi.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "-c"
+            - "shared_buffers=128MB"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "n8n"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "n8n"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: n8n-postgresql-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: n8n-postgresql
+  namespace: n8n
+spec:
+  selector:
+    app: n8n-postgresql
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP
