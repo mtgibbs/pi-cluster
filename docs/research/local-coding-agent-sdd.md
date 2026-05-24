@@ -182,3 +182,66 @@ T2 + fixed the percent/encoding bugs in review. Relevant commits on `main` throu
 - `specs/homepage-refresh/{spec.md, verify.sh}` (first worked example — note §11 tuning log)
 - `opencode.json`, `AGENTS.md` (the qwen harness config + lean entry file)
 - Memory: `project_local_coding_agent`, `user_digital_homesteading`, `feedback_agent_safety_pr_gated`
+
+## 12. Context budget & the preamble (measured 2026-05-23/24)
+
+An `oc` session opens with **~31% of qwen's 32k window already consumed** by the fixed
+**preamble** that opencode re-sends EVERY turn. Captured via a one-shot logging proxy:
+
+| Chunk | ~tokens |
+|---|---|
+| opencode system prompt (+ AGENTS.md + env) | ~3,988 |
+| 9 tool schemas | ~5,924 |
+| **Total preamble** | **~10,043 (≈31% of 32k)** |
+
+Per-tool: `bash` 1,460 · `skill` 1,053 · `task` 917 · `todowrite` 682 · `edit` 498 ·
+`read` 442 · `grep` 311 · `glob` 291 · `write` 262. **Tools are ~60% of the preamble; the
+biggest *unused* ones — `skill`, `task`, `todowrite` (~2,650 tok combined) — are a free ~8%
+reclaim.** (Note: `permission: deny` still *sends* the schema; you must **disable** the tool
+to shrink the window.)
+
+**The tension ("it'll die"):** preamble ~10k + elaborate spec (6–15k) + files (4–10k) +
+accumulating history → overflows 32k → lossy auto-compaction → drift → stall. Elaborate specs
+*will* kill a single long session. Two responses:
+
+- **Path A — decompose harder (orchestrator iterates).** Claude atomizes the spec; each
+  fresh-context iteration = preamble + ONE small task + ONE file ≈ 15–20k. Robust, fast.
+  **KEY insight:** focused context is *quality-optimal*, not just a VRAM workaround —
+  long-context attention degrades ("lost in the middle"), so a tight window reasons BETTER
+  than a bloated one. This is the **default, regardless of limits.** Cost: more decomposition
+  work for the orchestrator, more iterations, qwen never sees the whole picture (risk on
+  cross-cutting changes).
+- **Path B — more context (hold spec + code together).** The model supports far more than our
+  32k cap (we capped it to protect the iGPU KV cache — documented gotcha). So it's a VRAM +
+  latency question: `aimode work` (sole-tenant) frees VRAM; the catch is **prefill latency** —
+  bandwidth-bound iGPU, 15–26k prefills took 17–57s, so re-processing a big window every turn =
+  minutes UNLESS **prompt/prefix caching** reuses the stable prefix. Plus the long-context
+  degradation tax. Make-or-break: does our Ollama support KV/prefix caching across turns?
+
+**Synthesis (NOT yet decided — see §13):** tier it. (1) Trim unused tools now (free). (2)
+Decomposition is the default (robust + quality-optimal). (3) Bigger context is the escape hatch
+for the ~10% genuinely cross-cutting specs — and only a *modest* bump (32k→64k work-mode +
+caching), NOT 128k. "Less, sharper context + orchestrator decomposition" usually beats "give it
+more context."
+
+## 13. WHERE WE LEFT OFF (post-compaction pickup — 2026-05-24)
+
+We were mid-discussion on the **context-budget strategy (§12)** when we approached our own
+context limit and compacted. Thread state:
+
+- **Just measured** the preamble breakdown (§12) — confirmed the user's "fired up oc, 30%
+  already taken, wtf" observation: it's the fixed preamble (~10k), ~60% tool schemas.
+- **NOT YET DECIDED:** Path A (decompose) vs Path B (more context). Leaning "A as default, B as
+  escape hatch," but the user wants Path B's *feasibility* explored before committing.
+- **Immediate next actions we agreed on (pick up HERE):**
+  1. **Trim unused opencode tools** (`skill`, `task`, `todowrite`) to reclaim ~2.6k tokens —
+     **verify opencode's current tool-disable syntax first** (don't trust stale knowledge),
+     then measure the before/after preamble floor.
+  2. **Research Path B viability** — the 3 questions: (a) does our Ollama/LiteLLM support
+     prefix/KV caching across turns? (b) prefill latency at 64k sole-tenant on the Beelink?
+     (c) qwen3-coder quality curve past 32–64k? These decide if "more context" is usable on
+     this hardware.
+- **User's mental model:** elaborate specs overflow qwen; we either decompose into *very
+  specific small changes* (brain iterates) OR get *more context* so it holds spec + code at
+  once. Honest engineering lean: decomposition is usually better (sharper context), but verify
+  whether prompt caching makes a modest context bump cheap enough to serve as the escape hatch.
