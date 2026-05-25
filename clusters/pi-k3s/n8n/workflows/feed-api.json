@@ -1,0 +1,93 @@
+{
+  "name": "Feed API (read intake_items)",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "6701D652-58EE-4501-9792-847872F7435D",
+      "name": "Feed Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "6C5C0FDB-3557-4BC5-91AF-18AD46B3567A",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "feed",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "BE35730D-91D6-4305-9D3F-45C1C747A50E",
+      "name": "Get Feed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, received_at, type, title, due_at, student, action_required, amount, teacher, course, source_hint, confidence, source_channel, source_subject, source_from FROM intake_items ORDER BY (due_at IS NULL), due_at LIMIT 500;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "D1A5121E-A905-4E19-B16F-BA38669844A6",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Feed Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Feed": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
