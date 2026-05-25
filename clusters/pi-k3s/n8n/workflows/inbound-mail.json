@@ -1,15 +1,11 @@
 {
   "name": "Inbound Mail — Intake",
+  "settings": {
+    "executionOrder": "v1"
+  },
   "nodes": [
     {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "inbound-mail",
-        "authentication": "headerAuth",
-        "responseMode": "onReceived",
-        "options": {}
-      },
-      "id": "94C38443-5CF2-4E0B-867D-5585B144FBA4",
+      "id": "4FD799BD-55FB-42E9-BF85-397E4CE5509F",
       "name": "Inbound Mail Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -17,7 +13,14 @@
         0,
         0
       ],
-      "webhookId": "DA27282B-B8A6-4CD3-BA08-F6408B908088",
+      "webhookId": "8CC130C8-E6B0-41BE-BCDE-9A87ECFC0DFE",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound-mail",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
       "credentials": {
         "httpHeaderAuth": {
           "id": "5oAV58zdOBeUJXO8",
@@ -26,15 +29,59 @@
       }
     },
     {
-      "parameters": {},
-      "id": "C3842A41-346D-42EE-91EB-4A4D41E47058",
-      "name": "Queued → Worker",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "id": "7DEB2FCD-C6B5-45E1-9A85-DFC0333F3475",
+      "name": "Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
-        260,
+        240,
         0
-      ]
+      ],
+      "parameters": {
+        "jsCode": "const b = ($input.first().json.body) || {};\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info. Output ONLY a JSON array (no markdown, no commentary). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1}. Resolve relative dates against the email date. If nothing actionable, return [].`;\nconst text = String(b.text || '').slice(0, 6000);\nconst user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${text}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
+      }
+    },
+    {
+      "id": "700BED09-B44F-4639-8F58-29934F96C556",
+      "name": "LiteLLM Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://ai.lab.mtgibbs.dev/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "u8zjKkG1zwZt9Vr3",
+          "name": "litellm-intake"
+        }
+      }
+    },
+    {
+      "id": "AAEB5EDE-26BA-4EE0-9972-56ADEFD47F38",
+      "name": "Parse Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\n// stamp source metadata from the original webhook item onto every record\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\nreturn arr.map(r => ({ json: Object.assign({}, r, {\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n}) }));\n"
+      }
     }
   ],
   "connections": {
@@ -42,15 +89,34 @@
       "main": [
         [
           {
-            "node": "Queued → Worker",
+            "node": "Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Request": {
+      "main": [
+        [
+          {
+            "node": "LiteLLM Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LiteLLM Extract": {
+      "main": [
+        [
+          {
+            "node": "Parse Records",
             "type": "main",
             "index": 0
           }
         ]
       ]
     }
-  },
-  "settings": {
-    "executionOrder": "v1"
   }
 }
