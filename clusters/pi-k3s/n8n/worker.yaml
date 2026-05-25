@@ -47,6 +47,11 @@ spec:
           ports:
             - containerPort: 5678
               name: http
+          env:
+            # Running as NFS_UID (not 'node') leaves $HOME unset → n8n tries to mkdir
+            # '/.n8n' and EACCES-crashes. Pin HOME to the writable emptyDir mount.
+            - name: HOME
+              value: /home/node
           envFrom:
             - configMapRef:
                 name: n8n-config
