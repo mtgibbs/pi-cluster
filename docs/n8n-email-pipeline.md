@@ -204,10 +204,22 @@ Peachjar-vision → site-pointer.
 
 ---
 
+## Storage (DONE 2026-05-25)
+
+Records persist to **`intake_items`** (in n8n's Postgres). The workflow has `Ensure Table`
+(CREATE TABLE IF NOT EXISTS) + `Store` (Postgres insert, autoMap). Deadline feed query:
+```sql
+SELECT id, due_at, type, title, student, action_required, source_subject
+FROM intake_items WHERE due_at IS NOT NULL ORDER BY due_at;
+```
+Columns: id, received_at, type, title, due_at, student, action_required, amount, teacher,
+course, source_hint, confidence, source_channel, source_subject, source_from.
+> ⚠️ No dedup yet — replays/re-sends append duplicate rows. Add an idempotency key
+> (e.g. unique on source_from+title+due_at, or hash) before heavy use.
+
 ## Remaining work
 
-1. **Storage** — Postgres node → `intake_items` table (cred `intake-db` ready). Makes the
-   deadline feed real.
+1. ✅ ~~Storage~~ — done (see above).
 2. **PDF/docx branch** — fetch bytes from R2 (`r2Key`) → Extract-from-File → same extraction.
 3. **Peachjar image flyers** — fetch JPG → vision model (deferred; recurring).
 4. **Site-pointer** — detect & surface; filter signal links from tracking/footer noise.
