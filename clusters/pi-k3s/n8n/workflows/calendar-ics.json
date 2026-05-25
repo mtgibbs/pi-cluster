@@ -1,58 +1,55 @@
 {
-  "name": "Calendar ICS Generator",
+  "name": "Calendar ICS (dynamic)",
   "settings": {
     "executionOrder": "v1"
   },
   "nodes": [
     {
-      "id": "EE76DC9A-AEF9-4593-BFFE-4AB9164AF958",
-      "name": "Every 15 min",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "id": "8F7849E0-E5ED-41EC-8DCC-58A596BEBC57",
+      "name": "Ronin Cal",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         0,
         -120
       ],
+      "webhookId": "9F02D3A1-0FA3-4829-88BD-DADDF10BD03C",
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes",
-              "minutesInterval": 15
-            }
-          ]
-        }
+        "httpMethod": "GET",
+        "path": "cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a",
+        "responseMode": "responseNode",
+        "options": {}
       }
     },
     {
-      "id": "32E59741-3C0C-416F-8FDF-AEA7CAC60558",
-      "name": "Regen Now",
+      "id": "7726DF54-8085-42A7-8804-CC5BA7F97A2D",
+      "name": "Rory Cal",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         0,
         120
       ],
-      "webhookId": "EA26F0B7-9625-4367-BAF2-CFB002D39436",
+      "webhookId": "CF4A00A5-C124-4673-8637-86E7CAA404DC",
       "parameters": {
         "httpMethod": "GET",
-        "path": "gen-calendars",
-        "responseMode": "onReceived",
+        "path": "cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e",
+        "responseMode": "responseNode",
         "options": {}
       }
     },
     {
-      "id": "CBC5F9A6-B7BF-4EA8-A8CD-9389ACEDB314",
+      "id": "6BD65E47-AE52-4BA6-B55A-CBC98E09823C",
       "name": "Ronin rows",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        260,
+        240,
         -120
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT 'Ronin' AS calname, type,title,due_at,student,amount,source_hint,source_subject,source_msg_id FROM intake_items WHERE type IN ('event','due') AND student IN ('ronin','both') ORDER BY due_at;",
+        "query": "SELECT 'Ronin' AS calname, type,title,due_at,amount,source_hint,source_subject,source_msg_id FROM intake_items WHERE type IN ('event','due') AND student IN ('ronin','both') ORDER BY due_at;",
         "options": {}
       },
       "credentials": {
@@ -63,17 +60,17 @@
       }
     },
     {
-      "id": "245E8782-4F2E-468F-A480-4FD0C8E43888",
+      "id": "13989170-6268-486F-9514-8E4493D25F72",
       "name": "Rory rows",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        260,
+        240,
         120
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT 'Rory' AS calname, type,title,due_at,student,amount,source_hint,source_subject,source_msg_id FROM intake_items WHERE type IN ('event','due') AND student IN ('rory','both') ORDER BY due_at;",
+        "query": "SELECT 'Rory' AS calname, type,title,due_at,amount,source_hint,source_subject,source_msg_id FROM intake_items WHERE type IN ('event','due') AND student IN ('rory','both') ORDER BY due_at;",
         "options": {}
       },
       "credentials": {
@@ -84,89 +81,95 @@
       }
     },
     {
-      "id": "E5B2C9B5-AC2A-4C70-A2FE-1D96B0F94FA1",
+      "id": "6224B661-5C95-47F4-B406-0C24D8008554",
       "name": "ICS Ronin",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        480,
         -120
       ],
       "parameters": {
-        "jsCode": "// Build one ICS document from the input rows (one kid's event/due items + 'both').\nconst rows = $input.all().map(i => i.json);\nconst calname = (rows[0] && rows[0].calname) || 'School';\nconst esc = s => String(s == null ? '' : s).replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nconst parse = s => { const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/); return m ? { Y: m[1], Mo: m[2], D: m[3], H: m[4], Mi: m[5] } : null; };\nconst stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';\n\nconst lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//mtgibbs//intake//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:' + esc(calname), 'X-WR-TIMEZONE:America/New_York'];\nfor (const r of rows) {\n  const d = parse(r.due_at);\n  if (!d) continue;                       // undated items don't go on the calendar\n  const ymd = d.Y + d.Mo + d.D;\n  const midnight = (d.H === '00' && d.Mi === '00');   // LLM emits T00:00 for date-only\n  let dtstart;\n  if (r.type === 'due') {\n    // deadlines are timed: bare date -> 23:59 (end of day); otherwise the stated time.\n    // Floating local time (no Z/TZID) renders at wall-clock — avoids the UTC-shift bug.\n    const hm = midnight ? '2359' : (d.H + d.Mi);\n    dtstart = 'DTSTART:' + ymd + 'T' + hm + '00';\n  } else if (midnight) {\n    dtstart = 'DTSTART;VALUE=DATE:' + ymd;            // all-day event\n  } else {\n    dtstart = 'DTSTART:' + ymd + 'T' + d.H + d.Mi + '00';\n  }\n  const uidseed = (r.source_msg_id || '') + '|' + (r.title || '') + '|' + ymd;\n  const uid = Buffer.from(uidseed).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) + '@mtgibbs.dev';\n  let summary = r.title || '(untitled)';\n  if (r.type === 'due') summary = 'Due: ' + summary + (r.amount ? ' (' + r.amount + ')' : '');\n  const desc = 'From: ' + (r.source_subject || '') + (r.source_hint ? ' — ' + r.source_hint : '');\n  lines.push('BEGIN:VEVENT', 'UID:' + uid, 'DTSTAMP:' + stamp, dtstart, 'SUMMARY:' + esc(summary), 'DESCRIPTION:' + esc(desc), 'END:VEVENT');\n}\nlines.push('END:VCALENDAR');\nconst ics = lines.join('\\r\\n') + '\\r\\n';\nreturn [{ json: { calname, events: rows.length }, binary: { data: { data: Buffer.from(ics).toString('base64'), mimeType: 'text/calendar', fileName: 'cal.ics' } } }];\n"
+        "jsCode": "// Build an ICS string from this kid's event/due rows (returned as text, not a file).\nconst rows = $input.all().map(i => i.json);\nconst calname = (rows[0] && rows[0].calname) || 'School';\nconst esc = s => String(s == null ? '' : s).replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nconst parse = s => { const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/); return m ? { Y: m[1], Mo: m[2], D: m[3], H: m[4], Mi: m[5] } : null; };\nconst stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';\nconst lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//mtgibbs//intake//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:' + esc(calname),'X-WR-TIMEZONE:America/New_York'];\nfor (const r of rows) {\n  const d = parse(r.due_at); if (!d) continue;\n  const ymd = d.Y + d.Mo + d.D, midnight = (d.H === '00' && d.Mi === '00');\n  let dtstart;\n  if (r.type === 'due') { const hm = midnight ? '2359' : (d.H + d.Mi); dtstart = 'DTSTART:' + ymd + 'T' + hm + '00'; }\n  else if (midnight) dtstart = 'DTSTART;VALUE=DATE:' + ymd;\n  else dtstart = 'DTSTART:' + ymd + 'T' + d.H + d.Mi + '00';\n  const uid = Buffer.from((r.source_msg_id||'')+'|'+(r.title||'')+'|'+ymd).toString('base64').replace(/[^a-zA-Z0-9]/g,'').slice(0,32)+'@mtgibbs.dev';\n  let summary = r.title || '(untitled)'; if (r.type === 'due') summary = 'Due: ' + summary + (r.amount ? ' (' + r.amount + ')' : '');\n  lines.push('BEGIN:VEVENT','UID:'+uid,'DTSTAMP:'+stamp,dtstart,'SUMMARY:'+esc(summary),'DESCRIPTION:'+esc('From: '+(r.source_subject||'')+(r.source_hint?' — '+r.source_hint:'')),'END:VEVENT');\n}\nlines.push('END:VCALENDAR');\nreturn [{ json: { calname, events: rows.length, ics: lines.join('\\r\\n') + '\\r\\n' } }];\n"
       }
     },
     {
-      "id": "63032C43-1DC6-40BD-BFF8-28276775E296",
+      "id": "0E2A212A-0F5A-46EE-B2DB-166AC5CFD47A",
       "name": "ICS Rory",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        480,
         120
       ],
       "parameters": {
-        "jsCode": "// Build one ICS document from the input rows (one kid's event/due items + 'both').\nconst rows = $input.all().map(i => i.json);\nconst calname = (rows[0] && rows[0].calname) || 'School';\nconst esc = s => String(s == null ? '' : s).replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nconst parse = s => { const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/); return m ? { Y: m[1], Mo: m[2], D: m[3], H: m[4], Mi: m[5] } : null; };\nconst stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';\n\nconst lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//mtgibbs//intake//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:' + esc(calname), 'X-WR-TIMEZONE:America/New_York'];\nfor (const r of rows) {\n  const d = parse(r.due_at);\n  if (!d) continue;                       // undated items don't go on the calendar\n  const ymd = d.Y + d.Mo + d.D;\n  const midnight = (d.H === '00' && d.Mi === '00');   // LLM emits T00:00 for date-only\n  let dtstart;\n  if (r.type === 'due') {\n    // deadlines are timed: bare date -> 23:59 (end of day); otherwise the stated time.\n    // Floating local time (no Z/TZID) renders at wall-clock — avoids the UTC-shift bug.\n    const hm = midnight ? '2359' : (d.H + d.Mi);\n    dtstart = 'DTSTART:' + ymd + 'T' + hm + '00';\n  } else if (midnight) {\n    dtstart = 'DTSTART;VALUE=DATE:' + ymd;            // all-day event\n  } else {\n    dtstart = 'DTSTART:' + ymd + 'T' + d.H + d.Mi + '00';\n  }\n  const uidseed = (r.source_msg_id || '') + '|' + (r.title || '') + '|' + ymd;\n  const uid = Buffer.from(uidseed).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) + '@mtgibbs.dev';\n  let summary = r.title || '(untitled)';\n  if (r.type === 'due') summary = 'Due: ' + summary + (r.amount ? ' (' + r.amount + ')' : '');\n  const desc = 'From: ' + (r.source_subject || '') + (r.source_hint ? ' — ' + r.source_hint : '');\n  lines.push('BEGIN:VEVENT', 'UID:' + uid, 'DTSTAMP:' + stamp, dtstart, 'SUMMARY:' + esc(summary), 'DESCRIPTION:' + esc(desc), 'END:VEVENT');\n}\nlines.push('END:VCALENDAR');\nconst ics = lines.join('\\r\\n') + '\\r\\n';\nreturn [{ json: { calname, events: rows.length }, binary: { data: { data: Buffer.from(ics).toString('base64'), mimeType: 'text/calendar', fileName: 'cal.ics' } } }];\n"
+        "jsCode": "// Build an ICS string from this kid's event/due rows (returned as text, not a file).\nconst rows = $input.all().map(i => i.json);\nconst calname = (rows[0] && rows[0].calname) || 'School';\nconst esc = s => String(s == null ? '' : s).replace(/\\\\/g, '\\\\\\\\').replace(/;/g, '\\;').replace(/,/g, '\\\\,').replace(/\\r?\\n/g, '\\\\n');\nconst parse = s => { const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/); return m ? { Y: m[1], Mo: m[2], D: m[3], H: m[4], Mi: m[5] } : null; };\nconst stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';\nconst lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//mtgibbs//intake//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH','X-WR-CALNAME:' + esc(calname),'X-WR-TIMEZONE:America/New_York'];\nfor (const r of rows) {\n  const d = parse(r.due_at); if (!d) continue;\n  const ymd = d.Y + d.Mo + d.D, midnight = (d.H === '00' && d.Mi === '00');\n  let dtstart;\n  if (r.type === 'due') { const hm = midnight ? '2359' : (d.H + d.Mi); dtstart = 'DTSTART:' + ymd + 'T' + hm + '00'; }\n  else if (midnight) dtstart = 'DTSTART;VALUE=DATE:' + ymd;\n  else dtstart = 'DTSTART:' + ymd + 'T' + d.H + d.Mi + '00';\n  const uid = Buffer.from((r.source_msg_id||'')+'|'+(r.title||'')+'|'+ymd).toString('base64').replace(/[^a-zA-Z0-9]/g,'').slice(0,32)+'@mtgibbs.dev';\n  let summary = r.title || '(untitled)'; if (r.type === 'due') summary = 'Due: ' + summary + (r.amount ? ' (' + r.amount + ')' : '');\n  lines.push('BEGIN:VEVENT','UID:'+uid,'DTSTAMP:'+stamp,dtstart,'SUMMARY:'+esc(summary),'DESCRIPTION:'+esc('From: '+(r.source_subject||'')+(r.source_hint?' — '+r.source_hint:'')),'END:VEVENT');\n}\nlines.push('END:VCALENDAR');\nreturn [{ json: { calname, events: rows.length, ics: lines.join('\\r\\n') + '\\r\\n' } }];\n"
       }
     },
     {
-      "id": "F1BF498B-4F61-4D8D-8578-78A491622A55",
-      "name": "Write Ronin",
-      "type": "n8n-nodes-base.readWriteFile",
-      "typeVersion": 1,
+      "id": "D7923FBF-CFB2-40D2-A1D8-ADBCBCB1849F",
+      "name": "Resp Ronin",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "position": [
-        740,
+        720,
         -120
       ],
       "parameters": {
-        "operation": "write",
-        "fileName": "/calendar/ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a.ics",
-        "dataPropertyName": "data",
-        "options": {}
+        "respondWith": "text",
+        "responseBody": "={{ $json.ics }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/calendar; charset=utf-8"
+              }
+            ]
+          }
+        }
       }
     },
     {
-      "id": "7318C356-B0E5-4840-B500-D3126BFA0463",
-      "name": "Write Rory",
-      "type": "n8n-nodes-base.readWriteFile",
-      "typeVersion": 1,
+      "id": "3AEEDA55-222E-49FD-8AFC-0E4540779BC7",
+      "name": "Resp Rory",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "position": [
-        740,
+        720,
         120
       ],
       "parameters": {
-        "operation": "write",
-        "fileName": "/calendar/rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e.ics",
-        "dataPropertyName": "data",
-        "options": {}
+        "respondWith": "text",
+        "responseBody": "={{ $json.ics }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/calendar; charset=utf-8"
+              }
+            ]
+          }
+        }
       }
     }
   ],
   "connections": {
-    "Every 15 min": {
+    "Ronin Cal": {
       "main": [
         [
           {
             "node": "Ronin rows",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Rory rows",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Regen Now": {
+    "Rory Cal": {
       "main": [
         [
-          {
-            "node": "Ronin rows",
-            "type": "main",
-            "index": 0
-          },
           {
             "node": "Rory rows",
             "type": "main",
@@ -201,7 +204,7 @@
       "main": [
         [
           {
-            "node": "Write Ronin",
+            "node": "Resp Ronin",
             "type": "main",
             "index": 0
           }
@@ -212,7 +215,7 @@
       "main": [
         [
           {
-            "node": "Write Rory",
+            "node": "Resp Rory",
             "type": "main",
             "index": 0
           }

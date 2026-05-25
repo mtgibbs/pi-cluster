@@ -19,13 +19,6 @@ spec:
       labels:
         app: n8n-worker
     spec:
-      # Run as the NFS-owning user so the worker can WRITE the calendar share
-      # (same pattern jellyfin/immich/calendar use). n8n runs fine as an arbitrary
-      # UID; fsGroup makes the emptyDir home writable.
-      securityContext:
-        runAsUser: ${NFS_UID}
-        runAsGroup: ${NFS_GID}
-        fsGroup: ${NFS_GID}
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -47,11 +40,6 @@ spec:
           ports:
             - containerPort: 5678
               name: http
-          env:
-            # Running as NFS_UID (not 'node') leaves $HOME unset → n8n tries to mkdir
-            # '/.n8n' and EACCES-crashes. Pin HOME to the writable emptyDir mount.
-            - name: HOME
-              value: /home/node
           envFrom:
             - configMapRef:
                 name: n8n-config
@@ -61,10 +49,6 @@ spec:
             # Workers are stateless (state in Postgres/Valkey/R2) — ephemeral home dir.
             - name: n8n-home
               mountPath: /home/node/.n8n
-            # Calendar NFS share (RWX) — the ICS-generator workflow runs on a worker
-            # and writes <kid>.ics here; the public calendar nginx serves them.
-            - name: calendar
-              mountPath: /calendar
           resources:
             requests:
               cpu: 200m
@@ -87,6 +71,3 @@ spec:
       volumes:
         - name: n8n-home
           emptyDir: {}
-        - name: calendar
-          persistentVolumeClaim:
-            claimName: n8n-calendar

@@ -24,6 +24,11 @@ data:
       - hostname: n8n-hook.mtgibbs.dev
         path: ^/webhook/inbound-mail.*$
         service: http://n8n-webhook.n8n.svc.cluster.local:5678
+      # Per-kid calendar ICS feeds (dynamic, served by MAIN n8n which registers
+      # activations immediately). GUID-obscured paths; subscribed by family iPhones.
+      - hostname: n8n-hook.mtgibbs.dev
+        path: ^/webhook/cal-.*$
+        service: http://n8n.n8n.svc.cluster.local:5678
       - hostname: n8n-hook.mtgibbs.dev
         service: http_status:404
 
