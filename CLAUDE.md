@@ -74,6 +74,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
+| **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)
