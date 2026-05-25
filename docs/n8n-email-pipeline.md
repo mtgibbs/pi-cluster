@@ -227,10 +227,29 @@ course, source_hint, confidence, source_channel, source_subject, source_from.
 > before exposing beyond the LAN. This is the interim surface; the fuller Family Board API
 > (`/event`/`/task`/`/note` writes, etc.) is a separate plan.
 
+## Calendar feeds (iPhone-subscribable, DYNAMIC)
+
+Per-kid ICS calendars, served **dynamically** by n8n (workflow `Calendar ICS (dynamic)`,
+`workflows/calendar-ics.json`): GET webhook → query (`student IN (kid,'both')`, type
+event/due) → build ICS → respond `text/calendar`. Always current, no file write.
+
+- Ronin: `https://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
+- Rory:  `https://n8n-hook.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e`
+
+Public via tunnel rule `n8n-hook ^/webhook/cal-.*$ → MAIN n8n svc` (main registers
+activations immediately — no webhook-tier roll). GUID-obscured. **Subscribe (per iPhone):**
+Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar → paste URL.
+> ICS details: due dates → timed (date-only → 23:59); events → all-day or timed; **floating
+> local time** (no Z/TZID) to avoid the UTC midnight-shift bug. UID is stable per
+> (msg-id,title,date) so re-extraction updates rather than duplicates.
+> ⚠️ The static-file-on-NFS approach was abandoned — `/cluster/calendar` isn't writable by
+> the pod (read-only-serve share). Dynamic serving sidesteps NFS entirely.
+
 ## Remaining work
 
-1. ✅ ~~Storage~~ — done (see above).
-2. ✅ ~~Read API exposed~~ — `GET /webhook/feed` (see above).
+1. ✅ ~~Storage~~ — done.
+2. ✅ ~~Read API exposed~~ — `GET /webhook/feed`.
+3. ✅ ~~Per-kid calendars~~ — dynamic ICS (see above).
 2. **PDF/docx branch** — fetch bytes from R2 (`r2Key`) → Extract-from-File → same extraction.
 3. **Peachjar image flyers** — fetch JPG → vision model (deferred; recurring).
 4. **Site-pointer** — detect & surface; filter signal links from tracking/footer noise.
