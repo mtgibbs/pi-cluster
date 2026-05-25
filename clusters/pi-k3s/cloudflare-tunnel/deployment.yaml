@@ -14,6 +14,12 @@ spec:
     metadata:
       labels:
         app: cloudflared
+      annotations:
+        # cloudflared does NOT hot-reload config.yaml ConfigMap changes — it only reads
+        # the config at process start. Bump this whenever clusters/pi-k3s/cloudflare-tunnel/
+        # config.yaml changes, so Flux rolls the pod and the new ingress rules take effect.
+        # (Follow-up: switch to a configMapGenerator hash or a reloader sidecar to automate.)
+        config.mtgibbs.dev/reloaded-at: "2026-05-24T22:50:00Z"
     spec:
       # Prefer Pi 5 workers (pi3-worker-2 has limited memory)
       affinity:
