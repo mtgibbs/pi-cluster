@@ -1,0 +1,21 @@
+# Cloudflare Email Worker for the n8n inbound-mail pipeline.
+# Deployed with `wrangler deploy` (not Flux). The inbound email ROUTE
+# (catch-all/address -> this worker) is bound in the Email Routing dashboard,
+# not here — wrangler.toml does not declare inbound email routes.
+name = "mtgibbs-mail-worker"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+account_id = "8b93ae435cb999b141bb950cb781ae67"
+
+# This worker is triggered by EMAIL (via Email Routing), not HTTP — it needs no
+# workers.dev subdomain and no public route. Disable the workers.dev publish target.
+workers_dev = false
+
+# R2 bucket the worker writes attachments to (refs go in the JSON payload).
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "mtgibbs-mail-attachments"
+
+# Secrets (set via `wrangler secret put`, NOT committed):
+#   N8N_WEBHOOK_URL  -> https://n8n-hook.mtgibbs.dev/webhook/inbound-mail
+#   N8N_TOKEN        -> matches the n8n webhook Header-Auth credential (op://pi-cluster/n8n/webhook-token)

@@ -1,0 +1,16 @@
+{
+  "name": "mtgibbs-mail-worker",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Email Worker: parses inbound *@mtgibbs.dev, offloads attachments to R2, POSTs refs-only JSON to the n8n inbound-mail webhook. Deployed via wrangler (NOT Flux).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
+  }
+}
