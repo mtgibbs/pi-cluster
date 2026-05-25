@@ -49,6 +49,10 @@ spec:
             # Workers are stateless (state in Postgres/Valkey/R2) — ephemeral home dir.
             - name: n8n-home
               mountPath: /home/node/.n8n
+            # Calendar NFS share (RWX) — the ICS-generator workflow runs on a worker
+            # and writes <kid>.ics here; the public calendar nginx serves them.
+            - name: calendar
+              mountPath: /calendar
           resources:
             requests:
               cpu: 200m
@@ -71,3 +75,6 @@ spec:
       volumes:
         - name: n8n-home
           emptyDir: {}
+        - name: calendar
+          persistentVolumeClaim:
+            claimName: n8n-calendar

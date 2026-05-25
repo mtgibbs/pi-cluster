@@ -5,7 +5,7 @@
   },
   "nodes": [
     {
-      "id": "5C40DAEC-EE01-4BA7-ACA9-6687F29A76D3",
+      "id": "C9BF9EE2-30C2-42C9-AA91-34374FC527BD",
       "name": "Inbound Mail Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -13,7 +13,7 @@
         0,
         0
       ],
-      "webhookId": "56E63D6A-0C73-4626-9128-A79F7604746C",
+      "webhookId": "8C704A7A-20D6-4970-825B-88154E1AF330",
       "parameters": {
         "httpMethod": "POST",
         "path": "inbound-mail",
@@ -29,18 +29,18 @@
       }
     },
     {
-      "id": "BF3F0EDD-142E-4267-8A3B-F41CADD4055D",
+      "id": "5B4DE35A-4F40-4965-900F-B5A0F3E7B15F",
       "name": "Ensure Table",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        220,
+        200,
         0
       ],
       "alwaysOutputData": true,
       "parameters": {
         "operation": "executeQuery",
-        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT);",
+        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), source_msg_id TEXT, type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS source_msg_id TEXT; CREATE INDEX IF NOT EXISTS intake_items_msgid_idx ON intake_items(source_msg_id);",
         "options": {}
       },
       "credentials": {
@@ -51,12 +51,36 @@
       }
     },
     {
-      "id": "B278A45B-2A3B-4729-B032-4EE57039074B",
+      "id": "E8A2B540-870A-4D10-8C29-488CF1D5D538",
+      "name": "Delete Prior",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        380,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM intake_items WHERE source_msg_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Inbound Mail Webhook').first().json.body.messageId || (($('Inbound Mail Webhook').first().json.body.from || '') + '|' + ($('Inbound Mail Webhook').first().json.body.subject || '') + '|' + ($('Inbound Mail Webhook').first().json.body.date || '')) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "0B068F07-7757-45F1-A075-4D045378500A",
       "name": "Build Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        440,
+        560,
         0
       ],
       "parameters": {
@@ -64,12 +88,12 @@
       }
     },
     {
-      "id": "52D927A8-31ED-4A0B-853F-1970DBD2040B",
+      "id": "A5CF5490-A240-4018-9A87-099879F4FDEB",
       "name": "LiteLLM Extract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
+        740,
         0
       ],
       "parameters": {
@@ -93,20 +117,20 @@
       }
     },
     {
-      "id": "41921730-4A88-4368-A256-68FDB39BFB8C",
+      "id": "660E9561-3A83-4DC6-A48F-F5DFD76671D3",
       "name": "Parse Records",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        920,
         0
       ],
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\n// normalize to the intake_items column names (snake_case); coerce types\nreturn arr.map(r => ({ json: {\n  type: r.type || 'info',\n  title: r.title || '',\n  due_at: r.dueAt || null,\n  student: r.student || 'unknown',\n  action_required: r.actionRequired === true,\n  amount: r.amount || null,\n  teacher: r.teacher || null,\n  course: r.class || null,\n  source_hint: r.source_hint || null,\n  confidence: (typeof r.confidence === 'number' ? r.confidence : null),\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n} }));\n"
+        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\n// stable per-EMAIL identity (msgId) — the \"Delete Prior\" node clears this email's\n// old rows before insert, so re-processing/retries replace rather than duplicate.\nconst source_msg_id = String(src.messageId || `${src.from || ''}|${src.subject || ''}|${src.date || ''}`);\nreturn arr.map(r => ({ json: {\n  source_msg_id,\n  type: r.type || 'info',\n  title: r.title || '',\n  due_at: r.dueAt || null,\n  student: r.student || 'unknown',\n  action_required: r.actionRequired === true,\n  amount: r.amount || null,\n  teacher: r.teacher || null,\n  course: r.class || null,\n  source_hint: r.source_hint || null,\n  confidence: (typeof r.confidence === 'number' ? r.confidence : null),\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n} }));\n"
       }
     },
     {
-      "id": "A4EB0239-D0E0-4825-96E0-D24D018465E4",
+      "id": "C2CDAA6E-B030-497D-B1A3-F63D811A2303",
       "name": "Store",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
@@ -128,8 +152,8 @@
         },
         "columns": {
           "mappingMode": "autoMapInputData",
-          "value": {},
           "matchingColumns": [],
+          "value": {},
           "schema": []
         },
         "options": {}
@@ -155,6 +179,17 @@
       ]
     },
     "Ensure Table": {
+      "main": [
+        [
+          {
+            "node": "Delete Prior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Prior": {
       "main": [
         [
           {

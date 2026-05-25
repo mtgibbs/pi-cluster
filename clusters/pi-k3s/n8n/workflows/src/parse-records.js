@@ -9,8 +9,11 @@ if (s >= 0 && e > s) {
 }
 if (!Array.isArray(arr)) arr = [];
 const src = ($('Inbound Mail Webhook').first().json.body) || {};
-// normalize to the intake_items column names (snake_case); coerce types
+// stable per-EMAIL identity (msgId) — the "Delete Prior" node clears this email's
+// old rows before insert, so re-processing/retries replace rather than duplicate.
+const source_msg_id = String(src.messageId || `${src.from || ''}|${src.subject || ''}|${src.date || ''}`);
 return arr.map(r => ({ json: {
+  source_msg_id,
   type: r.type || 'info',
   title: r.title || '',
   due_at: r.dueAt || null,
