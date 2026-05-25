@@ -5,7 +5,7 @@
   },
   "nodes": [
     {
-      "id": "4FD799BD-55FB-42E9-BF85-397E4CE5509F",
+      "id": "5C40DAEC-EE01-4BA7-ACA9-6687F29A76D3",
       "name": "Inbound Mail Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -13,7 +13,7 @@
         0,
         0
       ],
-      "webhookId": "8CC130C8-E6B0-41BE-BCDE-9A87ECFC0DFE",
+      "webhookId": "56E63D6A-0C73-4626-9128-A79F7604746C",
       "parameters": {
         "httpMethod": "POST",
         "path": "inbound-mail",
@@ -29,25 +29,47 @@
       }
     },
     {
-      "id": "7DEB2FCD-C6B5-45E1-9A85-DFC0333F3475",
+      "id": "BF3F0EDD-142E-4267-8A3B-F41CADD4055D",
+      "name": "Ensure Table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT);",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "B278A45B-2A3B-4729-B032-4EE57039074B",
       "name": "Build Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        240,
+        440,
         0
       ],
       "parameters": {
-        "jsCode": "const b = ($input.first().json.body) || {};\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info. Output ONLY a JSON array (no markdown, no commentary). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1}. Resolve relative dates against the email date. If nothing actionable, return [].`;\nconst text = String(b.text || '').slice(0, 6000);\nconst user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${text}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
+        "jsCode": "// Read the email straight from the webhook node (so an upstream Ensure-Table node\n// in the chain doesn't clobber our input).\nconst b = ($('Inbound Mail Webhook').first().json.body) || {};\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info. Output ONLY a JSON array (no markdown, no commentary). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1}. Resolve relative dates against the email date. If nothing actionable, return [].`;\nconst text = String(b.text || '').slice(0, 6000);\nconst user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${text}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
       }
     },
     {
-      "id": "700BED09-B44F-4639-8F58-29934F96C556",
+      "id": "52D927A8-31ED-4A0B-853F-1970DBD2040B",
       "name": "LiteLLM Extract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        480,
+        660,
         0
       ],
       "parameters": {
@@ -71,21 +93,68 @@
       }
     },
     {
-      "id": "AAEB5EDE-26BA-4EE0-9972-56ADEFD47F38",
+      "id": "41921730-4A88-4368-A256-68FDB39BFB8C",
       "name": "Parse Records",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        720,
+        880,
         0
       ],
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\n// stamp source metadata from the original webhook item onto every record\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\nreturn arr.map(r => ({ json: Object.assign({}, r, {\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n}) }));\n"
+        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\n// normalize to the intake_items column names (snake_case); coerce types\nreturn arr.map(r => ({ json: {\n  type: r.type || 'info',\n  title: r.title || '',\n  due_at: r.dueAt || null,\n  student: r.student || 'unknown',\n  action_required: r.actionRequired === true,\n  amount: r.amount || null,\n  teacher: r.teacher || null,\n  course: r.class || null,\n  source_hint: r.source_hint || null,\n  confidence: (typeof r.confidence === 'number' ? r.confidence : null),\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n} }));\n"
+      }
+    },
+    {
+      "id": "A4EB0239-D0E0-4825-96E0-D24D018465E4",
+      "name": "Store",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "intake_items"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
       }
     }
   ],
   "connections": {
     "Inbound Mail Webhook": {
+      "main": [
+        [
+          {
+            "node": "Ensure Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Table": {
       "main": [
         [
           {
@@ -112,6 +181,17 @@
         [
           {
             "node": "Parse Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Records": {
+      "main": [
+        [
+          {
+            "node": "Store",
             "type": "main",
             "index": 0
           }
