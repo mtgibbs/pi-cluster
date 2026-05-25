@@ -19,6 +19,13 @@ spec:
       labels:
         app: n8n-worker
     spec:
+      # Run as the NFS-owning user so the worker can WRITE the calendar share
+      # (same pattern jellyfin/immich/calendar use). n8n runs fine as an arbitrary
+      # UID; fsGroup makes the emptyDir home writable.
+      securityContext:
+        runAsUser: ${NFS_UID}
+        runAsGroup: ${NFS_GID}
+        fsGroup: ${NFS_GID}
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
