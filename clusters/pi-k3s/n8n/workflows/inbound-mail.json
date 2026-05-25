@@ -1,0 +1,56 @@
+{
+  "name": "Inbound Mail — Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inbound-mail",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "94C38443-5CF2-4E0B-867D-5585B144FBA4",
+      "name": "Inbound Mail Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "DA27282B-B8A6-4CD3-BA08-F6408B908088",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5oAV58zdOBeUJXO8",
+          "name": "inbound-mail-token"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "C3842A41-346D-42EE-91EB-4A4D41E47058",
+      "name": "Queued → Worker",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Inbound Mail Webhook": {
+      "main": [
+        [
+          {
+            "node": "Queued → Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
