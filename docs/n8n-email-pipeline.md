@@ -217,9 +217,20 @@ course, source_hint, confidence, source_channel, source_subject, source_from.
 > ⚠️ No dedup yet — replays/re-sends append duplicate rows. Add an idempotency key
 > (e.g. unique on source_from+title+due_at, or hash) before heavy use.
 
+## Exposed read API (for the dashboard / smart board)
+
+`GET https://n8n.lab.mtgibbs.dev/webhook/feed` → JSON array of `intake_items`
+(ordered by `due_at`, nulls last, limit 500). **LAN-only** (NOT on the public tunnel),
+**CORS-open** (`Access-Control-Allow-Origin: *`) so a browser app can fetch it. Workflow
+`Feed API (read intake_items)` (id `XW6Ie2Ui3AOLkjSu`), IaC in `workflows/feed-api.json`.
+> ⚠️ **No auth** (LAN-trusted v1). Add a header token + CORS preflight (OPTIONS) handling
+> before exposing beyond the LAN. This is the interim surface; the fuller Family Board API
+> (`/event`/`/task`/`/note` writes, etc.) is a separate plan.
+
 ## Remaining work
 
 1. ✅ ~~Storage~~ — done (see above).
+2. ✅ ~~Read API exposed~~ — `GET /webhook/feed` (see above).
 2. **PDF/docx branch** — fetch bytes from R2 (`r2Key`) → Extract-from-File → same extraction.
 3. **Peachjar image flyers** — fetch JPG → vision model (deferred; recurring).
 4. **Site-pointer** — detect & surface; filter signal links from tracking/footer noise.
