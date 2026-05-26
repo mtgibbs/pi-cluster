@@ -245,11 +245,26 @@ Settings → Calendar → Accounts → Add Account → Other → Add Subscribed 
 > ⚠️ The static-file-on-NFS approach was abandoned — `/cluster/calendar` isn't writable by
 > the pod (read-only-serve share). Dynamic serving sidesteps NFS entirely.
 
+## Attachment extraction (PDF) + worker hardening (DONE 2026-05-26)
+
+The intake workflow now has a **PDF attachment branch**: Pick Attachment (allowlist
+`application/pdf`, ≤10 MB) → S3 Download from R2 (`r2-intake` cred) → Extract from File
+(**text only — files are never executed**) → folds PDF text into the prompt. Graceful
+no-op for attachment-less mail. Verified: a body-empty "see attached" email yielded the
+PDF's deadlines. **`.docx` deferred** (Extract-from-File lacks it; body fallback handled the
+corpus docx). Worker container hardened: `runAsNonRoot`, drop ALL caps, no-privesc,
+RuntimeDefault seccomp — shrinks the blast radius of any parser bug. (ClamAV intentionally
+skipped — we never execute attachments, so text-extract-only + allowlist/size + hardening
+is the agreed baseline.)
+
 ## Remaining work
 
-1. ✅ ~~Storage~~ — done.
-2. ✅ ~~Read API exposed~~ — `GET /webhook/feed`.
-3. ✅ ~~Per-kid calendars~~ — dynamic ICS (see above).
+1. ✅ ~~Storage~~ · ✅ ~~Read API~~ (`/webhook/feed`) · ✅ ~~Per-kid calendars~~ (dynamic ICS) · ✅ ~~PDF attachment extraction~~.
+2. **Peachjar image flyers** → fetch JPG → vision model (deferred; recurring).
+3. **Site-pointer** → detect & surface (filter signal links from tracking noise).
+4. **ntfy push reminders** → immediate alerts for upcoming/overdue dues (calendar refresh is slow).
+5. **Canvas cross-check** (BLOCKED — school system closed) → enrich/verify student+due via CARL's Canvas creds.
+6. **Ops:** dedicated `intake_items` backup, feed auth token, a "publish n8n" helper for the Flux cascade/restart dances.
 2. **PDF/docx branch** — fetch bytes from R2 (`r2Key`) → Extract-from-File → same extraction.
 3. **Peachjar image flyers** — fetch JPG → vision model (deferred; recurring).
 4. **Site-pointer** — detect & surface; filter signal links from tracking/footer noise.
