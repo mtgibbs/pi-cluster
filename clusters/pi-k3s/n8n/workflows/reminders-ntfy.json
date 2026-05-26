@@ -1,0 +1,272 @@
+{
+  "name": "Deadline Reminders (ntfy)",
+  "nodes": [
+    {
+      "id": "106EFA4A-BC33-455C-8BAC-42C18C75784B",
+      "name": "Daily 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -120
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9F8D40D7-5173-4202-857B-1ADFC52227F1",
+      "name": "Send Now",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        120
+      ],
+      "webhookId": "2AA5130C-5CC9-4D77-B3DA-CEF5AAEF047D",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "gen-reminders",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "C6583430-2067-406C-B6EF-014EEA5A460B",
+      "name": "Ronin due-soon",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'Ronin' AS kid_label, 'deadlines-ronin' AS topic, type,title,due_at,amount FROM intake_items WHERE type IN ('event','due') AND student IN ('ronin','both') AND due_at >= now() AND due_at <= now() + interval '48 hours' ORDER BY due_at;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "441A1D79-B46B-498B-B78F-0332CED26FB2",
+      "name": "Rory due-soon",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'Rory' AS kid_label, 'deadlines-rory' AS topic, type,title,due_at,amount FROM intake_items WHERE type IN ('event','due') AND student IN ('rory','both') AND due_at >= now() AND due_at <= now() + interval '48 hours' ORDER BY due_at;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "F100428F-7284-4B8A-BBCB-035CE2575BE0",
+      "name": "Digest Ronin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Build one push digest from a kid's due-soon rows. Empty input -> no notification.\nconst rows = $input.all().map(i => i.json);\nif (!rows.length) return [];\nconst kid = rows[0].kid_label || 'Student';\nconst topic = rows[0].topic || 'deadlines';\n// Format from the stored date COMPONENTS (floating local) — avoids the UTC-midnight\n// shift that made an all-day \"May 28\" render as \"May 27 8 PM\".\nconst fmt = (s) => {\n  const m = String(s).match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/);\n  if (!m) return String(s);\n  const [, Y, Mo, D, H, Mi] = m;\n  const wd = new Date(Date.UTC(+Y, +Mo - 1, +D)).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });\n  const date = `${+Mo}/${+D}`;\n  if (H === '00' && Mi === '00') return `${wd} ${date}`;            // all-day\n  const h = +H, ap = h >= 12 ? 'PM' : 'AM', h12 = ((h + 11) % 12) + 1;\n  return `${wd} ${date}, ${h12}:${Mi} ${ap}`;                       // timed\n};\nconst lines = rows.map(r => `• ${r.type === 'due' ? 'DUE: ' : ''}${r.title} — ${fmt(r.due_at)}${r.amount ? ' (' + r.amount + ')' : ''}`);\nreturn [{ json: { kid, topic, title: `${kid}: ${rows.length} upcoming`, message: lines.join('\\n') } }];\n"
+      }
+    },
+    {
+      "id": "EDC4358B-396F-4379-AC4A-F04A52C10874",
+      "name": "Digest Rory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        120
+      ],
+      "parameters": {
+        "jsCode": "// Build one push digest from a kid's due-soon rows. Empty input -> no notification.\nconst rows = $input.all().map(i => i.json);\nif (!rows.length) return [];\nconst kid = rows[0].kid_label || 'Student';\nconst topic = rows[0].topic || 'deadlines';\n// Format from the stored date COMPONENTS (floating local) — avoids the UTC-midnight\n// shift that made an all-day \"May 28\" render as \"May 27 8 PM\".\nconst fmt = (s) => {\n  const m = String(s).match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/);\n  if (!m) return String(s);\n  const [, Y, Mo, D, H, Mi] = m;\n  const wd = new Date(Date.UTC(+Y, +Mo - 1, +D)).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });\n  const date = `${+Mo}/${+D}`;\n  if (H === '00' && Mi === '00') return `${wd} ${date}`;            // all-day\n  const h = +H, ap = h >= 12 ? 'PM' : 'AM', h12 = ((h + 11) % 12) + 1;\n  return `${wd} ${date}, ${h12}:${Mi} ${ap}`;                       // timed\n};\nconst lines = rows.map(r => `• ${r.type === 'due' ? 'DUE: ' : ''}${r.title} — ${fmt(r.due_at)}${r.amount ? ' (' + r.amount + ')' : ''}`);\nreturn [{ json: { kid, topic, title: `${kid}: ${rows.length} upcoming`, message: lines.join('\\n') } }];\n"
+      }
+    },
+    {
+      "id": "73316C0E-D9A8-494D-84CC-B3407279CF88",
+      "name": "Push Ronin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ntfy.mtgibbs.dev/{{ $json.topic }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "calendar,school"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.message }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "Gw4eOIEmkybwuctT",
+          "name": "ntfy-family"
+        }
+      }
+    },
+    {
+      "id": "49F7C6C9-ABB8-4714-A055-12E6BFEF2CE6",
+      "name": "Push Rory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ntfy.mtgibbs.dev/{{ $json.topic }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "calendar,school"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.message }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "Gw4eOIEmkybwuctT",
+          "name": "ntfy-family"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 7am": {
+      "main": [
+        [
+          {
+            "node": "Ronin due-soon",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rory due-soon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Now": {
+      "main": [
+        [
+          {
+            "node": "Ronin due-soon",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Rory due-soon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ronin due-soon": {
+      "main": [
+        [
+          {
+            "node": "Digest Ronin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rory due-soon": {
+      "main": [
+        [
+          {
+            "node": "Digest Rory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest Ronin": {
+      "main": [
+        [
+          {
+            "node": "Push Ronin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Digest Rory": {
+      "main": [
+        [
+          {
+            "node": "Push Rory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
