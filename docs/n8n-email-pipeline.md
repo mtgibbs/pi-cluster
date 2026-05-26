@@ -278,7 +278,17 @@ create auth.db; server must start first).
 3. **Site-pointer** → detect & surface (filter signal links from tracking noise).
 4. **ntfy push reminders** → immediate alerts for upcoming/overdue dues (calendar refresh is slow).
 5. **Canvas cross-check** (BLOCKED — school system closed) → enrich/verify student+due via CARL's Canvas creds.
-6. **Ops:** dedicated `intake_items` backup, feed auth token, a "publish n8n" helper for the Flux cascade/restart dances.
+6. **Ops:** ✅ ~~intake_items / n8n DB backup~~ (below) · feed auth token · a "publish n8n" helper for the Flux cascade/restart dances.
+
+## Backup / restore (DONE 2026-05-26)
+
+The `postgres-backup` CronJob (`backup-jobs`, Sundays 2:30 AM) now also `pg_dump`s the
+**n8n** database → `QNAP:/share/cluster/backups/{date}/postgres/n8n-postgres.dump` (custom
+format, compress 9). Holds all workflows + encrypted credentials + `intake_items`. Verified
+manually (533 KB dump transferred). Uses `n8n-db-password` ExternalSecret (op `n8n/db-password`).
+> **Restore:** `pg_restore -h n8n-postgresql.n8n.svc -U n8n -d n8n --clean --if-exists n8n-postgres.dump`
+> (credentials decrypt only if `N8N_ENCRYPTION_KEY` is the same — it's in 1Password `n8n/encryption-key`).
+> Note: n8n's own `~/.n8n` PVC (`n8n_n8n-data`) is separately covered by `worker2-backup`.
 2. **PDF/docx branch** — fetch bytes from R2 (`r2Key`) → Extract-from-File → same extraction.
 3. **Peachjar image flyers** — fetch JPG → vision model (deferred; recurring).
 4. **Site-pointer** — detect & surface; filter signal links from tracking/footer noise.
