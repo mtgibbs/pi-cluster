@@ -65,6 +65,25 @@ spec:
                   echo "Transferred to NAS"
                   echo ""
 
+                  # Backup n8n PostgreSQL (workflows, credentials, intake_items)
+                  echo "--- Backing up: n8n PostgreSQL ---"
+                  PGPASSWORD="${N8N_DB_PASSWORD}" pg_dump \
+                    -h n8n-postgresql.n8n.svc.cluster.local \
+                    -U n8n \
+                    -d n8n \
+                    --format=custom \
+                    --compress=9 \
+                    -f /tmp/n8n-postgres.dump
+
+                  echo "Dump created: $(ls -lh /tmp/n8n-postgres.dump)"
+
+                  rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                    /tmp/n8n-postgres.dump \
+                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"
+
+                  echo "Transferred to NAS"
+                  echo ""
+
                   # Verify backup
                   echo "--- Backup Summary ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
@@ -74,12 +93,17 @@ spec:
                   echo "PostgreSQL backup completed successfully!"
 
                   # Cleanup
-                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump
+                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump
               env:
                 - name: DB_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: immich-db-password
+                      key: password
+                - name: N8N_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: n8n-db-password
                       key: password
               volumeMounts:
                 - name: ssh-key
