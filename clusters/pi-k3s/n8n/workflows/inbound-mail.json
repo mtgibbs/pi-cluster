@@ -5,7 +5,7 @@
   },
   "nodes": [
     {
-      "id": "C9BF9EE2-30C2-42C9-AA91-34374FC527BD",
+      "id": "90FEAC56-2ED2-4F6B-BE34-F850CE4E38EC",
       "name": "Inbound Mail Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -13,7 +13,7 @@
         0,
         0
       ],
-      "webhookId": "8C704A7A-20D6-4970-825B-88154E1AF330",
+      "webhookId": "53917A78-D6B0-4E8E-90B0-95397965D154",
       "parameters": {
         "httpMethod": "POST",
         "path": "inbound-mail",
@@ -29,12 +29,12 @@
       }
     },
     {
-      "id": "5B4DE35A-4F40-4965-900F-B5A0F3E7B15F",
+      "id": "4482E537-591F-46EA-B3F0-93A303C85A48",
       "name": "Ensure Table",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        200,
+        180,
         0
       ],
       "alwaysOutputData": true,
@@ -51,12 +51,12 @@
       }
     },
     {
-      "id": "E8A2B540-870A-4D10-8C29-488CF1D5D538",
+      "id": "BE46EDDA-173E-4021-9808-42298044775E",
       "name": "Delete Prior",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        380,
+        340,
         0
       ],
       "alwaysOutputData": true,
@@ -75,25 +75,77 @@
       }
     },
     {
-      "id": "0B068F07-7757-45F1-A075-4D045378500A",
+      "id": "3D3E9C89-831E-4D23-8865-2B8D6FE31A03",
+      "name": "Pick Attachment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Pick the first SAFE attachment to extract: PDF only, <= 10MB. Everything else\n// (docx, images, archives, executables, oversized) is skipped → body fallback.\nconst atts = ((($('Inbound Mail Webhook').first().json.body) || {}).attachments) || [];\nconst MAX = 10 * 1024 * 1024;\nconst pick = atts.find(a => a && a.mimeType === 'application/pdf' && Number(a.size || 0) > 0 && Number(a.size || 0) <= MAX);\nreturn [{ json: { r2Key: pick ? pick.r2Key : '', att_filename: pick ? (pick.filename || 'attachment.pdf') : '', has_att: !!pick } }];\n"
+      }
+    },
+    {
+      "id": "CF024CFA-3E97-4241-940A-6CCA6B3216A9",
+      "name": "S3 Download",
+      "type": "n8n-nodes-base.s3",
+      "typeVersion": 1,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "bucketName": "mtgibbs-mail-attachments",
+        "fileKey": "={{ $json.r2Key }}"
+      },
+      "credentials": {
+        "s3": {
+          "id": "d0rrIuqwF7WNIpnE",
+          "name": "r2-intake"
+        }
+      }
+    },
+    {
+      "id": "48C9204C-001D-4161-A07C-2E06DEB05A16",
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        820,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      }
+    },
+    {
+      "id": "9EA2137A-A142-4D31-862A-05AEA69E0E8C",
       "name": "Build Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        560,
+        980,
         0
       ],
       "parameters": {
-        "jsCode": "// Read the email straight from the webhook node (so an upstream Ensure-Table node\n// in the chain doesn't clobber our input).\nconst b = ($('Inbound Mail Webhook').first().json.body) || {};\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info. Output ONLY a JSON array (no markdown, no commentary). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1}. Resolve relative dates against the email date. If nothing actionable, return [].`;\nconst text = String(b.text || '').slice(0, 6000);\nconst user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${text}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
+        "jsCode": "const b = ($('Inbound Mail Webhook').first().json.body) || {};\n// attachment text comes from \"Extract from File\" (runs with continueOnError; empty if no PDF)\nlet attText = '';\ntry { const e = $('Extract from File').first().json || {}; attText = String(e.text || e.data || e.extractedText || ''); } catch (err) {}\nattText = attText.slice(0, 6000);\nlet fn = '';\ntry { fn = (($('Pick Attachment').first().json) || {}).att_filename || ''; } catch (err) {}\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info, and may include an attached PDF. Output ONLY a JSON array (no markdown). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1}. Resolve relative dates against the email date. If nothing actionable, return [].`;\nconst bodyText = String(b.text || '').slice(0, 5000);\nlet user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${bodyText}`;\nif (attText.trim()) user += `\\n\\n--- ATTACHED PDF (${fn}) ---\\n${attText}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
       }
     },
     {
-      "id": "A5CF5490-A240-4018-9A87-099879F4FDEB",
+      "id": "468B8948-E195-4E89-B6C4-8F801FC40DEB",
       "name": "LiteLLM Extract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        740,
+        1140,
         0
       ],
       "parameters": {
@@ -117,12 +169,12 @@
       }
     },
     {
-      "id": "660E9561-3A83-4DC6-A48F-F5DFD76671D3",
+      "id": "106FBAB9-ED15-47D2-87F7-E328CC533738",
       "name": "Parse Records",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        920,
+        1300,
         0
       ],
       "parameters": {
@@ -130,12 +182,12 @@
       }
     },
     {
-      "id": "C2CDAA6E-B030-497D-B1A3-F63D811A2303",
+      "id": "EAE759FA-4375-4B76-A460-B7D0399B1758",
       "name": "Store",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1100,
+        1460,
         0
       ],
       "parameters": {
@@ -190,6 +242,39 @@
       ]
     },
     "Delete Prior": {
+      "main": [
+        [
+          {
+            "node": "Pick Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Attachment": {
+      "main": [
+        [
+          {
+            "node": "S3 Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S3 Download": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
       "main": [
         [
           {

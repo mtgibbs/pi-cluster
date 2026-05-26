@@ -19,6 +19,17 @@ spec:
       labels:
         app: n8n-worker
     spec:
+      # Hardening — the worker parses untrusted email attachments (PDF). Shrink the
+      # blast radius of any parser bug: non-root, no privilege escalation, no Linux
+      # capabilities, default seccomp. (readOnlyRootFilesystem left off — n8n needs a
+      # writable home; that's the n8n-home emptyDir.)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -40,6 +51,11 @@ spec:
           ports:
             - containerPort: 5678
               name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           envFrom:
             - configMapRef:
                 name: n8n-config
