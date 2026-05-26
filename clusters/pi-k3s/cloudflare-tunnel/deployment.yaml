@@ -19,7 +19,7 @@ spec:
         # the config at process start. Bump this whenever clusters/pi-k3s/cloudflare-tunnel/
         # config.yaml changes, so Flux rolls the pod and the new ingress rules take effect.
         # (Follow-up: switch to a configMapGenerator hash or a reloader sidecar to automate.)
-        config.mtgibbs.dev/reloaded-at: "2026-05-25T15:45:00Z"
+        config.mtgibbs.dev/reloaded-at: "2026-05-26T13:10:00Z"
     spec:
       # Prefer Pi 5 workers (pi3-worker-2 has limited memory)
       affinity:

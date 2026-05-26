@@ -36,6 +36,10 @@ data:
       - hostname: calendar.mtgibbs.dev
         service: http://calendar.calendar.svc.cluster.local:80
 
+      # ntfy - self-hosted push notifications (auth: deny-all + family user)
+      - hostname: ntfy.mtgibbs.dev
+        service: http://ntfy.ntfy.svc.cluster.local:80
+
       # Personal site (uncomment when ready to migrate from Heroku)
       # - hostname: mtgibbs.xyz
       #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000

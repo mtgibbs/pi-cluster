@@ -404,6 +404,24 @@ spec:
       - kind: Secret
         name: nfs-credentials
 ---
+# ntfy - self-hosted push notifications (deadline reminders from n8n)
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ntfy
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/ntfy
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
 # 20. Calendar - ICS feed server for family calendar subscriptions
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization

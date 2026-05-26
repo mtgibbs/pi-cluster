@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: ntfy
+  labels:
+    app: ntfy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ntfy
+  template:
+    metadata:
+      labels:
+        app: ntfy
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+                      - pi5-worker-2
+      initContainers:
+        # Seed the shared 'family' user + ACL (idempotent — runs every start).
+        # auth-default-access is deny-all, so only this user can read/publish.
+        - name: seed-user
+          image: binwiederhier/ntfy:v2.11.0
+          env:
+            - name: NTFY_AUTH_FILE
+              value: /var/lib/ntfy/auth.db
+            - name: FAMILY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ntfy-secret
+                  key: FAMILY_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              printf '%s\n%s\n' "$FAMILY_PASSWORD" "$FAMILY_PASSWORD" | ntfy user add --ignore-exists family || true
+              ntfy access family "deadlines-*" rw
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ntfy
+      containers:
+        - name: ntfy
+          image: binwiederhier/ntfy:v2.11.0
+          args: ["serve"]
+          env:
+            - name: NTFY_BASE_URL
+              value: "https://ntfy.mtgibbs.dev"
+            - name: NTFY_LISTEN_HTTP
+              value: ":80"
+            - name: NTFY_CACHE_FILE
+              value: /var/lib/ntfy/cache.db
+            - name: NTFY_AUTH_FILE
+              value: /var/lib/ntfy/auth.db
+            - name: NTFY_AUTH_DEFAULT_ACCESS
+              value: "deny-all"
+            - name: NTFY_BEHIND_PROXY
+              value: "true"
+            # iOS instant push: forward a wake-up to ntfy.sh -> APNs; message content
+            # is fetched from THIS server (stays self-hosted).
+            - name: NTFY_UPSTREAM_BASE_URL
+              value: "https://ntfy.sh"
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ntfy
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ntfy-data
