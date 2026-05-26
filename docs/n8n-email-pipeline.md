@@ -257,9 +257,23 @@ RuntimeDefault seccomp — shrinks the blast radius of any parser bug. (ClamAV i
 skipped — we never execute attachments, so text-extract-only + allowlist/size + hardening
 is the agreed baseline.)
 
+## Push reminders (ntfy — DONE 2026-05-26)
+
+Self-hosted **ntfy** (`clusters/pi-k3s/ntfy/`, `ntfy.mtgibbs.dev`, auth deny-all + a shared
+`family` user scoped to `deadlines-*`, iOS push via `upstream-base-url: ntfy.sh` wake-up
+relay). n8n workflow `Deadline Reminders (ntfy)` (`workflows/reminders-ntfy.json`):
+**daily 7am ET** (+ on-demand `GET /webhook/gen-reminders`, LAN) → per-kid due-soon query
+(event/due, student in kid+both, `due_at` within 48h) → digest → POST to `deadlines-<kid>`
+(basic auth, n8n cred `ntfy-family`). Empty = no push (no spam). Digest formats from date
+components to avoid the UTC-midnight shift.
+**Subscribe (per phone):** install the **ntfy app** → Add subscription → server
+`https://ntfy.mtgibbs.dev`, topic `deadlines-ronin` and/or `deadlines-rory`, login
+`family` / (op://pi-cluster/ntfy/family-password). ntfy seed: postStart hook (CLI can't
+create auth.db; server must start first).
+
 ## Remaining work
 
-1. ✅ ~~Storage~~ · ✅ ~~Read API~~ (`/webhook/feed`) · ✅ ~~Per-kid calendars~~ (dynamic ICS) · ✅ ~~PDF attachment extraction~~.
+1. ✅ ~~Storage~~ · ✅ ~~Read API~~ (`/webhook/feed`) · ✅ ~~Per-kid calendars~~ (dynamic ICS) · ✅ ~~PDF attachment extraction~~ · ✅ ~~ntfy push reminders~~.
 2. **Peachjar image flyers** → fetch JPG → vision model (deferred; recurring).
 3. **Site-pointer** → detect & surface (filter signal links from tracking noise).
 4. **ntfy push reminders** → immediate alerts for upcoming/overdue dues (calendar refresh is slow).
