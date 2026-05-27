@@ -75,6 +75,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
+| **Family Board (dashboard UI)** | `.claude/skills/family-board-ui/SKILL.md` | `board-designer` (UI) + `cluster-ops` (deploy) |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)
@@ -97,6 +98,7 @@ pi-cluster/
 ### Sub-Agents
 *   **`cluster-ops`**: The Engineer. Handles ALL kubectl/flux/terminal operations.
 *   **`recap-architect`**: The Historian. Summarizes sessions and updates docs.
+*   **`board-designer`**: The Frontend/Design specialist for the Family Board PWA. Owns `clusters/pi-k3s/family-board/index.html` + assets; designs against a local mock feed; hands deploy to `cluster-ops`. Does NOT do cluster ops.
 
 ### Slash Commands
 *   `/deploy` - Commit, push, and reconcile.
