@@ -75,7 +75,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
-| **Family Board (dashboard UI)** | `.claude/skills/family-board-ui/SKILL.md` | `board-designer` (UI) + `cluster-ops` (deploy) |
+| **Family Board (dashboard UI)** | **self-contained subtree** `clusters/pi-k3s/family-board/` (own `CLAUDE.md` + `.claude/skills/family-board-ui` + `.claude/agents/board-designer`; slated to spin off) | `cluster-ops` (deploy/verify) |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)
@@ -98,7 +98,12 @@ pi-cluster/
 ### Sub-Agents
 *   **`cluster-ops`**: The Engineer. Handles ALL kubectl/flux/terminal operations.
 *   **`recap-architect`**: The Historian. Summarizes sessions and updates docs.
-*   **`board-designer`**: The Frontend/Design specialist for the Family Board PWA. Owns `clusters/pi-k3s/family-board/index.html` + assets; designs against a local mock feed; hands deploy to `cluster-ops`. Does NOT do cluster ops.
+
+> **Project-local agent:** `board-designer` (Family Board frontend) lives *inside* its
+> project at `clusters/pi-k3s/family-board/.claude/agents/` so the subtree stays portable.
+> Because it's not in the repo-root `.claude/`, Claude Code does **not** auto-register it
+> while it lives here — it activates once the board spins off into its own repo. Until then,
+> the nested `clusters/pi-k3s/family-board/CLAUDE.md` auto-loads when working in that dir.
 
 ### Slash Commands
 *   `/deploy` - Commit, push, and reconcile.

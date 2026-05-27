@@ -11,11 +11,19 @@ it for the family (deadlines, events, school notices, things to check). **The re
 disposable; the backend is the product.** All logic lives in n8n + Postgres; the board only
 reads and renders.
 
-## Where everything lives
-- **Workspace:** `clusters/pi-k3s/family-board/` (has its own nested `CLAUDE.md` — read it).
-- **The app:** `clusters/pi-k3s/family-board/index.html` — one file, inline CSS + vanilla JS, **no build step**.
+> **Self-contained project.** Everything for the board lives in THIS directory tree
+> (`index.html`, manifests, `dev/`, `CLAUDE.md`, and this `.claude/`). Paths below are
+> relative to this project root so the whole subtree can be lifted into its own repo
+> cleanly — at which point this `.claude/` becomes the repo-root `.claude/` and the skill
+> + agent auto-register. While it lives in pi-cluster they're reference docs (the nested
+> `CLAUDE.md` still auto-loads when you work here).
+
+## Where everything lives (paths relative to this project root)
+- **The app:** `index.html` — one file, inline CSS + vanilla JS, **no build step**.
+- **Workspace context:** `CLAUDE.md` (sibling) — boundaries + the design brief.
 - **Local preview:** `dev/serve.py` (serves the board + mocks `/api/feed`), `dev/feed.sample.json`, `dev/empty.json`.
-- **Data contract:** `docs/dashboard-feed-handoff.md` — the canonical field-by-field spec.
+- **Data contract:** `dashboard-feed-handoff.md` — canonical field-by-field spec. *(Currently
+  in the cluster repo at `docs/`; bring a copy along when this spins off.)*
 
 ## Architecture
 ```
@@ -57,4 +65,4 @@ source_hint, confidence, source_channel, source_subject, source_from`
 - **No build tooling** — framework-light is a mandate (resilience). Don't introduce npm/Vite without a decision.
 - **`/api/feed` only exists behind nginx or `dev/serve.py`** — a plain `python3 -m http.server` returns 404 for it.
 - **Token never in client JS.** If you find yourself putting a secret in `index.html`, stop — it's proxied for a reason.
-- **Backend changes (new fields, write-back, filters) are n8n work** — see `docs/n8n-email-pipeline.md`, not here.
+- **Backend changes (new fields, write-back, filters) are n8n work** — see the n8n pipeline doc (`docs/n8n-email-pipeline.md` in the cluster repo), not here.

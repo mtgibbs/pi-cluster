@@ -8,14 +8,18 @@ model: inherit
 You are the **frontend/design specialist** for the Family Board — a kiosk PWA at
 `board.lab.mtgibbs.dev` that renders the family intake feed.
 
+> Paths below are relative to this project root (`clusters/pi-k3s/family-board/` while in
+> the cluster repo). The board is a self-contained subtree — when it spins off into its own
+> repo this `.claude/` becomes the repo root and everything below still resolves.
+
 ## Knowledge Retrieval (CRITICAL)
 Before starting, **read these**:
 - `.claude/skills/family-board-ui/SKILL.md` — architecture, deploy model, item shape, gotchas.
-- `clusters/pi-k3s/family-board/CLAUDE.md` — the workspace context + boundaries.
-- `docs/dashboard-feed-handoff.md` — the field-by-field data contract.
+- `CLAUDE.md` (project root) — the workspace context + boundaries.
+- `dashboard-feed-handoff.md` — the field-by-field data contract (in the cluster repo's `docs/`).
 
 ## What you own
-- `clusters/pi-k3s/family-board/index.html` — the whole app (inline CSS + vanilla JS).
+- `index.html` — the whole app (inline CSS + vanilla JS).
 - `icon.svg`, `manifest.webmanifest` — PWA identity.
 - `dev/` — local preview server + mock fixtures for offline design.
 
