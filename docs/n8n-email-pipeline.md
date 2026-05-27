@@ -206,16 +206,67 @@ Peachjar-vision → site-pointer.
 
 ## Storage (DONE 2026-05-25)
 
-Records persist to **`intake_items`** (in n8n's Postgres). The workflow has `Ensure Table`
-(CREATE TABLE IF NOT EXISTS) + `Store` (Postgres insert, autoMap). Deadline feed query:
+Records persist to **`intake_items`** (in n8n's Postgres). Node chain:
+`Ensure Table` → … → `Parse Records` → `Store` → `Collect Keys` → `Cleanup`.
+`Ensure Table` is `CREATE TABLE IF NOT EXISTS` + the `item_key` migration (column +
+NULL-tolerant unique index, **no backfill**); `Store` is a deterministic upsert
+`ON CONFLICT (item_key)`. Deadline feed query:
 ```sql
 SELECT id, due_at, type, title, student, action_required, source_subject
 FROM intake_items WHERE due_at IS NOT NULL ORDER BY due_at;
 ```
 Columns: id, received_at, type, title, due_at, student, action_required, amount, teacher,
-course, source_hint, confidence, source_channel, source_subject, source_from.
-> ⚠️ No dedup yet — replays/re-sends append duplicate rows. Add an idempotency key
-> (e.g. unique on source_from+title+due_at, or hash) before heavy use.
+course, source_hint, confidence, source_channel, source_subject, source_from, **item_key**.
+
+**Dedup = deterministic per-email upsert (2026-05-27).** `item_key` is computed **once, in
+`Parse Records` (JS) — the single source of truth** — as a plain TEXT composite (no md5, no
+`crypto`):
+```
+slug      = lower(title), non-alphanumerics → '-', collapsed, first ~40 chars
+due_date  = YYYY-MM-DD of due_at, or '' when null  (date portion verbatim, no TZ convert)
+item_key  = [ source_msg_id, type, student, due_date, amount||'', course||'', slug ].join('|')
+```
+The slug is included for **ALL** items (dated and undated) so two *distinct* same-day items
+(same `type|student|due_date`, no amount/course — e.g. two `event`s for `both`) get
+**different** keys instead of colliding. A plain TEXT composite is fine for a unique index;
+no hashing. The key deliberately **never** uses `received_at` (arrival time), and
+`source_msg_id` stays *in* the key (per-email identity is safe); cross-email semantic dedup is
+a deliberate future pass, not this.
+
+`Store` passes the JS-computed `item_key` as a bind parameter (`$15`) — it does **not**
+recompute the key in SQL (avoids JS/SQL drift). On conflict it rewrites the mutable columns +
+bumps `received_at`. **The `id` (BIGSERIAL) is therefore stable across re-extractions** — so
+per-person "seen" acks (`BACKEND-ASKS.md #1`) keyed on `intake_items.id` survive a re-parse
+instead of orphaning.
+
+**Migration is collision-proof (no backfill).** `Ensure Table` only does
+`ADD COLUMN IF NOT EXISTS item_key TEXT` + `CREATE UNIQUE INDEX IF NOT EXISTS
+intake_items_itemkey_uq ON intake_items(item_key)`. Postgres unique indexes treat NULLs as
+distinct, so pre-existing rows (item_key NULL) never collide — `Ensure Table` runs on every
+execution and **cannot halt intake**. Existing rows stay keyless until/unless their email is
+re-sent. *(Earlier drafts backfilled item_key via a SQL md5 expression that excluded title for
+dated items; two same-day rows could collide and break `CREATE UNIQUE INDEX`, halting all
+intake. That backfill is removed.)*
+
+**Cleanup gives "replace this email's items" semantics.** After `Store`, a `Collect Keys`
+Code node reads `$('Parse Records').all()` and emits one item
+`{ source_msg_id, item_keys: [...] }` (the keys produced by *this* run). `Cleanup` then runs:
+```sql
+DELETE FROM intake_items
+WHERE source_msg_id = $1
+  AND (item_key <> ALL($2::text[]) OR item_key IS NULL);
+```
+`$1` = this email's `source_msg_id`; `$2` = the run's `item_keys` array (bound as a Postgres
+`text[]`). This drops the email's previous rows that aren't in the new set — including any
+pre-change NULL-keyed rows on re-send — while matched rows keep their `id` via the upsert.
+> The old `Delete Prior` node (DELETE-by-`source_msg_id` *before* insert) was removed — it
+> re-minted ids on every re-extraction, which the ack feature can't tolerate. The
+> upsert + after-the-fact `Cleanup` preserves ids for matched items and only deletes the
+> genuinely-removed ones.
+> ⚠️ **Empty-extraction edge case:** if a re-sent email now extracts to `[]`, `Parse Records`
+> emits zero items, so `Store`/`Collect Keys`/`Cleanup` never fire and that email's *old* rows
+> are not purged. (The pre-insert `Delete Prior` covered this; the upsert design does not.)
+> Acceptable for now — re-extractions normally yield ≥1 item; revisit if it bites.
 
 ## Exposed read API (for the dashboard / smart board)
 

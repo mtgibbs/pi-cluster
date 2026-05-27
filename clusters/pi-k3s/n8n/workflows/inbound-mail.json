@@ -40,32 +40,8 @@
       "alwaysOutputData": true,
       "parameters": {
         "operation": "executeQuery",
-        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), source_msg_id TEXT, type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS source_msg_id TEXT; CREATE INDEX IF NOT EXISTS intake_items_msgid_idx ON intake_items(source_msg_id);",
+        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), source_msg_id TEXT, type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS source_msg_id TEXT; CREATE INDEX IF NOT EXISTS intake_items_msgid_idx ON intake_items(source_msg_id); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS item_key TEXT; CREATE UNIQUE INDEX IF NOT EXISTS intake_items_itemkey_uq ON intake_items(item_key);",
         "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "5bzmWi2TWDCyypLQ",
-          "name": "intake-db"
-        }
-      }
-    },
-    {
-      "id": "BE46EDDA-173E-4021-9808-42298044775E",
-      "name": "Delete Prior",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        340,
-        0
-      ],
-      "alwaysOutputData": true,
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "DELETE FROM intake_items WHERE source_msg_id = $1;",
-        "options": {
-          "queryReplacement": "={{ $('Inbound Mail Webhook').first().json.body.messageId || (($('Inbound Mail Webhook').first().json.body.from || '') + '|' + ($('Inbound Mail Webhook').first().json.body.subject || '') + '|' + ($('Inbound Mail Webhook').first().json.body.date || '')) }}"
-        }
       },
       "credentials": {
         "postgres": {
@@ -178,7 +154,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\n// stable per-EMAIL identity (msgId) — the \"Delete Prior\" node clears this email's\n// old rows before insert, so re-processing/retries replace rather than duplicate.\nconst source_msg_id = String(src.messageId || `${src.from || ''}|${src.subject || ''}|${src.date || ''}`);\nreturn arr.map(r => ({ json: {\n  source_msg_id,\n  type: r.type || 'info',\n  title: r.title || '',\n  due_at: r.dueAt || null,\n  student: r.student || 'unknown',\n  action_required: r.actionRequired === true,\n  amount: r.amount || null,\n  teacher: r.teacher || null,\n  course: r.class || null,\n  source_hint: r.source_hint || null,\n  confidence: (typeof r.confidence === 'number' ? r.confidence : null),\n  source_channel: src.envelopeTo || '',\n  source_subject: src.subject || '',\n  source_from: src.from || ''\n} }));\n"
+        "jsCode": "const resp = $input.first().json;\nlet content = (((resp.choices || [])[0] || {}).message || {}).content || '';\ncontent = content.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst s = content.indexOf('['), e = content.lastIndexOf(']');\nlet arr = [];\nif (s >= 0 && e > s) {\n  try { arr = JSON.parse(content.slice(s, e + 1)); }\n  catch (err) { arr = [{ type: 'info', title: 'PARSE_ERROR', source_hint: content.slice(0, 300), confidence: 0 }]; }\n}\nif (!Array.isArray(arr)) arr = [];\nconst src = ($('Inbound Mail Webhook').first().json.body) || {};\n// stable per-EMAIL identity (msgId) — feeds the deterministic item_key computed\n// below, the SINGLE SOURCE OF TRUTH the Store node upserts on. So re-processing/\n// retries update rows in place (stable ids) rather than duplicating or re-minting.\nconst source_msg_id = String(src.messageId || `${src.from || ''}|${src.subject || ''}|${src.date || ''}`);\n// normalized title slug: lowercase, non-alphanumerics -> '-', collapsed, first ~40 chars.\nconst slugify = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);\nreturn arr.map(r => {\n  const type = r.type || 'info';\n  const title = r.title || '';\n  const due_at = r.dueAt || null;\n  const student = r.student || 'unknown';\n  const amount = r.amount || null;\n  const course = r.class || null;\n  // due_date = YYYY-MM-DD of due_at, '' when null (date portion verbatim, no TZ convert).\n  const due_date = due_at ? String(due_at).slice(0, 10) : '';\n  // plain TEXT composite — no md5, no crypto. slug for ALL items so two distinct\n  // same-day items (same type|student|due_date) don't collapse.\n  const item_key = [source_msg_id, type, student, due_date, amount || '', course || '', slugify(title)].join('|');\n  return { json: {\n    source_msg_id,\n    type,\n    title,\n    due_at,\n    student,\n    action_required: r.actionRequired === true,\n    amount,\n    teacher: r.teacher || null,\n    course,\n    source_hint: r.source_hint || null,\n    confidence: (typeof r.confidence === 'number' ? r.confidence : null),\n    source_channel: src.envelopeTo || '',\n    source_subject: src.subject || '',\n    source_from: src.from || '',\n    item_key\n  } };\n});\n"
       }
     },
     {
@@ -191,24 +167,49 @@
         0
       ],
       "parameters": {
-        "operation": "insert",
-        "schema": {
-          "__rl": true,
-          "mode": "list",
-          "value": "public"
-        },
-        "table": {
-          "__rl": true,
-          "mode": "list",
-          "value": "intake_items"
-        },
-        "columns": {
-          "mappingMode": "autoMapInputData",
-          "matchingColumns": [],
-          "value": {},
-          "schema": []
-        },
-        "options": {}
+        "operation": "executeQuery",
+        "query": "INSERT INTO intake_items (source_msg_id, type, title, due_at, student, action_required, amount, teacher, course, source_hint, confidence, source_channel, source_subject, source_from, item_key) VALUES ($1, $2, $3, $4::timestamptz, $5, $6::boolean, $7, $8, $9, $10, $11::real, $12, $13, $14, $15) ON CONFLICT (item_key) DO UPDATE SET type = EXCLUDED.type, title = EXCLUDED.title, due_at = EXCLUDED.due_at, student = EXCLUDED.student, action_required = EXCLUDED.action_required, amount = EXCLUDED.amount, teacher = EXCLUDED.teacher, course = EXCLUDED.course, source_hint = EXCLUDED.source_hint, confidence = EXCLUDED.confidence, source_channel = EXCLUDED.source_channel, source_subject = EXCLUDED.source_subject, source_from = EXCLUDED.source_from, received_at = now() RETURNING id, item_key;",
+        "options": {
+          "queryReplacement": "={{ $json.source_msg_id }},={{ $json.type }},={{ $json.title }},={{ $json.due_at }},={{ $json.student }},={{ $json.action_required }},={{ $json.amount }},={{ $json.teacher }},={{ $json.course }},={{ $json.source_hint }},={{ $json.confidence }},={{ $json.source_channel }},={{ $json.source_subject }},={{ $json.source_from }},={{ $json.item_key }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "2F1B0C7A-9D54-4E22-8A6B-7C3E1F0A9B44",
+      "name": "Collect Keys",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Aggregate THIS run's item_keys (from Parse Records — the canonical source) into\n// one array so the Cleanup node can drop this email's previous rows not in the new set.\n// Read from Parse Records (not Store) so a no-op upsert still contributes its key.\nconst recs = $('Parse Records').all().map(i => i.json);\nconst source_msg_id = recs.length ? recs[0].source_msg_id : '';\nconst item_keys = recs.map(r => r.item_key).filter(Boolean);\nreturn [{ json: { source_msg_id, item_keys } }];\n"
+      }
+    },
+    {
+      "id": "A7E3D81C-4B26-4F90-B1D5-6E0C2A8F37E9",
+      "name": "Cleanup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1780,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM intake_items WHERE source_msg_id = $1 AND (item_key <> ALL($2::text[]) OR item_key IS NULL);",
+        "options": {
+          "queryReplacement": "={{ $json.source_msg_id }},={{ $json.item_keys }}"
+        }
       },
       "credentials": {
         "postgres": {
@@ -231,17 +232,6 @@
       ]
     },
     "Ensure Table": {
-      "main": [
-        [
-          {
-            "node": "Delete Prior",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Delete Prior": {
       "main": [
         [
           {
@@ -312,6 +302,28 @@
         [
           {
             "node": "Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store": {
+      "main": [
+        [
+          {
+            "node": "Collect Keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Keys": {
+      "main": [
+        [
+          {
+            "node": "Cleanup",
             "type": "main",
             "index": 0
           }
