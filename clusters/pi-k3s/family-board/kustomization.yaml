@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: family-board
 resources:
   - namespace.yaml
+  - external-secret.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
@@ -16,4 +17,4 @@ configMapGenerator:
       - icon.svg
   - name: family-board-nginx
     files:
-      - nginx.conf
+      - nginx.conf.template

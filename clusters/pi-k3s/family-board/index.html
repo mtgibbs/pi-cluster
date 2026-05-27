@@ -157,7 +157,9 @@
 
   <script>
     "use strict";
-    const FEED_URL = "https://n8n.lab.mtgibbs.dev/webhook/feed";
+    // Same-origin proxy — nginx injects the auth token server-side, so no token
+    // ever ships to the browser and there's no cross-origin/CORS to negotiate.
+    const FEED_URL = "/api/feed";
     const REFRESH_MS = 3 * 60 * 1000;   // poll every 3 minutes
     const TZ = "America/New_York";
 
