@@ -1,5 +1,14 @@
 # Dashboard / Smart-Board UI — Backend Handoff Brief
 
+> **STATUS (2026-05-26): BUILT & LIVE.** A v1 renderer ships in
+> `clusters/pi-k3s/family-board/` and serves at **`https://board.lab.mtgibbs.dev`**
+> (LAN, letsencrypt-prod). It's a framework-light vanilla PWA (single `index.html`)
+> on `nginx:alpine`, static files via kustomize `configMapGenerator` (hashed CMs →
+> editing `index.html` auto-rolls the pod, no annotation-bump). Renders agenda-by-day
+> + action-required emphasis + site-pointer "links to check" + info list, with
+> per-student color/filter. Handles UTC-midnight all-day items (no day-shift). This
+> brief remains the data contract; the sections below still describe the feed.
+
 **For:** the agent planning the family display (iPad / smart-board kiosk).
 **You are building the RENDERER.** The backend is done and stable — you only **read** an
 HTTP JSON feed. Per house philosophy: *the renderer is disposable, the backend is the
