@@ -5,339 +5,840 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Family Board" />
-  <meta name="theme-color" content="#0f1419" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <title>Family Board</title>
+  <meta name="apple-mobile-web-app-title" content="Family Pulse" />
+  <meta name="theme-color" content="#14110d" />
+  <title>The Family Pulse</title>
+
+  <!-- Dyslexia-first type. Atkinson Hyperlegible (Braille Institute, built to
+       disambiguate look-alike glyphs) for reading; Lexend (proven to lift reading
+       proficiency) for the big display numerals. PROTOTYPE: CDN now, self-host for prod. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
   <style>
-    /* ---- The renderer is disposable; the backend is the product. ---- */
+    /* =========================================================================
+       THE FAMILY PULSE — a warm, living canvas for the home.
+       Aesthetic: "hearth at dusk." Warm near-black, a slow aurora breathing
+       underneath, each person a glow of their own color. Art when idle, a
+       control surface when touched. Reads across a kitchen; tuned for dyslexia.
+       ========================================================================= */
+
     :root {
-      --bg: #0f1419;
-      --panel: #1a212b;
-      --panel-2: #222c38;
-      --text: #e7edf3;
-      --muted: #8b9bb0;
-      --line: #2c3849;
-      --accent: #4aa3ff;
-      --ronin: #4aa3ff;   /* blue   */
-      --rory: #c77dff;    /* purple */
-      --both: #4ade80;    /* green  */
-      --unknown: #8b9bb0; /* gray   */
-      --action: #ff6b6b;  /* red, needs a human */
+      /* --- warm dark "hearth" canvas --- */
+      --bg:        #14110d;   /* warm near-black, like a dim kitchen at dusk */
+      --bg-2:      #1c1813;
+      --surface:   #221d16;   /* card */
+      --surface-2: #2b251c;   /* raised */
+      --line:      #392f23;   /* warm hairline */
+      --text:      #f6efe3;   /* warm paper-white */
+      --muted:     #b6a890;   /* warm sand */
+      --faint:     #7d715d;
+
+      /* --- the four players (defaults; a pref service will let them choose) --- */
+      --julia:  #34d399;  /* green  */
+      --matt:   #fb923c;  /* orange */
+      --ronin:  #38bdf8;  /* blue   */
+      --rory:   #c084fc;  /* purple */
+
+      --alert:  #fb7185;  /* coral — needs a human */
+      --gold:   #f5c563;  /* due / money accent */
+
+      /* type */
+      --display: "Lexend", system-ui, sans-serif;
+      --read: "Atkinson Hyperlegible", system-ui, sans-serif;
+
+      --r: 20px;          /* card radius */
+      --pop: cubic-bezier(.34, 1.56, .64, 1);  /* springy "pop" */
     }
-    * { box-sizing: border-box; }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; padding: 0; height: 100%; }
+
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: var(--read);
+      font-size: clamp(15px, 1.05vw, 18px);
+      line-height: 1.5;
+      letter-spacing: 0.006em;            /* a touch of air for dyslexic reading */
       -webkit-font-smoothing: antialiased;
-      font-size: clamp(15px, 1.6vw, 19px);
-      line-height: 1.4;
-    }
-    .wrap { max-width: 1400px; margin: 0 auto; padding: env(safe-area-inset-top) 18px 40px; }
-
-    /* ---- Header ---- */
-    header {
-      display: flex; align-items: baseline; justify-content: space-between;
-      flex-wrap: wrap; gap: 8px;
-      padding: 18px 4px 14px; border-bottom: 2px solid var(--line); margin-bottom: 18px;
-    }
-    header h1 { font-size: 1.6em; margin: 0; letter-spacing: -0.02em; }
-    .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 1.05em; }
-    .status { font-size: 0.8em; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--both); }
-    .dot.stale { background: var(--action); }
-    .dot.loading { background: var(--accent); animation: pulse 1s infinite; }
-    @keyframes pulse { 50% { opacity: 0.3; } }
-
-    /* ---- Filter chips ---- */
-    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-    .chip {
-      border: 1px solid var(--line); background: var(--panel); color: var(--muted);
-      padding: 8px 16px; border-radius: 999px; font-size: 0.9em; cursor: pointer;
-      user-select: none; -webkit-tap-highlight-color: transparent; transition: all .12s;
-    }
-    .chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: var(--panel-2); }
-    .chip .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-
-    /* ---- Layout columns ---- */
-    .columns { display: grid; grid-template-columns: 1fr; gap: 22px; }
-    @media (min-width: 900px) { .columns { grid-template-columns: 2fr 1fr; } }
-
-    section h2 {
-      font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.08em;
-      color: var(--muted); margin: 0 0 12px; font-weight: 600;
+      overflow-x: hidden;
+      position: relative;
+      min-height: 100%;
     }
 
-    /* ---- Day groups ---- */
-    .day { margin-bottom: 22px; }
-    .day-label {
-      position: sticky; top: 0; background: var(--bg); padding: 6px 0;
-      font-size: 1.05em; font-weight: 700; color: var(--text);
-      border-bottom: 1px solid var(--line); margin-bottom: 10px; z-index: 2;
-    }
-    .day-label .rel { color: var(--muted); font-weight: 400; font-size: 0.82em; margin-left: 8px; }
-    .day-label.today { color: var(--accent); }
-    .day-label.overdue { color: var(--action); }
+    /* ---- The breathing aurora: the "pulse." Big soft blobs in each person's
+            color, drifting slowly under everything. This is the soul of it. ---- */
+    .aurora { position: fixed; inset: -25% -15%; z-index: 0; filter: blur(100px); opacity: .4; pointer-events: none; transition: opacity 1.4s ease; }
+    .aurora b { position: absolute; width: 58vmax; height: 58vmax; border-radius: 50%; mix-blend-mode: screen; }
+    .aurora .a1 { background: radial-gradient(circle, var(--julia), transparent 62%); top: -14%; left: -6%;  animation: drift1 34s ease-in-out infinite; }
+    .aurora .a2 { background: radial-gradient(circle, var(--matt),  transparent 62%); top: 8%;   right: -12%; animation: drift2 41s ease-in-out infinite; }
+    .aurora .a3 { background: radial-gradient(circle, var(--ronin), transparent 62%); bottom: -18%; left: 12%; animation: drift3 47s ease-in-out infinite; }
+    .aurora .a4 { background: radial-gradient(circle, var(--rory),  transparent 62%); bottom: -10%; right: 4%; animation: drift4 38s ease-in-out infinite; }
+    @keyframes drift1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(8vw,5vh) scale(1.15)} }
+    @keyframes drift2 { 0%,100%{transform:translate(0,0) scale(1.1)} 50%{transform:translate(-6vw,7vh) scale(.92)} }
+    @keyframes drift3 { 0%,100%{transform:translate(0,0) scale(.95)} 50%{transform:translate(5vw,-6vh) scale(1.18)} }
+    @keyframes drift4 { 0%,100%{transform:translate(0,0) scale(1.05)} 50%{transform:translate(-7vw,-4vh) scale(.9)} }
 
-    /* ---- Item cards ---- */
-    .item {
-      background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--unknown);
-      border-radius: 12px; padding: 13px 15px; margin-bottom: 10px;
-      display: flex; gap: 12px; align-items: flex-start;
-    }
-    .item.s-ronin { border-left-color: var(--ronin); }
-    .item.s-rory { border-left-color: var(--rory); }
-    .item.s-both { border-left-color: var(--both); }
-    .item.action { box-shadow: inset 0 0 0 1px var(--action); }
-    .item .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85em; min-width: 64px; padding-top: 2px; }
-    .item .body { flex: 1; min-width: 0; }
-    .item .title { font-weight: 600; font-size: 1.05em; }
-    .item .meta { color: var(--muted); font-size: 0.82em; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
-    .badge {
-      display: inline-block; font-size: 0.72em; padding: 2px 8px; border-radius: 6px;
-      background: var(--panel-2); color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .badge.who-ronin { color: var(--ronin); }
-    .badge.who-rory { color: var(--rory); }
-    .badge.who-both { color: var(--both); }
-    .badge.act { background: rgba(255,107,107,0.15); color: var(--action); }
-    .badge.amt { background: rgba(74,222,128,0.13); color: var(--both); }
+    /* grain/texture so flat areas aren't dead */
+    .grain { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .035;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
-    /* ---- Side panels ---- */
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; }
-    .panel.links { border-color: rgba(74,163,255,0.4); }
-    .link-item { padding: 9px 0; border-bottom: 1px solid var(--line); }
-    .link-item:last-child { border-bottom: none; }
-    .link-item .title { font-weight: 600; }
-    .link-item .sub { color: var(--muted); font-size: 0.82em; margin-top: 2px; }
-    .info-item { padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.92em; }
-    .info-item:last-child { border-bottom: none; }
+    .wrap { position: relative; z-index: 2; max-width: 1140px; margin: 0 auto;
+      padding: calc(env(safe-area-inset-top) + 16px) clamp(16px, 3vw, 34px) 48px; }
 
-    .empty { color: var(--muted); font-style: italic; padding: 10px 2px; }
-    a { color: var(--accent); text-decoration: none; }
+    /* ===================== MASTHEAD ===================== */
+    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 6px 4px 20px; }
+    .mast .kicker { font-family: var(--display); font-weight: 300; font-size: .82em; letter-spacing: .42em; text-transform: uppercase; color: var(--faint); margin: 0 0 2px 3px; }
+    .mast h1 { font-family: var(--display); font-weight: 600; font-size: clamp(1.7em, 3.4vw, 2.4em); line-height: .96; margin: 0; letter-spacing: -.02em;
+      background: linear-gradient(110deg, var(--text) 30%, var(--muted)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .now { text-align: right; }
+    .now .date { font-family: var(--display); font-weight: 500; font-size: 1.05em; color: var(--muted); }
+    .now .time { font-family: var(--display); font-weight: 700; font-size: clamp(1.6em, 4vw, 2.4em); font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; }
+    .heartbeat { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--julia); margin-left: 10px; vertical-align: middle;
+      box-shadow: 0 0 0 0 var(--julia); animation: beat 2.6s ease-in-out infinite; }
+    .heartbeat.stale { background: var(--alert); animation: none; box-shadow: 0 0 12px var(--alert); }
+    @keyframes beat { 0%,100%{ box-shadow: 0 0 0 0 rgba(52,211,153,.55);} 50%{ box-shadow: 0 0 0 9px rgba(52,211,153,0);} }
+    .statusline { width: 100%; text-align: right; font-size: .76em; color: var(--faint); margin-top: 2px; letter-spacing: .02em; }
+
+    /* ===================== FAMILY BAR (who's at the table) ===================== */
+    .family { display: flex; gap: clamp(8px, 1.4vw, 18px); justify-content: center; flex-wrap: wrap; padding: 4px 0 14px; }
+    .seat-big { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; cursor: pointer; padding: 5px 9px; border-radius: 16px; transition: transform .18s var(--pop), background .2s; }
+    .seat-big:active { transform: scale(.94); }
+    .seat-big.active { background: var(--surface); }
+    .seat-big.active .avatar { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--pc), 0 0 36px -2px var(--pc); }
+    .avatar { position: relative; width: clamp(44px, 5vw, 58px); height: clamp(44px, 5vw, 58px); border-radius: 50%;
+      display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: clamp(1.05em, 2vw, 1.45em);
+      color: var(--bg); border: 3px solid; }
+    .avatar::after { content:""; position:absolute; inset:-3px; border-radius:50%; box-shadow: 0 0 26px -2px var(--pc, currentColor); opacity:.6; animation: glow 4s ease-in-out infinite; }
+    @keyframes glow { 0%,100%{opacity:.45} 50%{opacity:.85} }
+    .seat-big .nm { font-family: var(--display); font-weight: 500; font-size: .82em; color: var(--muted); }
+    .badge-count { position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px;
+      background: var(--alert); color: #2a0e12; font-family: var(--display); font-weight: 700; font-size: .56em; display: grid; place-items: center; border: 2px solid var(--bg); }
+    /* per-person color binding */
+    .p-julia { color: var(--julia); --pc: var(--julia); } .p-julia .avatar { background: var(--julia); border-color: var(--julia); }
+    .p-matt  { color: var(--matt);  --pc: var(--matt);  } .p-matt  .avatar { background: var(--matt);  border-color: var(--matt); }
+    .p-ronin { color: var(--ronin); --pc: var(--ronin); } .p-ronin .avatar { background: var(--ronin); border-color: var(--ronin); }
+    .p-rory  { color: var(--rory);  --pc: var(--rory);  } .p-rory  .avatar { background: var(--rory);  border-color: var(--rory); }
+
+    /* the active viewer's banner */
+    .viewer-note { text-align: center; font-family: var(--display); font-weight: 400; font-size: .86em; color: var(--muted); margin: -4px auto 14px; letter-spacing: .01em; }
+    .viewer-note:empty { display: none; }
+    .viewer-note b { font-weight: 700; }
+
+    /* ===================== LANE SWITCHER ===================== */
+    .lanes { display: flex; gap: 6px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px; margin: 0 0 18px; width: fit-content; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .lanes::-webkit-scrollbar { display: none; }
+    .lane-btn { appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-family: var(--display); font-weight: 500;
+      font-size: clamp(.92em, 1.7vw, 1.08em); padding: 12px clamp(16px, 3vw, 30px); border-radius: 999px; white-space: nowrap; transition: color .2s, background .25s; letter-spacing: .01em; }
+    .lane-btn .ct { font-size: .8em; opacity: .65; margin-left: 7px; font-variant-numeric: tabular-nums; }
+    .lane-btn[aria-selected="true"] { color: var(--bg); background: var(--text); }
+
+    /* ===================== CONTENT ===================== */
+    main { min-height: 50vh; }
+    .lane-view { display: none; animation: laneIn .42s ease both; }
+    .lane-view.on { display: block; }
+    @keyframes laneIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    /* Single column inside a width-capped main column — cards fill their column
+       (no internal void) without becoming a wall-wide banner. */
+    .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+
+    .daygroup { margin-bottom: 30px; }
+    .day-head { display: flex; align-items: baseline; gap: 12px; margin: 0 4px 14px; }
+    .day-head .d { font-family: var(--display); font-weight: 700; font-size: clamp(1.05em, 1.8vw, 1.4em); letter-spacing: -.01em; }
+    .day-head .rel { font-family: var(--display); font-weight: 500; font-size: .8em; padding: 4px 12px; border-radius: 999px; background: var(--surface); color: var(--muted); }
+    .day-head.today .d   { color: var(--julia); }
+    .day-head.today .rel { background: rgba(52,211,153,.16); color: var(--julia); }
+    .day-head.overdue .d, .day-head.overdue .rel { color: var(--alert); }
+    .day-head.overdue .rel { background: rgba(251,113,133,.16); }
+
+    /* ---- the card ---- */
+    .card { position: relative; background: linear-gradient(180deg, var(--surface), var(--bg-2)); border: 1px solid var(--line);
+      border-radius: 16px; padding: 15px 16px 14px; overflow: hidden; opacity: 0; transform: translateY(14px); animation: cardIn .5s var(--pop) forwards; }
+    @keyframes cardIn { to { opacity: 1; transform: none; } }
+    .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--for, var(--faint)); }
+    .card.alert { box-shadow: inset 0 0 0 1px rgba(251,113,133,.5), 0 6px 30px -12px rgba(251,113,133,.5); }
+
+    .card .when { font-family: var(--display); font-weight: 600; font-size: .88em; color: var(--muted); font-variant-numeric: tabular-nums; margin-bottom: 5px; display: flex; align-items: center; gap: 9px; padding-right: 78px; }
+    .card .when .clk { color: var(--gold); }
+    .card .ttl { font-weight: 700; font-size: clamp(1.04em, 1.5vw, 1.26em); line-height: 1.26; max-width: 28ch; margin: 0 0 9px; padding-right: 78px; }
+    .card .tags { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+    .tag { font-family: var(--display); font-weight: 500; font-size: .76em; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); color: var(--muted); letter-spacing: .02em; display: inline-flex; align-items: center; gap: 5px; }
+    .tag.for { color: var(--for); background: color-mix(in srgb, var(--for) 16%, transparent); }
+    .tag.act { color: var(--alert); background: rgba(251,113,133,.15); font-weight: 700; }
+    .tag.amt { color: var(--gold); background: rgba(245,197,99,.14); font-weight: 700; }
+    .src { font-size: .82em; color: var(--faint); font-style: italic; margin: -6px 0 14px; max-width: 46ch; }
+
+    /* ---- the 4-player ack quadrant ---- */
+    /* acks tucked into the card's top-right corner — no vertical footprint */
+    .acks { position: absolute; top: 12px; right: 12px; z-index: 2; }
+    .quad { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .seat { appearance: none; cursor: pointer; width: 33px; height: 33px; border-radius: 9px; display: grid; place-items: center;
+      font-family: var(--display); font-weight: 700; font-size: .82em; background: transparent; color: var(--c);
+      border: 2px solid color-mix(in srgb, var(--c) 45%, transparent); transition: transform .14s var(--pop); position: relative; }
+    .seat:active { transform: scale(.86); }
+    .seat .ck { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(.4); }
+    .seat.seen { background: var(--c); color: var(--bg); border-color: var(--c); box-shadow: 0 0 18px -4px var(--c); }
+    /* the flip-pop */
+    .seat.pop { animation: pop .42s var(--pop); }
+    @keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.28) rotate(-4deg); } 70% { transform: scale(.92); } 100% { transform: scale(1); } }
+    .seat.unpop { animation: unpop .3s ease; }
+    @keyframes unpop { 0% { transform: scale(1);} 50%{ transform: scale(.8);} 100%{ transform: scale(1);} }
+    .seat.s-julia { --c: var(--julia); } .seat.s-matt { --c: var(--matt); }
+    .seat.s-ronin { --c: var(--ronin); } .seat.s-rory { --c: var(--rory); }
+
+    /* link & info cards a touch different */
+    .card.link .ttl { display: flex; align-items: center; gap: 10px; }
+    .card.link .ttl::before { content: "↗"; font-family: var(--display); color: var(--ronin); }
+    .card.info { background: linear-gradient(180deg, var(--bg-2), var(--bg)); }
+
+    /* empty states — must look intentional, never broken */
+    .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty .big { font-family: var(--display); font-weight: 300; font-size: clamp(1.4em, 4vw, 2.2em); margin-bottom: 8px; color: var(--text); }
+    .empty .em { font-size: 2.4em; display: block; margin-bottom: 14px; opacity: .8; }
+    .empty.mini { padding: 18px 6px 6px; text-align: left; font-size: .96em; }
+
+    /* "Seen" fold — marked items tucked one tap away, faded when opened */
+    details.fold { margin-top: 22px; border-top: 1px solid var(--line); }
+    details.fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px;
+      font-family: var(--display); font-weight: 500; font-size: 1em; color: var(--muted); padding: 16px 6px; -webkit-tap-highlight-color: transparent; }
+    details.fold > summary::-webkit-details-marker { display: none; }
+    details.fold > summary::before { content: "▸"; transition: transform .22s ease; color: var(--faint); }
+    details.fold[open] > summary::before { transform: rotate(90deg); }
+    details.fold > summary .n { font-variant-numeric: tabular-nums; color: var(--faint); }
+    details.fold .card { animation: none; opacity: .5; transform: none; transition: opacity .2s; }
+    details.fold .card:active { opacity: .85; }
+
+    /* ===================== LAYOUT: main lanes + dinners sidebar ===================== */
+    .board { display: grid; grid-template-columns: 1fr; gap: 24px; }
+    @media (min-width: 1000px) { .board { grid-template-columns: minmax(0, 640px) 320px; gap: 28px; justify-content: center; align-items: start; } }
+    .side { display: grid; gap: 18px; }
+    @media (min-width: 1000px) { .side { position: sticky; top: 14px; } }
+
+    /* ---- side widget: the dinner menu (a TODO of meals) ---- */
+    .widget { background: linear-gradient(180deg, var(--surface), var(--bg-2)); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 18px 16px; }
+    .whead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .whead h2 { font-family: var(--display); font-weight: 600; font-size: 1.18em; letter-spacing: -.01em; color: var(--text); margin: 0; text-transform: none; }
+    .whead .prog { font-family: var(--display); font-weight: 500; font-size: .78em; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    .menu-list { display: grid; gap: 3px; margin-bottom: 12px; }
+    .meal-row { display: flex; align-items: center; gap: 12px; padding: 9px 6px; border-radius: 12px; transition: background .15s; }
+    .meal-row:hover { background: var(--surface-2); }
+    .check { flex: none; width: 28px; height: 28px; border-radius: 9px; border: 2px solid var(--line); background: transparent; cursor: pointer;
+      display: grid; place-items: center; color: var(--bg); font-weight: 700; transition: transform .15s var(--pop), background .15s, border-color .15s; }
+    .check:active { transform: scale(.84); }
+    .check.on { background: var(--matt); border-color: var(--matt); }
+    .check .tick { opacity: 0; transform: scale(.4); transition: opacity .15s, transform .2s var(--pop); }
+    .check.on .tick { opacity: 1; transform: none; }
+    .meal-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--text); font-family: var(--read);
+      font-weight: 600; font-size: 1.02em; cursor: pointer; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meal-row.eaten .meal-name { text-decoration: line-through; color: var(--faint); font-weight: 400; }
+    .lk { flex: none; background: none; border: 0; color: var(--ronin); font-size: 1.15em; cursor: pointer; padding: 2px 4px; }
+    .lk.off { visibility: hidden; }
+    .add-meal { width: 100%; background: var(--bg-2); border: 1px dashed var(--line); border-radius: 12px; color: var(--text); font-family: var(--read); font-size: 1em; padding: 12px 14px; }
+    .add-meal::placeholder { color: var(--faint); }
+    .add-meal:focus { outline: none; border-style: solid; border-color: var(--matt); }
+
+    /* edit sheet — bottom sheet for editing a meal */
+    .sheet { position: fixed; inset: 0; z-index: 20; display: grid; place-items: end center; background: rgba(8,6,4,.55); opacity: 0; transition: opacity .25s ease; }
+    .sheet:not([hidden]) { opacity: 1; }
+    .sheet[hidden] { display: none; }
+    .sheet-card { width: min(560px, 94vw); background: var(--surface); border: 1px solid var(--line); border-bottom: 0;
+      border-radius: 26px 26px 0 0; padding: 26px 22px calc(26px + env(safe-area-inset-bottom)); transform: translateY(24px); transition: transform .3s var(--pop); }
+    .sheet:not([hidden]) .sheet-card { transform: none; }
+    .sheet h3 { font-family: var(--display); font-weight: 600; font-size: 1.4em; margin: 0; letter-spacing: -.01em; }
+    .sheet .sub { color: var(--muted); font-size: .9em; margin: 4px 0 20px; }
+    .field { display: block; margin-bottom: 14px; }
+    .field span { display: block; font-family: var(--display); font-weight: 500; font-size: .74em; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 7px; }
+    .field input { width: 100%; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; color: var(--text); font-family: var(--read); font-size: 1.08em; padding: 14px; }
+    .field input:focus { outline: none; border-color: var(--matt); }
+    .sheet-actions { display: flex; gap: 10px; margin-top: 22px; }
+    .btn { appearance: none; border: 0; border-radius: 12px; padding: 15px; font-family: var(--display); font-weight: 600; font-size: 1.04em; cursor: pointer; }
+    .btn.save { flex: 1; background: var(--matt); color: var(--bg); }
+    .btn.ghost { flex: 1; background: var(--surface-2); color: var(--muted); }
+    .btn.clear { background: none; color: var(--alert); padding: 15px 16px; }
+
+    /* ===================== ART MODE (the screensaver that's worth watching) ====
+       On idle, the whole board fades out and a living poster fades in over the
+       swelled aurora: a giant clock, the next thing coming up, the day's pulse —
+       crossfading slowly, with the four of them floating below. ============== */
+    body.idle .wrap   { opacity: 0; pointer-events: none; transition: opacity 1.6s ease; }
+    body.idle .aurora { opacity: 1; }
+    body.idle .aurora b { animation-duration: 64s, 70s, 78s, 68s; }  /* slow the drift for calm */
+
+    #art { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity 1.8s ease; }
+    body.idle #art { opacity: 1; }
+
+    .art-scene { position: absolute; left: 0; right: 0; top: 46%; transform: translateY(-50%) scale(1.05);
+      text-align: center; padding: 0 7vw; opacity: 0; transition: opacity 2.2s ease, transform 2.4s ease; }
+    .art-scene.active { opacity: 1; transform: translateY(-50%) scale(1); }
+
+    .art-clock { font-family: var(--display); font-weight: 200; font-size: clamp(5.5em, 23vw, 17em); line-height: .86;
+      letter-spacing: -.04em; font-variant-numeric: tabular-nums;
+      background: linear-gradient(180deg, var(--text) 35%, var(--muted)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .art-date { font-family: var(--display); font-weight: 300; font-size: clamp(1.3em, 3.6vw, 2.4em); color: var(--muted); letter-spacing: .05em; margin-top: .15em; }
+
+    .art-kicker { font-family: var(--display); font-weight: 300; letter-spacing: .42em; text-transform: uppercase;
+      font-size: clamp(.82em, 1.8vw, 1.15em); color: var(--faint); margin-bottom: .55em; }
+    .art-next-ttl { font-family: var(--display); font-weight: 600; font-size: clamp(2.3em, 7.5vw, 5.4em); line-height: 1.05;
+      letter-spacing: -.02em; max-width: 17ch; margin: 0 auto; text-shadow: 0 0 50px color-mix(in srgb, var(--for) 45%, transparent); }
+    .art-next-when { font-family: var(--display); font-weight: 400; font-size: clamp(1.15em, 3.2vw, 2em); color: var(--for); margin-top: .65em; letter-spacing: .01em; }
+    .art-big-num { font-family: var(--display); font-weight: 200; font-size: clamp(8em, 32vw, 24em); line-height: .78; color: var(--alert); text-shadow: 0 0 70px rgba(251,113,133,.45); }
+
+    .art-orbs { position: absolute; bottom: 8vh; left: 0; right: 0; display: flex; justify-content: center; gap: clamp(22px, 6vw, 74px); }
+    .art-orb { display: block; animation: float 9s ease-in-out infinite; }
+    .art-orb .avatar { width: clamp(48px, 7vw, 76px); height: clamp(48px, 7vw, 76px); font-size: clamp(1em, 2.4vw, 1.7em); }
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-18px); } }
+
+    .idle-hint { position: fixed; left: 0; right: 0; bottom: 24px; text-align: center; z-index: 6; font-family: var(--display);
+      color: var(--faint); font-size: .8em; letter-spacing: .16em; text-transform: uppercase; opacity: 0; transition: opacity 1.4s ease; pointer-events: none; }
+    body.idle .idle-hint { opacity: .55; animation: hintpulse 4s ease-in-out infinite; }
+    @keyframes hintpulse { 50% { opacity: .18; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .aurora b, .heartbeat, .avatar::after, .card, .lane-view, .seat.pop, .seat.unpop, .idle-hint, .art-orb { animation: none !important; }
+      .card { opacity: 1; transform: none; }
+      .art-scene { transition: opacity 1s ease !important; transform: translateY(-50%) !important; }
+      .art-scene.active { transform: translateY(-50%) !important; }
+    }
   </style>
 </head>
 <body>
+  <div class="aurora"><b class="a1"></b><b class="a2"></b><b class="a3"></b><b class="a4"></b></div>
+  <div class="grain"></div>
+
   <div class="wrap">
     <header>
-      <h1>Family Board</h1>
-      <div class="clock" id="clock"></div>
-      <div class="status">
-        <span class="dot loading" id="dot"></span>
-        <span id="status-text">Loading…</span>
+      <div class="mast">
+        <p class="kicker">The Gibbs Family</p>
+        <h1>Today's Pulse</h1>
       </div>
+      <div class="now">
+        <div class="date" id="date">—</div>
+        <div class="time" id="time">—<span class="heartbeat" id="beat"></span></div>
+      </div>
+      <div class="statusline" id="status">waking up…</div>
     </header>
 
-    <div class="filters" id="filters">
-      <button class="chip" data-who="all" aria-pressed="true">Everyone</button>
-      <button class="chip" data-who="ronin" aria-pressed="false"><span class="swatch" style="background:var(--ronin)"></span>Ronin</button>
-      <button class="chip" data-who="rory" aria-pressed="false"><span class="swatch" style="background:var(--rory)"></span>Rory</button>
-      <button class="chip" data-who="both" aria-pressed="false"><span class="swatch" style="background:var(--both)"></span>Both</button>
-    </div>
+    <nav class="family" id="family" aria-label="Family members"></nav>
+    <div class="viewer-note" id="viewerNote"></div>
 
-    <div class="columns">
-      <section>
-        <h2>Agenda &amp; Deadlines</h2>
-        <div id="agenda"></div>
-      </section>
-      <aside>
-        <section class="panel links">
-          <h2>Links to Check</h2>
-          <div id="links"></div>
-        </section>
-        <section class="panel">
-          <h2>Good to Know</h2>
-          <div id="info"></div>
-        </section>
+    <div class="board">
+      <div class="board-main">
+        <div class="lanes" role="tablist" id="lanes">
+          <button class="lane-btn" role="tab" aria-selected="true"  data-lane="events">Happening<span class="ct" id="ct-events"></span></button>
+          <button class="lane-btn" role="tab" aria-selected="false" data-lane="needs">Good to Know<span class="ct" id="ct-needs"></span></button>
+          <button class="lane-btn" role="tab" aria-selected="false" data-lane="links">Read Later<span class="ct" id="ct-links"></span></button>
+        </div>
+        <main>
+          <div class="lane-view on" id="lane-events"></div>
+          <div class="lane-view"    id="lane-needs"></div>
+          <div class="lane-view"    id="lane-links"></div>
+        </main>
+      </div>
+      <aside class="side">
+        <section class="widget" id="menu"></section>
       </aside>
     </div>
   </div>
 
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="art" aria-hidden="true"></div>
+  <div class="idle-hint">touch to wake</div>
+
   <script>
-    "use strict";
-    // Same-origin proxy — nginx injects the auth token server-side, so no token
-    // ever ships to the browser and there's no cross-origin/CORS to negotiate.
-    const FEED_URL = "/api/feed";
-    const REFRESH_MS = 3 * 60 * 1000;   // poll every 3 minutes
-    const TZ = "America/New_York";
+  "use strict";
+  /* ===========================================================================
+     THE FAMILY PULSE — design preview (prototype).
+     Reads the same /api/feed contract. Acks are stubbed in localStorage so the
+     interaction feels real; the backend write-path is BACKEND-ASKS.md #1.
+     =========================================================================== */
 
-    let activeWho = "all";
-    let lastItems = [];
+  const FEED_URL   = "/api/feed";
+  const REFRESH_MS = 3 * 60 * 1000;
+  const TZ         = "America/New_York";
+  const IDLE_MS    = 90 * 1000;     // go to "art mode" after 90s untouched
 
-    // --- Date helpers -------------------------------------------------------
-    // All-day items are stored at UTC midnight (T00:00:00.000Z). Converting
-    // those to ET would shift them a day earlier, so we detect midnight-UTC and
-    // render them as a plain date. Timed items convert to America/New_York.
-    function isAllDay(iso) {
-      return /T00:00:00(\.000)?Z$/.test(iso);
-    }
-    function parseDue(iso) {
-      if (!iso) return null;
-      const d = new Date(iso);
-      if (isNaN(d)) return null;
-      return { date: d, allDay: isAllDay(iso) };
-    }
-    // A stable YYYY-MM-DD key in the right frame (UTC for all-day, ET for timed).
-    function dayKey(p) {
-      const opts = p.allDay
-        ? { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" }
-        : { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" };
-      const parts = new Intl.DateTimeFormat("en-CA", opts).format(p.date); // en-CA => YYYY-MM-DD
-      return parts;
-    }
-    function todayKey() {
-      return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    }
-    function dayLabel(key) {
-      const [y, m, d] = key.split("-").map(Number);
-      const dt = new Date(Date.UTC(y, m - 1, d));
-      return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(dt);
-    }
-    function relLabel(key) {
-      const t = todayKey();
-      if (key === t) return "Today";
-      const a = new Date(key + "T00:00:00Z"), b = new Date(t + "T00:00:00Z");
-      const days = Math.round((a - b) / 86400000);
-      if (days === 1) return "Tomorrow";
-      if (days === -1) return "Yesterday";
-      if (days < 0) return Math.abs(days) + " days ago";
-      if (days < 7) return "in " + days + " days";
-      return "";
-    }
-    function timeLabel(p) {
-      if (p.allDay) return "All day";
-      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(p.date);
-    }
+  // Roster — aged order. Hardcoded for now (BACKEND-ASKS.md #2 + #3 make it real).
+  const PEOPLE = [
+    { id: "julia", name: "Julia", short: "Ju" },
+    { id: "matt",  name: "Matt",  short: "Ma" },
+    { id: "ronin", name: "Ronin", short: "Ro" },
+    { id: "rory",  name: "Rory",  short: "Ry" },
+  ];
 
-    function esc(s) {
-      return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let lastItems = [];
+  let activeLane = "events";
+  let viewer = null;               // active viewer (person id) — "tap to be me"; null = shared board
+  let acks = {};   // id -> Set(person), hydrated from the feed (item.acks)
+  let menu = [];   // board_menu rows, loaded from /api/menu
+
+  // ---- acks: hydrated from the feed, toggled via POST /api/ack -------------
+  function hydrateAcks(items) {
+    acks = {};
+    for (const it of items) if (Array.isArray(it.acks) && it.acks.length) acks[it.id] = new Set(it.acks);
+  }
+  function isSeen(id, person) { const s = acks[id]; return !!(s && s.has(person)); }
+  function setSeen(id, person, seen) {
+    const s = acks[id] || (acks[id] = new Set());
+    if (seen) s.add(person); else { s.delete(person); if (!s.size) delete acks[id]; }
+  }
+  async function postAck(id, person) {
+    const res = await fetch("/api/ack", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: Number(id), person }) });
+    if (!res.ok) throw new Error("ack " + res.status);
+    const data = await res.json();
+    const row = Array.isArray(data) ? data[0] : data;
+    return !!(row && row.seen);
+  }
+
+  // ---- date helpers (carried over — the all-day trap is real) -------------
+  function isAllDay(iso) { return /T00:00:00(\.000)?Z$/.test(iso); }
+  function parseDue(iso) { if (!iso) return null; const d = new Date(iso); if (isNaN(d)) return null; return { date: d, allDay: isAllDay(iso) }; }
+  function dayKey(p) {
+    const opts = p.allDay ? { timeZone: "UTC" } : { timeZone: TZ };
+    return new Intl.DateTimeFormat("en-CA", { ...opts, year: "numeric", month: "2-digit", day: "2-digit" }).format(p.date);
+  }
+  function todayKey() { return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+  function dayLabel(key) { const [y,m,d] = key.split("-").map(Number); const dt = new Date(Date.UTC(y, m-1, d));
+    return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(dt); }
+  function relLabel(key) {
+    const t = todayKey(); if (key === t) return "Today";
+    const days = Math.round((new Date(key+"T00:00:00Z") - new Date(t+"T00:00:00Z")) / 86400000);
+    if (days === 1) return "Tomorrow"; if (days === -1) return "Yesterday";
+    if (days < 0) return Math.abs(days) + " days ago";
+    if (days < 7) return "in " + days + " days"; return "";
+  }
+  function timeLabel(p) { return p.allDay ? "All day" : new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(p.date); }
+  // Every card carries a date: due_at when it has one, else the email's received_at.
+  function receivedLabel(it) {
+    if (!it.received_at) return "";
+    const d = new Date(it.received_at); if (isNaN(d)) return "";
+    const key = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+    const rel = relLabel(key);
+    if (rel === "Today" || rel === "Yesterday") return "Added " + rel.toLowerCase();
+    return "Added " + new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "short", day: "numeric" }).format(d);
+  }
+  function byReceivedDesc(a, b) { return new Date(b.received_at || 0) - new Date(a.received_at || 0); }
+
+  // ---- dinners menu: a TODO of meals; backed by /api/menu (board_menu) -------
+  async function apiMenu(payload) {
+    const res = await fetch("/api/menu", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error("menu " + res.status);
+    return res.json();
+  }
+  async function loadMenu() {
+    try { const rows = await apiMenu({ action: "list" }); menu = Array.isArray(rows) ? rows : []; }
+    catch { /* keep last-known menu */ }
+    renderMenu();
+  }
+  const mealById = id => menu.find(m => String(m.id) === String(id));
+
+  function renderMenu() {
+    const eaten = menu.filter(m => m.eaten).length;
+    let html = '<div class="whead"><h2>On the Menu</h2>' +
+      (menu.length ? '<span class="prog">'+eaten+' of '+menu.length+' eaten</span>' : '') + '</div>';
+    html += '<div class="menu-list">';
+    if (!menu.length) html += '<div class="empty mini">No dinners yet — add one below.</div>';
+    for (const m of menu) {
+      html += '<div class="meal-row'+(m.eaten?' eaten':'')+'" data-id="'+m.id+'">' +
+        '<button class="check'+(m.eaten?' on':'')+'" data-act="eat" aria-label="Mark eaten"><span class="tick">✓</span></button>' +
+        '<span class="meal-name" data-act="edit">'+esc(m.meal)+'</span>' +
+        '<button class="lk'+(m.recipe_url?'':' off')+'" data-act="open" aria-label="Open recipe">↗</button>' +
+      '</div>';
     }
-    function whoLabel(s) { return s === "both" ? "Both" : s === "ronin" ? "Ronin" : s === "rory" ? "Rory" : "?"; }
+    html += '</div>';
+    html += '<input class="add-meal" id="addMeal" type="text" placeholder="+ add a dinner" autocomplete="off">';
+    document.getElementById("menu").innerHTML = html;
+  }
 
-    // --- Rendering ----------------------------------------------------------
-    function matchesWho(item) {
-      if (activeWho === "all") return true;
-      // "both" items belong to each kid's view; exact match otherwise.
-      return item.student === activeWho || item.student === "both";
-    }
+  function openMealSheet(id) {
+    const m = mealById(id) || { meal: "", recipe_url: "" };
+    const sheet = document.getElementById("sheet");
+    sheet.innerHTML = '<div class="sheet-card">' +
+      '<h3>Edit dinner</h3>' +
+      '<div class="sub">Rename it, add a Paprika (or any) recipe link, or remove it.</div>' +
+      '<label class="field"><span>Dinner</span><input id="f-meal" type="text" value="'+esc(m.meal)+'"></label>' +
+      '<label class="field"><span>Recipe link (optional)</span><input id="f-url" type="url" inputmode="url" placeholder="paste a recipe link" value="'+esc(m.recipe_url || "")+'"></label>' +
+      '<div class="sheet-actions">' +
+        '<button class="btn clear" data-act="delete">Delete</button>' +
+        '<button class="btn ghost" data-act="cancel">Cancel</button>' +
+        '<button class="btn save" data-act="save">Save</button>' +
+      '</div></div>';
+    sheet.dataset.id = id;
+    sheet.hidden = false;
+    setTimeout(() => { const f = document.getElementById("f-meal"); if (f) f.focus(); }, 60);
+  }
+  function closeSheet() { const s = document.getElementById("sheet"); s.hidden = true; s.innerHTML = ""; delete s.dataset.id; }
 
-    function render(items) {
-      const agenda = document.getElementById("agenda");
-      const linksEl = document.getElementById("links");
-      const infoEl = document.getElementById("info");
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
 
-      const visible = items.filter(matchesWho);
-      const AGENDA_TYPES = new Set(["event", "due", "assignment"]);
+  // who an item is *about* (feed `student` axis — distinct from who ack'd it)
+  function forColor(student) { return ({ ronin:"var(--ronin)", rory:"var(--rory)" })[student] || "var(--faint)"; }
+  function forLabel(student) { return ({ ronin:"Ronin", rory:"Rory", both:"Both kids", unknown:"Whole family?" })[student] || "Whole family"; }
 
-      // --- Agenda: dated items grouped by day ---
-      const dated = visible
-        .map(it => ({ it, p: parseDue(it.due_at) }))
-        .filter(x => x.p && AGENDA_TYPES.has(x.it.type))
-        .sort((a, b) => a.p.date - b.p.date);
+  // ---- the ack quadrant ----------------------------------------------------
+  function quadHTML(id) {
+    return '<div class="acks"><div class="quad" data-id="'+id+'">' +
+      PEOPLE.map(p => {
+        const seen = isSeen(id, p.id) ? " seen" : "";
+        return '<button class="seat s-'+p.id+seen+'" data-person="'+p.id+'" aria-pressed="'+(seen?'true':'false')+'" aria-label="'+esc(p.name)+'" title="'+esc(p.name)+'">'+p.short+'</button>';
+      }).join("") + "</div></div>";
+  }
 
+  function unseenCountFor(person) {
+    // items "for" this kid (or the whole family) that this person hasn't ack'd
+    return lastItems.filter(it => {
+      const s = it.student;
+      const relevant = s === person || s === "both" || s === "unknown" || (person === "matt" || person === "julia");
+      return relevant && !isSeen(it.id, person);
+    }).length;
+  }
+
+  // ---- cards ---------------------------------------------------------------
+  function agendaCard(it, p) {
+    const fc = forColor(it.student);
+    return '<article class="card'+(it.action_required?' alert':'')+'" style="--for:'+fc+'">' +
+      '<div class="when">'+(p.allDay?'':'<span class="clk">🕑</span>')+esc(timeLabel(p))+'</div>' +
+      '<h3 class="ttl">'+esc(it.title)+'</h3>' +
+      '<div class="tags">' + tagsFor(it) + '</div>' +
+      (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
+      quadHTML(it.id) + '</article>';
+  }
+  function infoCard(it) {
+    const fc = forColor(it.student), rl = receivedLabel(it);
+    return '<article class="card info'+(it.action_required?' alert':'')+'" style="--for:'+fc+'">' +
+      (rl ? '<div class="when">'+esc(rl)+'</div>' : '') +
+      '<h3 class="ttl">'+esc(it.title)+'</h3>' +
+      '<div class="tags">' + tagsFor(it) + '</div>' +
+      quadHTML(it.id) + '</article>';
+  }
+  function linkCard(it) {
+    const fc = forColor(it.student), rl = receivedLabel(it);
+    return '<article class="card link'+(it.action_required?' alert':'')+'" style="--for:'+fc+'">' +
+      (rl ? '<div class="when">'+esc(rl)+'</div>' : '') +
+      '<h3 class="ttl">'+esc(it.title)+'</h3>' +
+      '<div class="tags">' + tagsFor(it) + '</div>' +
+      (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
+      quadHTML(it.id) + '</article>';
+  }
+  function tagsFor(it) {
+    let t = '<span class="tag for">'+esc(forLabel(it.student))+'</span>';
+    if (it.action_required) t += '<span class="tag act">! needs you</span>';
+    if (it.amount)  t += '<span class="tag amt">'+esc(it.amount)+'</span>';
+    if (it.course)  t += '<span class="tag">'+esc(it.course)+'</span>';
+    if (it.teacher) t += '<span class="tag">'+esc(it.teacher)+'</span>';
+    return t;
+  }
+
+  // True only when there's an active viewer AND they've marked this item — that's
+  // the one case we fold it away. No viewer = shared board, nothing hides.
+  function foldedForViewer(id) { return viewer && isSeen(id, viewer); }
+
+  // ---- render --------------------------------------------------------------
+  function render() {
+    const AGENDA = new Set(["event","due","assignment"]);
+
+    // ---------- HAPPENING: dated agenda grouped by day; seen ones folded ----------
+    const datedAll = lastItems.map(it => ({ it, p: parseDue(it.due_at) }))
+      .filter(x => x.p && AGENDA.has(x.it.type)).sort((a,b) => a.p.date - b.p.date);
+    const datedShown = datedAll.filter(x => !foldedForViewer(x.it.id));
+    const datedSeen  = datedAll.filter(x =>  foldedForViewer(x.it.id));
+
+    let html = "";
+    if (!datedAll.length) {
+      html = emptyState("🌤️", "The calendar's clear", "Nothing scheduled right now.");
+    } else {
       const groups = new Map();
-      for (const x of dated) {
-        const k = dayKey(x.p);
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k).push(x);
-      }
-
+      for (const x of datedShown) { const k = dayKey(x.p); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
       const tk = todayKey();
-      let html = "";
-      if (groups.size === 0) {
-        html = '<div class="empty">Nothing on the calendar. 🎉</div>';
-      } else {
-        for (const [key, rows] of groups) {
-          const cls = key === tk ? "today" : (key < tk ? "overdue" : "");
-          const rel = relLabel(key);
-          html += '<div class="day"><div class="day-label ' + cls + '">' + esc(dayLabel(key)) +
-                  (rel ? '<span class="rel">' + esc(rel) + "</span>" : "") + "</div>";
-          for (const { it, p } of rows) html += itemCard(it, p);
-          html += "</div>";
-        }
+      if (!groups.size) html += '<div class="empty mini">You\'re all caught up — what you\'ve marked is tucked below.</div>';
+      let i = 0;
+      for (const [key, rows] of groups) {
+        const cls = key === tk ? "today" : (key < tk ? "overdue" : "");
+        const rel = relLabel(key);
+        html += '<section class="daygroup"><div class="day-head '+cls+'"><span class="d">'+esc(dayLabel(key))+'</span>'+
+          (rel?'<span class="rel">'+esc(rel)+'</span>':'')+'</div><div class="grid">';
+        for (const { it, p } of rows) html += stagger(agendaCard(it, p), i++);
+        html += '</div></section>';
       }
-      agenda.innerHTML = html;
+      html += foldHTML(datedSeen.map(x => agendaCard(x.it, x.p)));
+    }
+    document.getElementById("lane-events").innerHTML = html;
 
-      // --- Links to check: site-pointers ---
-      const links = visible.filter(it => it.type === "site-pointer");
-      linksEl.innerHTML = links.length ? links.map(it =>
-        '<div class="link-item"><div class="title">' + esc(it.title) + '</div>' +
-        '<div class="sub">' + badge(it) + (it.source_hint ? esc(it.source_hint) : "") + "</div></div>"
-      ).join("") : '<div class="empty">No portals to check.</div>';
+    // ---------- GOOD TO KNOW: info + undated, newest first ----------
+    const needs = lastItems.filter(it => it.type === "info" || (!it.due_at && it.type !== "site-pointer")).sort(byReceivedDesc);
+    renderLane("lane-needs", needs, infoCard, false, emptyState("🧠", "Nothing to note", "FYIs and reminders land here."));
 
-      // --- Good to know: info + any undated leftovers ---
-      const info = visible.filter(it => it.type === "info" || (!it.due_at && it.type !== "site-pointer"));
-      infoEl.innerHTML = info.length ? info.map(it =>
-        '<div class="info-item">' + badge(it) + esc(it.title) + "</div>"
-      ).join("") : '<div class="empty">Nothing here.</div>';
+    // ---------- READ LATER: site-pointers, newest first ----------
+    const links = lastItems.filter(it => it.type === "site-pointer").sort(byReceivedDesc);
+    renderLane("lane-links", links, linkCard, true, emptyState("🔖", "No links waiting", "Portals & sign-ups to read later show up here."));
+
+    renderMenu();
+
+    setCount("ct-events",  datedShown.length);
+    setCount("ct-needs",   needs.filter(it => !foldedForViewer(it.id)).length);
+    setCount("ct-links",   links.filter(it => !foldedForViewer(it.id)).length);
+
+    renderFamily();
+    renderViewerNote();
+  }
+
+  // shared renderer for the two flat (non-grouped) lanes
+  function renderLane(elId, all, cardFn, three, emptyHTML) {
+    const shown = all.filter(it => !foldedForViewer(it.id));
+    const seen  = all.filter(it =>  foldedForViewer(it.id));
+    let html = "";
+    if (!all.length) html = emptyHTML;
+    else {
+      if (shown.length) html += '<div class="grid'+(three?' three':'')+'">' + shown.map((it,i) => stagger(cardFn(it), i)).join("") + '</div>';
+      else html += '<div class="empty mini">You\'re all caught up — what you\'ve marked is tucked below.</div>';
+      html += foldHTML(seen.map(it => cardFn(it)));
+    }
+    document.getElementById(elId).innerHTML = html;
+  }
+
+  function foldHTML(cards) {
+    if (!cards.length) return "";
+    return '<details class="fold"><summary>Seen by you <span class="n">('+cards.length+')</span></summary>' +
+      '<div class="grid">' + cards.join("") + '</div></details>';
+  }
+
+  function stagger(cardHTML, i) { return cardHTML.replace('class="card', 'style="animation-delay:'+(i*55)+'ms" data-x class="card'); }
+  function emptyState(em, big, sub) { return '<div class="empty"><span class="em">'+em+'</span><div class="big">'+big+'</div><div>'+sub+'</div></div>'; }
+  function setCount(id, n) { document.getElementById(id).textContent = n || ""; }
+
+  function renderFamily() {
+    document.getElementById("family").innerHTML = PEOPLE.map(p => {
+      const n = unseenCountFor(p.id);
+      const active = viewer === p.id ? " active" : "";
+      return '<button class="seat-big p-'+p.id+active+'" data-person="'+p.id+'">' +
+        '<span class="avatar">'+esc(p.short)+(n?'<span class="badge-count">'+n+'</span>':'')+'</span>' +
+        '<span class="nm">'+esc(p.name)+'</span></button>';
+    }).join("");
+  }
+
+  function renderViewerNote() {
+    const el = document.getElementById("viewerNote");
+    if (!viewer) { el.innerHTML = ""; return; }
+    const p = PEOPLE.find(x => x.id === viewer);
+    el.innerHTML = 'Showing <b style="color:var(--'+viewer+')">'+esc(p.name)+'’s</b> view — what you’ve marked is tucked away · tap '+esc(p.name)+' again to leave';
+  }
+
+  // ---- interactions --------------------------------------------------------
+  document.getElementById("lanes").addEventListener("click", e => {
+    const b = e.target.closest(".lane-btn"); if (!b) return;
+    setLane(b.dataset.lane);
+  });
+  function setLane(lane) {
+    activeLane = lane;
+    document.querySelectorAll(".lane-btn").forEach(x => x.setAttribute("aria-selected", x.dataset.lane === lane));
+    document.querySelectorAll(".lane-view").forEach(v => v.classList.toggle("on", v.id === "lane-"+lane));
+  }
+
+  // ack toggle (event-delegated, optimistic, with the flip-pop) → POST /api/ack
+  document.querySelector("main").addEventListener("click", async e => {
+    const seat = e.target.closest(".seat"); if (!seat) return;
+    const id = seat.closest(".quad").dataset.id;
+    const person = seat.dataset.person;
+    const next = !isSeen(id, person);
+    setSeen(id, person, next);                         // optimistic
+    seat.classList.toggle("seen", next);
+    seat.setAttribute("aria-pressed", next ? "true" : "false");
+    seat.classList.remove("pop","unpop"); void seat.offsetWidth;
+    seat.classList.add(next ? "pop" : "unpop");
+    // If I'm the active viewer, let the pop play, then re-render so the item
+    // tucks itself into (or back out of) my "Seen" fold.
+    if (viewer === person) setTimeout(render, 380); else renderFamily();
+    try {
+      const seen = await postAck(id, person);          // reconcile with server truth
+      if (seen !== next) { setSeen(id, person, seen); seat.classList.toggle("seen", seen); renderFamily(); if (viewer === person) render(); }
+    } catch {
+      setSeen(id, person, !next);                       // revert on failure
+      seat.classList.toggle("seen", !next); seat.setAttribute("aria-pressed", String(!next));
+      setStatus("offline — change not saved", true);
+      renderFamily(); if (viewer === person) render();
+    }
+  });
+
+  // family bar — tap your icon to "be me" (fold your seen items); tap again to leave
+  document.getElementById("family").addEventListener("click", e => {
+    const b = e.target.closest(".seat-big"); if (!b) return;
+    viewer = viewer === b.dataset.person ? null : b.dataset.person;
+    render();
+  });
+
+  // dinners menu widget — check off eaten · tap name to edit · ↗ opens recipe
+  document.getElementById("menu").addEventListener("click", async e => {
+    const btn = e.target.closest("[data-act]"); if (!btn) return;
+    const row = e.target.closest(".meal-row"); if (!row) return;
+    const m = mealById(row.dataset.id); if (!m) return;
+    if (btn.dataset.act === "eat") {
+      m.eaten = !m.eaten; renderMenu();                              // optimistic
+      try { await apiMenu({ action: "toggle", id: m.id }); } catch { m.eaten = !m.eaten; renderMenu(); }
+    } else if (btn.dataset.act === "open") {
+      if (m.recipe_url) window.open(m.recipe_url, "_blank", "noopener");
+    } else if (btn.dataset.act === "edit") { openMealSheet(m.id); }
+  });
+  // add a dinner — type + Enter
+  document.getElementById("menu").addEventListener("keydown", async e => {
+    if (e.target.id !== "addMeal" || e.key !== "Enter") return;
+    const v = e.target.value.trim(); if (!v) return;
+    e.target.value = "";
+    try { await apiMenu({ action: "add", meal: v, recipe_url: "" }); await loadMenu(); } catch {}
+    setTimeout(() => { const a = document.getElementById("addMeal"); if (a) a.focus(); }, 30);
+  });
+
+  // edit sheet (shared) — save / delete a meal
+  document.getElementById("sheet").addEventListener("click", async e => {
+    if (e.target.id === "sheet") return closeSheet();          // tap backdrop to dismiss
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    const id = document.getElementById("sheet").dataset.id, m = mealById(id);
+    if (b.dataset.act === "save" && m) {
+      const meal = document.getElementById("f-meal").value.trim();
+      const recipe_url = document.getElementById("f-url").value.trim();
+      try { await apiMenu({ action: "edit", id: m.id, meal, recipe_url }); await loadMenu(); } catch {}
+    } else if (b.dataset.act === "delete" && m) {
+      try { await apiMenu({ action: "delete", id: m.id }); await loadMenu(); } catch {}
+    }
+    closeSheet();
+  });
+
+  // ---- clock + status ------------------------------------------------------
+  function tick() {
+    const now = new Date();
+    document.getElementById("date").textContent = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" }).format(now);
+    const t = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(now);
+    const time = document.getElementById("time");
+    time.firstChild.textContent = t + " ";
+    updateArtClock();
+  }
+  function setStatus(text, stale) {
+    document.getElementById("status").textContent = text;
+    document.getElementById("beat").classList.toggle("stale", !!stale);
+  }
+
+  async function load() {
+    setStatus("refreshing…", false);
+    try {
+      const res = await fetch(FEED_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      lastItems = Array.isArray(data) ? data : [];
+      hydrateAcks(lastItems);                          // acks come from the feed now
+      render();
+      const t = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date());
+      setStatus("updated " + t + " · " + lastItems.length + " items", false);
+    } catch (err) {
+      setStatus("offline — showing last known", true);
+      if (lastItems.length) render();
+    }
+  }
+
+  // ---- keep the screen awake (Screen Wake Lock; Safari 16.4+) --------------
+  // Belt to the device-settings suspenders (Auto-Lock = Never). Re-acquired on
+  // wake/visibility because iOS drops the lock when the tab backgrounds.
+  let wakeLock = null;
+  async function keepAwake() {
+    if (!("wakeLock" in navigator)) return;
+    if (wakeLock && !wakeLock.released) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch { /* needs a user gesture first — poke() will retry on interaction */ }
+  }
+
+  // ---- art mode: a living poster that crossfades through scenes -------------
+  function nextUp() {
+    const tk = todayKey(), AGENDA = new Set(["event","due","assignment"]);
+    return lastItems.map(it => ({ it, p: parseDue(it.due_at) }))
+      .filter(x => x.p && AGENDA.has(x.it.type) && dayKey(x.p) >= tk)
+      .sort((a,b) => a.p.date - b.p.date)[0] || null;
+  }
+  function buildArtScenes() {
+    const tk = todayKey();
+    const nu = nextUp();
+    const need = lastItems.filter(it => it.action_required).length;
+    const todayN = lastItems.filter(it => { const p = parseDue(it.due_at); return p && dayKey(p) === tk; }).length;
+
+    let html = '<div class="art-scene" data-scene="clock"><div class="art-clock" id="art-time"></div><div class="art-date" id="art-date"></div></div>';
+
+    if (nu) {
+      const fc = forColor(nu.it.student);
+      const rel = relLabel(dayKey(nu.p));
+      const when = nu.p.allDay ? (rel || dayLabel(dayKey(nu.p))) : ((rel ? rel + " · " : "") + timeLabel(nu.p));
+      html += '<div class="art-scene" data-scene="next" style="--for:'+fc+'">' +
+        '<div class="art-kicker">Coming up</div>' +
+        '<div class="art-next-ttl">'+esc(nu.it.title)+'</div>' +
+        '<div class="art-next-when">'+esc(when)+' · '+esc(forLabel(nu.it.student))+'</div></div>';
     }
 
-    function badge(it) {
-      const w = it.student || "unknown";
-      return '<span class="badge who-' + w + '">' + whoLabel(w) + "</span> ";
+    const nextMeal = menu.find(m => !m.eaten);
+    if (nextMeal) {
+      html += '<div class="art-scene" data-scene="dinner" style="--for:var(--matt)">' +
+        '<div class="art-kicker">Up next for dinner</div>' +
+        '<div class="art-next-ttl">'+esc(nextMeal.meal)+'</div></div>';
     }
 
-    function itemCard(it, p) {
-      const who = it.student || "unknown";
-      const action = it.action_required ? " action" : "";
-      let meta = "";
-      meta += '<span class="badge who-' + who + '">' + whoLabel(who) + "</span>";
-      meta += '<span class="badge">' + esc(it.type) + "</span>";
-      if (it.action_required) meta += '<span class="badge act">Action needed</span>';
-      if (it.amount) meta += '<span class="badge amt">' + esc(it.amount) + "</span>";
-      if (it.course) meta += "<span>" + esc(it.course) + "</span>";
-      if (it.teacher) meta += "<span>" + esc(it.teacher) + "</span>";
-      return '<div class="item s-' + who + action + '">' +
-               '<div class="time">' + esc(timeLabel(p)) + "</div>" +
-               '<div class="body"><div class="title">' + esc(it.title) + "</div>" +
-               '<div class="meta">' + meta + "</div></div>" +
-             "</div>";
-    }
+    html += '<div class="art-scene" data-scene="pulse">' +
+      (need
+        ? '<div class="art-big-num">'+need+'</div><div class="art-kicker">'+(need===1?'thing needs a grown-up':'things need a grown-up')+'</div>'
+        : todayN
+          ? '<div class="art-big-num" style="color:var(--julia);text-shadow:0 0 70px rgba(52,211,153,.4)">'+todayN+'</div><div class="art-kicker">'+(todayN===1?'thing on today':'things on today')+'</div>'
+          : '<div class="art-next-ttl">All caught up</div><div class="art-kicker">✦ nothing pressing</div>') +
+      '</div>';
 
-    // --- Fetch loop ---------------------------------------------------------
-    function setStatus(state, text) {
-      const dot = document.getElementById("dot");
-      dot.className = "dot" + (state === "loading" ? " loading" : state === "stale" ? " stale" : "");
-      document.getElementById("status-text").textContent = text;
-    }
+    html += '<div class="art-orbs">' + PEOPLE.map((p,i) =>
+      '<span class="art-orb p-'+p.id+'" style="animation-delay:'+(i*-2.3)+'s"><span class="avatar">'+esc(p.short)+'</span></span>'
+    ).join("") + '</div>';
 
-    async function load() {
-      setStatus("loading", "Refreshing…");
-      try {
-        const res = await fetch(FEED_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const items = await res.json();
-        lastItems = Array.isArray(items) ? items : [];
-        render(lastItems);
-        const t = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date());
-        setStatus("ok", "Updated " + t);
-      } catch (err) {
-        setStatus("stale", "Offline — showing last data");
-        if (lastItems.length) render(lastItems);
-      }
-    }
+    document.getElementById("art").innerHTML = html;
+  }
+  function updateArtClock() {
+    const t = document.getElementById("art-time"); if (!t) return;
+    const now = new Date();
+    t.textContent = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(now);
+    const d = document.getElementById("art-date");
+    if (d) d.textContent = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" }).format(now);
+  }
 
-    function tickClock() {
-      document.getElementById("clock").textContent =
-        new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date());
-    }
+  let idleTimer, artTimer, artScenes = [], artIdx = 0;
+  function enterArt() {
+    if (viewer) { viewer = null; render(); }   // walked away → board returns to the shared view
+    buildArtScenes(); updateArtClock();
+    artScenes = [...document.querySelectorAll("#art .art-scene")];
+    artIdx = 0; artScenes.forEach((s,i) => s.classList.toggle("active", i === 0));
+    clearInterval(artTimer);
+    artTimer = setInterval(() => {
+      artScenes[artIdx].classList.remove("active");
+      artIdx = (artIdx + 1) % artScenes.length;
+      artScenes[artIdx].classList.add("active");
+    }, 11000);
+    document.body.classList.add("idle");
+  }
+  function wake() { document.body.classList.remove("idle"); clearInterval(artTimer); }
+  function poke() {
+    if (document.body.classList.contains("idle")) wake();
+    keepAwake();
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(enterArt, IDLE_MS);
+  }
+  ["pointerdown","touchstart"].forEach(ev => document.addEventListener(ev, poke, { passive: true }));
+  document.addEventListener("keydown", e => {
+    const typing = e.target.matches && e.target.matches("input, textarea");
+    if (!typing && (e.key === "a" || e.key === "A")) { document.body.classList.contains("idle") ? wake() : enterArt(); return; }
+    poke();
+  });
 
-    document.getElementById("filters").addEventListener("click", e => {
-      const chip = e.target.closest(".chip");
-      if (!chip) return;
-      activeWho = chip.dataset.who;
-      document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", c === chip ? "true" : "false"));
-      render(lastItems);
-    });
-
-    tickClock();
-    setInterval(tickClock, 30000);
-    load();
-    setInterval(load, REFRESH_MS);
-    // Refresh when the kiosk/tab regains focus.
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  // ---- boot ----------------------------------------------------------------
+  tick(); setInterval(tick, 20000);
+  load(); setInterval(load, REFRESH_MS);
+  loadMenu(); setInterval(loadMenu, REFRESH_MS);     // menu lives in board_menu now
+  keepAwake(); poke();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { load(); keepAwake(); } });
   </script>
 </body>
 </html>
