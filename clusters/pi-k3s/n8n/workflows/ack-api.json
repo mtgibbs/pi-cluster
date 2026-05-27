@@ -1,22 +1,22 @@
 {
-  "name": "Feed API (read intake_items)",
+  "name": "Ack API (toggle board_acks)",
   "settings": {
     "executionOrder": "v1"
   },
   "nodes": [
     {
-      "id": "6701D652-58EE-4501-9792-847872F7435D",
-      "name": "Feed Webhook",
+      "id": "F2B1A0C3-4D5E-6F70-8190-A1B2C3D4E5F6",
+      "name": "Ack Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         0,
         0
       ],
-      "webhookId": "6C5C0FDB-3557-4BC5-91AF-18AD46B3567A",
+      "webhookId": "7D8E9FA0-1B2C-3D4E-5F60-718293A4B5C6",
       "parameters": {
-        "httpMethod": "GET",
-        "path": "feed",
+        "httpMethod": "POST",
+        "path": "ack",
         "responseMode": "responseNode",
         "authentication": "headerAuth",
         "options": {}
@@ -51,18 +51,20 @@
       }
     },
     {
-      "id": "BE35730D-91D6-4305-9D3F-45C1C747A50E",
-      "name": "Get Feed",
+      "id": "B2D1E0F3-5C6D-7E80-9F10-2A3B4C5D6E7F",
+      "name": "Toggle Ack",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        460,
+        440,
         0
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT i.id, i.received_at, i.type, i.title, i.due_at, i.student, i.action_required, i.amount, i.teacher, i.course, i.source_hint, i.confidence, i.source_channel, i.source_subject, i.source_from, COALESCE(a.acks, '[]'::json) AS acks FROM intake_items i LEFT JOIN (SELECT item_id, json_agg(person ORDER BY person) AS acks FROM board_acks GROUP BY item_id) a ON a.item_id = i.id ORDER BY (i.due_at IS NULL), i.due_at LIMIT 500;",
-        "options": {}
+        "query": "WITH del AS (DELETE FROM board_acks WHERE item_id = $1::bigint AND person = $2::text RETURNING person), ins AS (INSERT INTO board_acks (item_id, person) SELECT $1::bigint, $2::text WHERE NOT EXISTS (SELECT 1 FROM del) RETURNING person) SELECT $1::bigint AS item_id, $2::text AS person, EXISTS (SELECT 1 FROM ins) AS seen;",
+        "options": {
+          "queryReplacement": "={{ $('Ack Webhook').first().json.body.item_id }},={{ $('Ack Webhook').first().json.body.person }}"
+        }
       },
       "credentials": {
         "postgres": {
@@ -72,12 +74,12 @@
       }
     },
     {
-      "id": "D1A5121E-A905-4E19-B16F-BA38669844A6",
+      "id": "C3E2F1A4-6D7E-8F90-A021-3B4C5D6E7F80",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        700,
+        660,
         0
       ],
       "parameters": {
@@ -96,7 +98,7 @@
     }
   ],
   "connections": {
-    "Feed Webhook": {
+    "Ack Webhook": {
       "main": [
         [
           {
@@ -111,14 +113,14 @@
       "main": [
         [
           {
-            "node": "Get Feed",
+            "node": "Toggle Ack",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Feed": {
+    "Toggle Ack": {
       "main": [
         [
           {

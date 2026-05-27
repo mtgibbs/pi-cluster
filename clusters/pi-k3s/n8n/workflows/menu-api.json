@@ -1,0 +1,302 @@
+{
+  "name": "Menu API (board_menu CRUD)",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "10A1B2C3-D4E5-46F7-8809-1A2B3C4D5E60",
+      "name": "Menu Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "20B2C3D4-E5F6-4708-9910-2B3C4D5E6F71",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "menu",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dgqc6ZiNll2avwOb",
+          "name": "Feed Token"
+        }
+      }
+    },
+    {
+      "id": "30C3D4E5-F6A7-4819-9A21-3C4D5E6F7082",
+      "name": "Ensure Board Menu",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS board_menu (id BIGSERIAL PRIMARY KEY, meal TEXT NOT NULL, recipe_url TEXT, eaten BOOLEAN NOT NULL DEFAULT false, position INT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "40D4E5F6-A7B8-492A-9B31-4D5E6F708193",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $('Menu Webhook').first().json.body.action }}", "rightValue": "list", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $('Menu Webhook').first().json.body.action }}", "rightValue": "add", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $('Menu Webhook').first().json.body.action }}", "rightValue": "edit", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $('Menu Webhook').first().json.body.action }}", "rightValue": "toggle", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  { "leftValue": "={{ $('Menu Webhook').first().json.body.action }}", "rightValue": "delete", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "50E5F6A7-B8C9-4A3B-9C41-5E6F70819204",
+      "name": "List Menu",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        -240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, meal, recipe_url, eaten, position, created_at FROM board_menu ORDER BY COALESCE(position, 0), created_at, id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "60F6A7B8-C9DA-4B4C-9D51-6F7081920315",
+      "name": "Add Meal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO board_menu (meal, recipe_url) VALUES ($1::text, NULLIF($2::text, '')) RETURNING id, meal, recipe_url, eaten, position, created_at;",
+        "options": {
+          "queryReplacement": "={{ $('Menu Webhook').first().json.body.meal }},={{ $('Menu Webhook').first().json.body.recipe_url }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "70A7B8C9-DAEB-4C5D-9E61-708192031426",
+      "name": "Edit Meal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE board_menu SET meal = COALESCE(NULLIF($2::text, ''), meal), recipe_url = NULLIF($3::text, '') WHERE id = $1::bigint RETURNING id, meal, recipe_url, eaten, position, created_at;",
+        "options": {
+          "queryReplacement": "={{ $('Menu Webhook').first().json.body.id }},={{ $('Menu Webhook').first().json.body.meal }},={{ $('Menu Webhook').first().json.body.recipe_url }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "80B8C9DA-EBFC-4D6E-9F71-819203142537",
+      "name": "Toggle Eaten",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE board_menu SET eaten = NOT eaten WHERE id = $1::bigint RETURNING id, meal, recipe_url, eaten, position, created_at;",
+        "options": {
+          "queryReplacement": "={{ $('Menu Webhook').first().json.body.id }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "90C9DAEB-FC0D-4E7F-A081-920314253648",
+      "name": "Delete Meal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        240
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM board_menu WHERE id = $1::bigint RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ $('Menu Webhook').first().json.body.id }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "A0DAEBFC-0D1E-4F80-A191-031425364759",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        920,
+        0
+      ],
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Menu Webhook": {
+      "main": [
+        [
+          { "node": "Ensure Board Menu", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ensure Board Menu": {
+      "main": [
+        [
+          { "node": "Route Action", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [ { "node": "List Menu", "type": "main", "index": 0 } ],
+        [ { "node": "Add Meal", "type": "main", "index": 0 } ],
+        [ { "node": "Edit Meal", "type": "main", "index": 0 } ],
+        [ { "node": "Toggle Eaten", "type": "main", "index": 0 } ],
+        [ { "node": "Delete Meal", "type": "main", "index": 0 } ]
+      ]
+    },
+    "List Menu": {
+      "main": [
+        [ { "node": "Respond", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Add Meal": {
+      "main": [
+        [ { "node": "Respond", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Edit Meal": {
+      "main": [
+        [ { "node": "Respond", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Toggle Eaten": {
+      "main": [
+        [ { "node": "Respond", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Delete Meal": {
+      "main": [
+        [ { "node": "Respond", "type": "main", "index": 0 } ]
+      ]
+    }
+  }
+}

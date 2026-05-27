@@ -20,7 +20,7 @@ spec:
         # Bump this to roll the webhook tier so it re-registers active production
         # webhooks at startup (n8n doesn't reliably propagate activations to webhook
         # pods dynamically). Treat a publish as a deployment: drain/quiesce, then bump.
-        n8n.mtgibbs.dev/restarted-at: "2026-05-24T20:05:00Z"
+        n8n.mtgibbs.dev/restarted-at: "2026-05-27T17:30:00Z"
     spec:
       affinity:
         nodeAffinity:
