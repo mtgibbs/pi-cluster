@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Family Board" />
+  <meta name="theme-color" content="#0f1419" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <title>Family Board</title>
+  <style>
+    /* ---- The renderer is disposable; the backend is the product. ---- */
+    :root {
+      --bg: #0f1419;
+      --panel: #1a212b;
+      --panel-2: #222c38;
+      --text: #e7edf3;
+      --muted: #8b9bb0;
+      --line: #2c3849;
+      --accent: #4aa3ff;
+      --ronin: #4aa3ff;   /* blue   */
+      --rory: #c77dff;    /* purple */
+      --both: #4ade80;    /* green  */
+      --unknown: #8b9bb0; /* gray   */
+      --action: #ff6b6b;  /* red, needs a human */
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      font-size: clamp(15px, 1.6vw, 19px);
+      line-height: 1.4;
+    }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: env(safe-area-inset-top) 18px 40px; }
+
+    /* ---- Header ---- */
+    header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 8px;
+      padding: 18px 4px 14px; border-bottom: 2px solid var(--line); margin-bottom: 18px;
+    }
+    header h1 { font-size: 1.6em; margin: 0; letter-spacing: -0.02em; }
+    .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 1.05em; }
+    .status { font-size: 0.8em; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--both); }
+    .dot.stale { background: var(--action); }
+    .dot.loading { background: var(--accent); animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    /* ---- Filter chips ---- */
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+    .chip {
+      border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+      padding: 8px 16px; border-radius: 999px; font-size: 0.9em; cursor: pointer;
+      user-select: none; -webkit-tap-highlight-color: transparent; transition: all .12s;
+    }
+    .chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: var(--panel-2); }
+    .chip .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+    /* ---- Layout columns ---- */
+    .columns { display: grid; grid-template-columns: 1fr; gap: 22px; }
+    @media (min-width: 900px) { .columns { grid-template-columns: 2fr 1fr; } }
+
+    section h2 {
+      font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin: 0 0 12px; font-weight: 600;
+    }
+
+    /* ---- Day groups ---- */
+    .day { margin-bottom: 22px; }
+    .day-label {
+      position: sticky; top: 0; background: var(--bg); padding: 6px 0;
+      font-size: 1.05em; font-weight: 700; color: var(--text);
+      border-bottom: 1px solid var(--line); margin-bottom: 10px; z-index: 2;
+    }
+    .day-label .rel { color: var(--muted); font-weight: 400; font-size: 0.82em; margin-left: 8px; }
+    .day-label.today { color: var(--accent); }
+    .day-label.overdue { color: var(--action); }
+
+    /* ---- Item cards ---- */
+    .item {
+      background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--unknown);
+      border-radius: 12px; padding: 13px 15px; margin-bottom: 10px;
+      display: flex; gap: 12px; align-items: flex-start;
+    }
+    .item.s-ronin { border-left-color: var(--ronin); }
+    .item.s-rory { border-left-color: var(--rory); }
+    .item.s-both { border-left-color: var(--both); }
+    .item.action { box-shadow: inset 0 0 0 1px var(--action); }
+    .item .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85em; min-width: 64px; padding-top: 2px; }
+    .item .body { flex: 1; min-width: 0; }
+    .item .title { font-weight: 600; font-size: 1.05em; }
+    .item .meta { color: var(--muted); font-size: 0.82em; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .badge {
+      display: inline-block; font-size: 0.72em; padding: 2px 8px; border-radius: 6px;
+      background: var(--panel-2); color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge.who-ronin { color: var(--ronin); }
+    .badge.who-rory { color: var(--rory); }
+    .badge.who-both { color: var(--both); }
+    .badge.act { background: rgba(255,107,107,0.15); color: var(--action); }
+    .badge.amt { background: rgba(74,222,128,0.13); color: var(--both); }
+
+    /* ---- Side panels ---- */
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; }
+    .panel.links { border-color: rgba(74,163,255,0.4); }
+    .link-item { padding: 9px 0; border-bottom: 1px solid var(--line); }
+    .link-item:last-child { border-bottom: none; }
+    .link-item .title { font-weight: 600; }
+    .link-item .sub { color: var(--muted); font-size: 0.82em; margin-top: 2px; }
+    .info-item { padding: 7px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.92em; }
+    .info-item:last-child { border-bottom: none; }
+
+    .empty { color: var(--muted); font-style: italic; padding: 10px 2px; }
+    a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Family Board</h1>
+      <div class="clock" id="clock"></div>
+      <div class="status">
+        <span class="dot loading" id="dot"></span>
+        <span id="status-text">Loading…</span>
+      </div>
+    </header>
+
+    <div class="filters" id="filters">
+      <button class="chip" data-who="all" aria-pressed="true">Everyone</button>
+      <button class="chip" data-who="ronin" aria-pressed="false"><span class="swatch" style="background:var(--ronin)"></span>Ronin</button>
+      <button class="chip" data-who="rory" aria-pressed="false"><span class="swatch" style="background:var(--rory)"></span>Rory</button>
+      <button class="chip" data-who="both" aria-pressed="false"><span class="swatch" style="background:var(--both)"></span>Both</button>
+    </div>
+
+    <div class="columns">
+      <section>
+        <h2>Agenda &amp; Deadlines</h2>
+        <div id="agenda"></div>
+      </section>
+      <aside>
+        <section class="panel links">
+          <h2>Links to Check</h2>
+          <div id="links"></div>
+        </section>
+        <section class="panel">
+          <h2>Good to Know</h2>
+          <div id="info"></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+    const FEED_URL = "https://n8n.lab.mtgibbs.dev/webhook/feed";
+    const REFRESH_MS = 3 * 60 * 1000;   // poll every 3 minutes
+    const TZ = "America/New_York";
+
+    let activeWho = "all";
+    let lastItems = [];
+
+    // --- Date helpers -------------------------------------------------------
+    // All-day items are stored at UTC midnight (T00:00:00.000Z). Converting
+    // those to ET would shift them a day earlier, so we detect midnight-UTC and
+    // render them as a plain date. Timed items convert to America/New_York.
+    function isAllDay(iso) {
+      return /T00:00:00(\.000)?Z$/.test(iso);
+    }
+    function parseDue(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (isNaN(d)) return null;
+      return { date: d, allDay: isAllDay(iso) };
+    }
+    // A stable YYYY-MM-DD key in the right frame (UTC for all-day, ET for timed).
+    function dayKey(p) {
+      const opts = p.allDay
+        ? { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" }
+        : { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" };
+      const parts = new Intl.DateTimeFormat("en-CA", opts).format(p.date); // en-CA => YYYY-MM-DD
+      return parts;
+    }
+    function todayKey() {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    }
+    function dayLabel(key) {
+      const [y, m, d] = key.split("-").map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(dt);
+    }
+    function relLabel(key) {
+      const t = todayKey();
+      if (key === t) return "Today";
+      const a = new Date(key + "T00:00:00Z"), b = new Date(t + "T00:00:00Z");
+      const days = Math.round((a - b) / 86400000);
+      if (days === 1) return "Tomorrow";
+      if (days === -1) return "Yesterday";
+      if (days < 0) return Math.abs(days) + " days ago";
+      if (days < 7) return "in " + days + " days";
+      return "";
+    }
+    function timeLabel(p) {
+      if (p.allDay) return "All day";
+      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(p.date);
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+    function whoLabel(s) { return s === "both" ? "Both" : s === "ronin" ? "Ronin" : s === "rory" ? "Rory" : "?"; }
+
+    // --- Rendering ----------------------------------------------------------
+    function matchesWho(item) {
+      if (activeWho === "all") return true;
+      // "both" items belong to each kid's view; exact match otherwise.
+      return item.student === activeWho || item.student === "both";
+    }
+
+    function render(items) {
+      const agenda = document.getElementById("agenda");
+      const linksEl = document.getElementById("links");
+      const infoEl = document.getElementById("info");
+
+      const visible = items.filter(matchesWho);
+      const AGENDA_TYPES = new Set(["event", "due", "assignment"]);
+
+      // --- Agenda: dated items grouped by day ---
+      const dated = visible
+        .map(it => ({ it, p: parseDue(it.due_at) }))
+        .filter(x => x.p && AGENDA_TYPES.has(x.it.type))
+        .sort((a, b) => a.p.date - b.p.date);
+
+      const groups = new Map();
+      for (const x of dated) {
+        const k = dayKey(x.p);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(x);
+      }
+
+      const tk = todayKey();
+      let html = "";
+      if (groups.size === 0) {
+        html = '<div class="empty">Nothing on the calendar. 🎉</div>';
+      } else {
+        for (const [key, rows] of groups) {
+          const cls = key === tk ? "today" : (key < tk ? "overdue" : "");
+          const rel = relLabel(key);
+          html += '<div class="day"><div class="day-label ' + cls + '">' + esc(dayLabel(key)) +
+                  (rel ? '<span class="rel">' + esc(rel) + "</span>" : "") + "</div>";
+          for (const { it, p } of rows) html += itemCard(it, p);
+          html += "</div>";
+        }
+      }
+      agenda.innerHTML = html;
+
+      // --- Links to check: site-pointers ---
+      const links = visible.filter(it => it.type === "site-pointer");
+      linksEl.innerHTML = links.length ? links.map(it =>
+        '<div class="link-item"><div class="title">' + esc(it.title) + '</div>' +
+        '<div class="sub">' + badge(it) + (it.source_hint ? esc(it.source_hint) : "") + "</div></div>"
+      ).join("") : '<div class="empty">No portals to check.</div>';
+
+      // --- Good to know: info + any undated leftovers ---
+      const info = visible.filter(it => it.type === "info" || (!it.due_at && it.type !== "site-pointer"));
+      infoEl.innerHTML = info.length ? info.map(it =>
+        '<div class="info-item">' + badge(it) + esc(it.title) + "</div>"
+      ).join("") : '<div class="empty">Nothing here.</div>';
+    }
+
+    function badge(it) {
+      const w = it.student || "unknown";
+      return '<span class="badge who-' + w + '">' + whoLabel(w) + "</span> ";
+    }
+
+    function itemCard(it, p) {
+      const who = it.student || "unknown";
+      const action = it.action_required ? " action" : "";
+      let meta = "";
+      meta += '<span class="badge who-' + who + '">' + whoLabel(who) + "</span>";
+      meta += '<span class="badge">' + esc(it.type) + "</span>";
+      if (it.action_required) meta += '<span class="badge act">Action needed</span>';
+      if (it.amount) meta += '<span class="badge amt">' + esc(it.amount) + "</span>";
+      if (it.course) meta += "<span>" + esc(it.course) + "</span>";
+      if (it.teacher) meta += "<span>" + esc(it.teacher) + "</span>";
+      return '<div class="item s-' + who + action + '">' +
+               '<div class="time">' + esc(timeLabel(p)) + "</div>" +
+               '<div class="body"><div class="title">' + esc(it.title) + "</div>" +
+               '<div class="meta">' + meta + "</div></div>" +
+             "</div>";
+    }
+
+    // --- Fetch loop ---------------------------------------------------------
+    function setStatus(state, text) {
+      const dot = document.getElementById("dot");
+      dot.className = "dot" + (state === "loading" ? " loading" : state === "stale" ? " stale" : "");
+      document.getElementById("status-text").textContent = text;
+    }
+
+    async function load() {
+      setStatus("loading", "Refreshing…");
+      try {
+        const res = await fetch(FEED_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const items = await res.json();
+        lastItems = Array.isArray(items) ? items : [];
+        render(lastItems);
+        const t = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date());
+        setStatus("ok", "Updated " + t);
+      } catch (err) {
+        setStatus("stale", "Offline — showing last data");
+        if (lastItems.length) render(lastItems);
+      }
+    }
+
+    function tickClock() {
+      document.getElementById("clock").textContent =
+        new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date());
+    }
+
+    document.getElementById("filters").addEventListener("click", e => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      activeWho = chip.dataset.who;
+      document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", c === chip ? "true" : "false"));
+      render(lastItems);
+    });
+
+    tickClock();
+    setInterval(tickClock, 30000);
+    load();
+    setInterval(load, REFRESH_MS);
+    // Refresh when the kiosk/tab regains focus.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  </script>
+</body>
+</html>

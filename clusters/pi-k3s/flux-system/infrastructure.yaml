@@ -564,3 +564,25 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 27. Family Board - smart-board PWA rendering the n8n intake feed (board.lab.mtgibbs.dev)
+# NOTE: deliberately NO postBuild.substituteFrom — the dashboard JS uses ${...}
+# template literals that envsubst would clobber. Static files ship as hashed
+# ConfigMaps (configMapGenerator), so edits auto-roll the pod.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: family-board
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/family-board
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
