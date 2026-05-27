@@ -279,3 +279,51 @@ sole-tenant escape hatch (full reasoning + measured data in §12).
    strips schemas.
 4. **`aimode bigctx` deliberately NOT built** — 30B@64k is niche per the benchmark; revisit only
    if a real cross-cutting spec needs it (would also require opencode `limit.context` → 64k).
+
+## 14. External: SPDD (Martin Fowler) — what we adopt / reject (2026-05-27)
+
+Source: Fowler, *Structured Prompt-Driven Development* — https://martinfowler.com/articles/structured-prompt-driven/
+Independent of us, it formalizes most of our practice; it sharpens three open decisions and
+hands us one concrete artifact. Their thesis: **prompts are first-class, version-controlled
+delivery artifacts** — "the real question isn't 'How do we generate more code?' It's how do
+we make AI-generated changes governable, reviewable, and reusable." That is our §4 premise.
+
+### Confirms us
+- **Spec-is-the-artifact, code is regenerable** — our Sean Grove framing, their core claim.
+- **Model-agnostic spec / swappable executor** — they treat it as a *caution* ("prompt drift
+  from ad hoc model swaps"); we made it a **hard law** (§3 economics: qwen-only executor, never
+  Claude-through-opencode). The intent stays locked in the spec; the executor varies. We're ahead.
+- **Functional-validation-first** (`/spdd-api-test`) ≈ our deterministic `verify.sh` gate (and
+  ours is stronger — static, offline, loop-gating, not a human-run script).
+- **"Context black holes"** (unclear domain tanks even strong models) = our §7 — and it bites our
+  weaker local models *harder*, reinforcing "the fixture, not the model, is the work."
+
+### Adopted
+- **REASONS Canvas → `specs/TEMPLATE.md` (done).** Overlaid R-E-A-S-O-N-S on our template and
+  added the dimensions we lacked: **Entities (E)**, **Approach (A)**, **Norms (N)**,
+  **Safeguards (S)**. N+S are the cross-cutting + non-negotiable layers — exactly the
+  "unspecified" space where qwen guessed badly (reused `mdi-memory` ×3; executed the wrong
+  percent example). Now there's a home to pin taste rules and invariants, each Safeguard mapping
+  to a `verify.sh` assertion where possible.
+- **Two-way sync rule → `specs/TEMPLATE.md` (done).** "When reality diverges, fix the prompt
+  first." Logic change → spec→regen; refactor → code→spec; hotfix → post-mortem back into spec +
+  Tuning log. A Norms/taste fix made in review MUST be written back or it recurs. This is our
+  drift-mitigation protocol (informs §10.5 / #7).
+
+### Informs (but does NOT resolve — these are still the user's per §10)
+- **§10.4 PR-gate / deviation #9.** Their sharpest warning is **"single-shot review
+  compression"** — one late gate makes humans skim/defer/approve-by-default. Implication for us:
+  the answer isn't "PR vs live-review," it's **two small gates** — (1) an **intent gate before
+  execution** (Claude approves the spec/canvas pre-loop — cheap, automatable, keeps the Ralph
+  loop's autonomy) plus (2) a **diff gate before merge** (human). Distributing the gate is the
+  fix; it does not require adopting their human-heaviness.
+- **§10.5 drift (#7).** The two-way sync rule above is the concrete protocol.
+
+### Rejected / tension
+- SPDD is **human-in-each-of-6-steps** (heavy, distributed pairing). Our Ralph loop targets
+  **unattended** iteration with gates only at spec-in / PR-out. We borrow their **gate placement**
+  (intent gate before code) but hold that early gate with **Claude, not a human** — autonomy
+  preserved, rubber-stamp risk removed. We do not adopt their per-step human checkpoints.
+- Their `openspdd` CLI (`/spdd-*` slash commands) is a tooling layer we don't need — our
+  `ralph-qwen.sh` + `verify.sh` + Claude-orchestration already cover generation, validation,
+  and the loop.

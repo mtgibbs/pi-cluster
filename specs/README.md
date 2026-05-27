@@ -55,6 +55,17 @@ These are the non-negotiables every spec inherits — canonical text in [`consti
 - **Agent work is PR-gated** — autonomous loops are permissive in a sandbox but
   reviewed at the repo boundary before they reach the cluster.
 
+## The spec is a REASONS Canvas
+
+[`TEMPLATE.md`](TEMPLATE.md) is structured as a **REASONS Canvas** (Fowler's
+[SPDD](https://martinfowler.com/articles/structured-prompt-driven/)) overlaid on our
+EARS + `verify.sh` discipline — **R**equirements · **E**ntities · **A**pproach ·
+**S**tructure · **O**perations · **N**orms · **S**afeguards. The two that matter most for a
+literal executor are **Norms** (cross-cutting taste/observability standards) and
+**Safeguards** (non-negotiable invariants) — the "unspecified" space where qwen otherwise
+guesses. Plus a **two-way sync rule** (fix the spec first when behavior diverges; sync code
+refactors back). Full adopt/reject rationale: `docs/research/local-coding-agent-sdd.md` §14.
+
 ## Acceptance criteria use EARS
 
 [EARS](https://alistairmavin.com/ears/) (Easy Approach to Requirements Syntax) — five
