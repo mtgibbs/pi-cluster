@@ -18,7 +18,14 @@
         "httpMethod": "GET",
         "path": "feed",
         "responseMode": "responseNode",
+        "authentication": "headerAuth",
         "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dgqc6ZiNll2avwOb",
+          "name": "Feed Token"
+        }
       }
     },
     {

@@ -19,12 +19,16 @@ product.* Hold no business logic; if the display dies, reflash and lose nothing.
 ## The one endpoint you consume
 
 ```
-GET  https://n8n.lab.mtgibbs.dev/webhook/feed
+GET  https://board.lab.mtgibbs.dev/api/feed        # what the board calls (same-origin)
+GET  https://n8n.lab.mtgibbs.dev/webhook/feed      # the upstream — now TOKEN-GATED
 ```
-- **LAN-only** (home network / the wired board). NOT public internet. The board lives on
-  the LAN, so this resolves and is reachable there.
-- **CORS-open** (`Access-Control-Allow-Origin: *`) — a browser PWA can `fetch()` it directly.
-- **Read-only.** No writes/auth yet (see [Constraints](#constraints--what-NOT-to-assume)).
+- **Token-gated (2026-05-26).** The upstream requires an `X-Feed-Token` header
+  (Header Auth). A direct call without it → **403**. The board never holds the token:
+  its nginx **proxies `/api/feed` and injects the header server-side** from a k8s
+  secret (1Password `n8n-automation/feed-token`). So the renderer just calls the
+  **same-origin `/api/feed`** — no token in client JS, no CORS to negotiate.
+- **LAN-only** (home network / the wired board). NOT public internet.
+- **Read-only.** No writes yet (see [Constraints](#constraints--what-NOT-to-assume)).
 - Returns a **JSON array** of "items" extracted from inbound family email
   (school notices, community flyers, bills, events…). Poll it (e.g. every few minutes).
 
