@@ -100,8 +100,8 @@ client still consuming the markdown blob.
 | `action_required`| bool           | Show a "do something" badge. |
 | `amount`         | string \| null | e.g. `"$25"` for `dues`. |
 | `teacher`/`course` | string \| null | When extracted (assignments). |
-| `action_url`     | string \| null | A URL the user should visit to act on this item — sign-up form, vendor page, scheduling page (e.g. an Outlook Bookings link). Literal from the source; never invented. Render as the row's primary tap target when present. |
-| `action_target`  | string \| null | A contact destination to send/reply to — typically an email address (`"TRMSResidency@fultonschools.org"`), phone number, or named office (`"Main Office"`). Literal from the source. Render as a copyable chip / `mailto:` / `tel:` when present. |
+| `action_url`     | string \| null | A URL the user should visit to act on this item — sign-up form, vendor page, scheduling page (e.g. an Outlook Bookings link). **Verified against the source email** (literal substring, with hostname fallback) before storage — if it didn't appear in the email, it gets nulled. Render as the row's primary tap target when present. |
+| `action_target`  | string \| null | A contact destination to send/reply to — typically an email address (`"TRMSResidency@fultonschools.org"`), phone number (digits-only matched to survive format variance), or named office (`"Main Office"`). **Verified against the source email** before storage. Render as a copyable chip / `mailto:` / `tel:` when present. |
 
 ### Rendering the markdown (legacy `body`)
 
@@ -244,7 +244,7 @@ A starter `digest.sample.json` body:
 
 - The digest sees `intake_items` rows only — `title`, `source_hint`, dates, `student`. **It does not see full email bodies**, so it's slightly thinner than Gemini's. Future enhancement: a sibling `intake_email_bodies` table. **Not blocking.**
 - **Soft attribution drift beyond lock 3.** Lock 3 catches *unjustified* solo mentions. The LLM can still narrate the right kids around the wrong items if multiple `student` values are present. The locks reduce mischief; visual review is still the human's last word.
-- **`action_target` false positives.** Qwen sometimes invents a plausible-looking phone number when given only an action description. The extraction prompt rule says *"literal from the source"* but it's not deterministically enforced; in practice some phones land that aren't in the email body. Flag for a future verifier-style check (regex-extract the action_target, confirm it appears in `source_hint` or `body`).
 - *(Resolved 2026-05-28)* Automatic refresh on new inbound mail is wired — `inbound-mail` pings the rebuild webhook after `Cleanup`.
 - *(Resolved 2026-05-28)* Inbound `Build Request` includes `EMAIL DATE (ISO)` + `EMAIL DAY` as anchors for relative-date resolution (e.g. *"this Friday"*).
 - *(Resolved 2026-05-28, v7-action-fields)* Schema now has `action_url` + `action_target` on `intake_items` — Bookings URLs, ClassLink launches, portal links, email/phone contacts now ride through to the feed and digest highlights.
+- *(Resolved 2026-05-28, action-field verifier)* `Parse Records` post-LLM verifier: every `action_url` and `action_target` Qwen returns must appear in the source text (email body + extracted PDF text + `source_hint`). Phones are matched **digits-only** to survive format variance (`832-731-2630` vs `(832) 731-2630` vs `8327312630`). URLs fall back to **hostname-in-source** if the literal substring doesn't match. Values that don't appear get nulled — the row still stands, just without the unverifiable target. Defense-in-depth on the prompt's *"literal from source, never invent"* rule.
