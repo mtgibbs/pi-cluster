@@ -1,6 +1,6 @@
 # Spec: Family Board — Power Drawer · L4 Connect content
 
-- **Status:** Planned (4 of 4)
+- **Status:** **Archived (never ran)** — see `family-board-drawer-1-scaffold/spec.md` §14 Tuning log.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Touches:** `clusters/pi-k3s/family-board/index.html` (only).

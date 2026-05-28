@@ -1,6 +1,6 @@
 # Spec: Family Board — Power Drawer · L2 state + keys + tap-close
 
-- **Status:** Planned (2 of 4)
+- **Status:** **Archived (never ran)** — see `family-board-drawer-1-scaffold/spec.md` §14 Tuning log for the SDD-overreach lesson that retired L1–L4.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Design / taste:** `clusters/pi-k3s/family-board/DESIGN.md`

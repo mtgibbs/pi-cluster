@@ -1,6 +1,6 @@
 # Spec: Family Board — Power Drawer · L1 scaffold
 
-- **Status:** Planned (1 of 4 sub-specs decomposed from the v0.1 monolithic `family-board-power-drawer` that stalled the loop)
+- **Status:** **Archived — SDD overreach** (see §14 Tuning log). Drawer hand-built directly on main.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Design / taste:** `clusters/pi-k3s/family-board/DESIGN.md`
@@ -129,3 +129,62 @@ None.
 ## Two-way sync rule
 If L2/L3 reveal that the §7 class/CSS shapes don't compose (e.g., `.shell` needs
 `min-height: 100vh` for the gradient to fill), fix the spec first, re-loop.
+
+## 14. Tuning log — SDD OVERREACH (archived 2026-05-28)
+
+### Outcome
+3 attempts failed verify; loop stopped for human. Diff after each attempt was clean
+(no commits made; the loop's reset reverted qwen's work). The L2–L4 sub-specs were
+**archived without running** alongside this one.
+
+### Why this spec didn't earn its keep
+This spec was meant to test the lower bound — "how small can a sub-spec be and still
+have the loop reliably one-shot it?" The answer it gave was the **upper bound on
+specificity** instead:
+
+- §7 (Norms) pinned every class name (`shell`, `drawer`, `sliver`) **and** the exact CSS
+  property values **and** the attribute names (`aria-hidden="true"`).
+- The verify gate then grepped for those literal strings — including
+  `<div class="shell">` with no attribute-tolerant `[^>]*`.
+- §9 (Task breakdown) literally dictated the markup nesting and the three CSS rule
+  bodies, character-for-character.
+
+At that level of detail, **the spec IS the source.** The executor's only job is to
+re-type what the spec already wrote. The gate then enforces that re-typing happened
+*verbatim*, which means any reasonable formatting variation (multi-line CSS instead of
+single-line, attribute reordering on a `<div>`, single vs double quotes) reads as a
+failure. You're not testing the executor's ability to satisfy a contract — you're
+testing whether it can dictate-faithfully.
+
+The user named it plainly: **"if we're building SUUUUUCH a strict outcome, aren't we
+basically just coding it already?"** Yes. At this granularity, SDD is two writes for the
+price of one, with a fragile gate as the friction tax.
+
+### The pattern that actually held today
+The SDD loop won on **behavioral changes** where the gate could test a *contract*:
+
+| Feature | Gate tested | Result |
+|---|---|---|
+| `family-board-ack-readonly` | seat receives `locked` class when viewer set; click handler refuses locked | ✓ |
+| `family-board-auto-ack-stale` v0.1 + v0.2 | SQL `CASE` projects synthesized acks; LEFT JOIN preserved | ✓ |
+| `family-board-power-drawer` (monolith) | grab-bag of "implement everything" | ✗ drift |
+| **`family-board-drawer-1-scaffold` (this one)** | "Is `<div class="shell">` in the file? Is `width: 360px` in the CSS?" | ✗ over-pinned |
+
+### Lessons banked
+1. **Static-grep gates are only suitable when the implementation tokens are intrinsic
+   to the behavior** — e.g., `aria-disabled` on a button that *must not* receive focus,
+   a SQL `interval '7 days'` that *is* the rule. Class names chosen for the gate's
+   convenience cross the line into dictation.
+2. **For UI scaffold** (HTML structure + presentational CSS), no static grep can express
+   "this renders correctly." A behavioral gate would need a headless browser (Playwright
+   etc.) — not justified for a vanilla-single-file kiosk.
+3. **The right move when a spec must over-prescribe to be testable is to skip SDD and
+   build it directly.** That's what L2–L4 *would* have hit too, just slower.
+4. **The decomposition itself wasn't wrong.** Smaller scope helps. But each "tiny task"
+   that's pure-typing isn't a SDD win — it's just bureaucracy around an edit.
+
+### Decision
+Drawer hand-built directly on main. The 4 sub-spec dirs are preserved as the lesson
+artifact (durable, version-controlled — the SDD discipline applied to itself). Future
+SDD use targets **behavioral contracts** (database, API, business rules, validation),
+not structural UI work.

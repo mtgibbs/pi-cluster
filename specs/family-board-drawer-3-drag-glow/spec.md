@@ -1,6 +1,6 @@
 # Spec: Family Board — Power Drawer · L3 drag mechanics + glow ramp
 
-- **Status:** Planned (3 of 4)
+- **Status:** **Archived (never ran)** — see `family-board-drawer-1-scaffold/spec.md` §14 Tuning log.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Touches:** `clusters/pi-k3s/family-board/index.html` (only).
