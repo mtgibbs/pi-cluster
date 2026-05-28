@@ -61,7 +61,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT i.id, i.received_at, i.type, i.title, i.due_at, i.student, i.action_required, i.amount, i.teacher, i.course, i.source_hint, i.confidence, i.source_channel, i.source_subject, i.source_from, COALESCE(a.acks, '[]'::json) AS acks FROM intake_items i LEFT JOIN (SELECT item_id, json_agg(person ORDER BY person) AS acks FROM board_acks GROUP BY item_id) a ON a.item_id = i.id ORDER BY (i.due_at IS NULL), i.due_at LIMIT 500;",
+        "query": "SELECT i.id, i.received_at, i.type, i.title, i.due_at, i.student, i.action_required, i.amount, i.teacher, i.course, i.source_hint, i.confidence, i.source_channel, i.source_subject, i.source_from, i.original_from, COALESCE(a.acks, '[]'::json) AS acks FROM intake_items i LEFT JOIN (SELECT item_id, json_agg(person ORDER BY person) AS acks FROM board_acks GROUP BY item_id) a ON a.item_id = i.id ORDER BY (i.due_at IS NULL), i.due_at LIMIT 500;",
         "options": {}
       },
       "credentials": {

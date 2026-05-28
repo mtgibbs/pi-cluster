@@ -1,6 +1,6 @@
 # Spec: Extract `original_from` from forwarded emails
 
-- **Status:** Planned (OQs resolved)
+- **Status:** **Hand-built after the loop stalled** (3 attempts) — see §14 Tuning log.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Design / taste:** `clusters/pi-k3s/family-board/DESIGN.md`
@@ -215,4 +215,51 @@ patterns from a few weeks of forwarded mail.
 ## Two-way sync rule
 If the LLM proves inconsistent at this and we add a regex fallback / change the schema /
 rename `originalFrom`, fix this spec first and regenerate. Tuning lessons from this run
-go in a v0.2 §14 entry here.
+go in §14 here.
+
+## 14. Tuning log — loop stalled at 5-file behavioral scope (2026-05-28)
+
+### Outcome
+3 attempts failed verify; loop stopped for a human. Working tree clean after each reset
+(qwen's edits were rolled back; no commits made). All 12 new markers stayed FAIL.
+**Hand-built afterward** — the feature ships, this entry banks the lesson.
+
+### Why this spec didn't earn the loop
+This was a genuine **behavioral** spec (data-flow plumbing — column add, LLM-prompt
+field, parse mapping, upsert bind, feed projection, drill-in row) — exactly the kind we
+ran the auto-ack-stale loops on and won. So the failure isn't "SDD doesn't fit
+behavioral work."
+
+What broke it was **scope × coordination**:
+- **5 files** edited surgically in one fresh-context turn.
+- A **mirror-keep rule**: changes to the `Code` node `jsCode` in `inbound-mail.json` must
+  also appear in `src/parse-records.js` and `src/build-request.js`. That's *one change,
+  two files, must match.*
+- The Store SQL edit required **four coordinated changes inside one query string**:
+  column list, `VALUES $16`, ON CONFLICT SET, queryReplacement. Editing a long
+  parameterized SQL string consistently is a precision task.
+
+Working-spec scores so far:
+
+| spec | files | result |
+|---|---|---|
+| ack-readonly | 1 | ✓ attempt 2 |
+| auto-ack-stale v0.1 / v0.2 | 1 | ✓ attempts 2 / 1 |
+| **original-from-extraction** | **5 (with mirror-keep)** | **✗ 3 attempts** |
+| power-drawer monolith | 1 (large) | ✗ 3 attempts |
+| drawer-L1 scaffold (over-pinned) | 1 (UI) | ✗ 3 attempts |
+
+The clean wins are **1 file, ≤1 cohesive edit**. Above that, the loop pays a
+coordination tax bigger than the leverage gained.
+
+### Lesson banked
+**SDD/qwen reliable scope, today, is ~1 file, ~1 coordinated edit, behavioral.** Beyond
+that — multi-file, mirror-keep, multi-edit-within-one-query — the executor stalls and
+hand-building is faster than another loop cycle. Decomposition is *available* (split this
+into schema-add, prompt-update, store-bind, feed-projection, board-row — 4-5 sub-loops),
+but in this run the user wanted shipping speed, not more loop overhead.
+
+For the next behavioral-but-multi-file spec, two paths to try:
+1. **Decompose** to one file per sub-spec (each gate green before the next).
+2. **Stay hand-built**, with the spec as the durable record of intent and the gate as
+   the post-merge truth check. (Exactly what we did here.)
