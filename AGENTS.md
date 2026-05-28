@@ -16,6 +16,11 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
   from**. Never invent URLs, ports, or UIDs — if a value isn't in the spec, it's an open
   question: flag it, don't guess.
 - **Stay in scope.** Do exactly what the spec's scope says; don't refactor adjacent things.
+- **One worktree, one branch.** You execute inside an isolated `git worktree` on a throwaway
+  branch (the operator set this up before invoking `ralph-qwen.sh`). **Before every commit:**
+  `git branch --show-current` — if it isn't the branch your task was opened on, **STOP and
+  surface it.** Never `git switch` / `git checkout` away from your branch. Never push to
+  `main`. (Full rule: `specs/constitution.md` → "Git discipline — one worktree per agent".)
 
 ## Your workflow
 

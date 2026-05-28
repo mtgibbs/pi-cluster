@@ -15,6 +15,32 @@
 - **PR-gated.** Your output is reviewed before it reaches the cluster. Optimize for a
   diff a human can verify against the spec's acceptance criteria.
 
+## Git discipline — one worktree per agent (non-negotiable)
+
+This is forward-looking: today there is one ralph loop, but qwen will fan out to a **set
+of parallel agents** (and Claude runs alongside). Shared-checkout work races on
+`git switch`/`git checkout`. The rule that lets us fan out safely:
+
+- **Each agent loop runs from its OWN `git worktree` on its own throwaway branch.** The
+  operator launches `scripts/ralph-qwen.sh` from inside that worktree — the script's
+  usage already states this. Don't run a loop from the primary checkout.
+- **Before any commit, verify the branch:** `git branch --show-current`. If it's not
+  the branch your task was opened on, STOP and ask. Committing default-branch work onto
+  a feature branch (or feature-branch work onto `main`) is just as wrong as committing
+  straight to `main`.
+- **Operator setup, the pattern:**
+  ```bash
+  git worktree add ../pi-cluster-<task> -b ralph/<task>   # isolated dir + branch
+  cd ../pi-cluster-<task>
+  scripts/ralph-qwen.sh <spec-dir>
+  ```
+- **Cherry-pick or PR back to `main` deliberately** (`PR-gated` rule above). Never push
+  the throwaway branch straight to `main`.
+- **Teardown when the task lands:** `git worktree remove --force ../pi-cluster-<task>`.
+- **Landing other work onto `main` while a worktree is in flight** (e.g. an unrelated
+  doc fix): use a *second* temporary worktree (`git worktree add /tmp/<name> main`); do
+  not `git switch main` in the primary checkout (that disturbs whoever is working there).
+
 ## House conventions (match these — do not invent your own)
 
 - **In-cluster service URLs** for service-to-service / widget calls
