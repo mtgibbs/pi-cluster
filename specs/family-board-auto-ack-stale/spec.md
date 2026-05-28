@@ -1,6 +1,6 @@
 # Spec: Family Board — auto-ack items older than 7 days
 
-- **Status:** v0.2 (criterion tuned — see §14)
+- **Status:** v0.3 — server synthesis reverted; rule moved to the client (see §14 v0.3 entry)
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Design / taste:** `clusters/pi-k3s/family-board/DESIGN.md`
@@ -167,3 +167,35 @@ behavior explicitly in §3 and §10, even when it falls out of SQL semantics.
 
 *(Live re-deploy of v0.2 follows the same path as v0.1: PUT `feed-api.json` to the n8n API
 + activate. board_acks is still never written.)*
+
+### v0.3 — 2026-05-28 — server synthesis reverted; rule moved to the client
+The v0.2 SQL `CASE` synthesized `acks: ["julia","matt","ronin","rory"]` on the server for
+stale items. User-reported defect: **the toggle semantics broke.** When someone tapped a
+synthesized ack to de-ack, the client's optimistic flip rolled back instantly — because
+the toggle endpoint's "delete-if-exists else insert" found no real row, INSERTed one, and
+returned `seen:true`. Net effect: the seat blipped and reverted; the user couldn't
+override the synthesis. The user also noted that the **all-view** (no viewer) had no
+"everyone seen" fold at all — synthesized acks just sat visible, ack'd but stuck.
+
+Root cause: synthesis was conflated with persistence. `board_acks` should be the only
+source of truth; "treat stale items as everyone-seen" is a *presentation rule* on the
+read side, not a data rewrite. Moved it client-side:
+
+- **Server (`feed-api.json` `Get Feed`):** reverted to `COALESCE(a.acks, '[]'::json) AS acks`.
+  `board_acks` is the only ack source.
+- **Client (`index.html`):**
+  - New `isAutoStale(item)` (`due_at > 7d ago`) and `isEveryoneSeen(item)`.
+  - `quadHTML(item)`: for a stale item, **all four seats render as `seen` + `locked`**
+    (reusing the locked-seat behavior from the ack-readonly feature). They're visually
+    acked-but-muted; the ack-click handler already early-returns on `.locked` so taps do
+    nothing → no more blip-and-revert.
+  - New `folded(item)` rule: with a viewer → fold what *they* have seen (real or
+    synthesized); **without** a viewer → fold what **everyone** has seen (the new
+    "Seen by everyone" group covers both real all-four-acked and stale items).
+  - `unseenCountFor(person)` excludes stale items (everyone is implicitly caught up).
+
+**Lesson banked for read-time synthesis rules:** if it's a presentation rule, keep it on
+the renderer. The server should only own *facts* (what's persisted); synthesized states
+mixed into the response confuse write-side semantics. If we ever want this rule for *other*
+consumers of the feed, lift it back to a synthesis layer (a view, a separate endpoint) —
+don't bake it into the canonical read.

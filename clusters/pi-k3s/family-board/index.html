@@ -552,22 +552,32 @@
   function forLabel(student) { return ({ ronin:"Ronin", rory:"Rory", both:"Both kids", unknown:"Whole family?" })[student] || "Whole family"; }
 
   // ---- the ack quadrant ----------------------------------------------------
-  function quadHTML(id) {
+  function quadHTML(item) {
+    const id = item.id;
+    const stale = isAutoStale(item);
     return '<div class="acks"><div class="quad" data-id="'+id+'">' +
       PEOPLE.map(p => {
-        const seen = isSeen(id, p.id) ? " seen" : "";
-        const lockCls = viewer ? (p.id === viewer ? " mine" : " locked") : "";
+        const isAcked = stale || isSeen(id, p.id);
+        const seenCls = isAcked ? " seen" : "";
+        // Lock rules:
+        //   stale item → ALL four locked (auto-handled; no manual override)
+        //   viewer set → others locked, viewer's own marked .mine
+        //   otherwise  → all four interactive (shared wall)
+        let lockCls = "";
+        if (stale)        lockCls = " locked";
+        else if (viewer)  lockCls = (p.id === viewer ? " mine" : " locked");
         const ariaDisabled = lockCls.includes("locked") ? ' aria-disabled="true" tabindex="-1"' : "";
-        return '<button class="seat s-'+p.id+seen+lockCls+'" data-person="'+p.id+'" aria-pressed="'+(seen?'true':'false')+'"'+ariaDisabled+' aria-label="'+esc(p.name)+'" title="'+esc(p.name)+'">'+p.short+'</button>';
+        return '<button class="seat s-'+p.id+seenCls+lockCls+'" data-person="'+p.id+'" aria-pressed="'+(isAcked?'true':'false')+'"'+ariaDisabled+' aria-label="'+esc(p.name)+'" title="'+esc(p.name)+'">'+p.short+'</button>';
       }).join("") + "</div></div>";
   }
 
   function unseenCountFor(person) {
-    // items "for" this kid (or the whole family) that this person hasn't ack'd
+    // items "for" this kid (or the whole family) that this person hasn't ack'd.
+    // Auto-stale items don't count — they're synthesized-acked for everyone.
     return lastItems.filter(it => {
       const s = it.student;
       const relevant = s === person || s === "both" || s === "unknown" || (person === "matt" || person === "julia");
-      return relevant && !isSeen(it.id, person);
+      return relevant && !isAutoStale(it) && !isSeen(it.id, person);
     }).length;
   }
 
@@ -579,7 +589,7 @@
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
-      quadHTML(it.id) + '</article>';
+      quadHTML(it) + '</article>';
   }
   function infoCard(it) {
     const fc = forColor(it.student), rl = receivedLabel(it);
@@ -587,7 +597,7 @@
       (rl ? '<div class="when">'+esc(rl)+'</div>' : '') +
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
-      quadHTML(it.id) + '</article>';
+      quadHTML(it) + '</article>';
   }
   function linkCard(it) {
     const fc = forColor(it.student), rl = receivedLabel(it);
@@ -596,7 +606,7 @@
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
-      quadHTML(it.id) + '</article>';
+      quadHTML(it) + '</article>';
   }
   function tagsFor(it) {
     let t = '<span class="tag for">'+esc(forLabel(it.student))+'</span>';
@@ -607,9 +617,27 @@
     return t;
   }
 
-  // True only when there's an active viewer AND they've marked this item — that's
-  // the one case we fold it away. No viewer = shared board, nothing hides.
-  function foldedForViewer(id) { return viewer && isSeen(id, viewer); }
+  // ---- staleness / "everyone seen" — client-side, replaces the server SQL CASE
+  //      that used to synthesize acks (broke the toggle: server inserted on a
+  //      synthesized de-ack, kept showing acked. Synthesis belongs on the client). ----
+  function isAutoStale(item) {
+    if (!item || !item.due_at) return false;
+    const due = new Date(item.due_at).getTime();
+    if (isNaN(due)) return false;
+    return (Date.now() - due) > 7 * 86400 * 1000;     // due_at > 7d in the past
+  }
+  function isEveryoneSeen(item) {
+    if (isAutoStale(item)) return true;                // synthesized: all four acked
+    const s = acks[item.id]; if (!s) return false;
+    return PEOPLE.every(p => s.has(p.id));             // truly all four marked
+  }
+  // Folded if:
+  //   - viewer set:  this viewer has seen it (real ack OR auto-stale synthesis) → "Seen by you"
+  //   - no viewer:   everyone has seen it (real all-four OR auto-stale) → "Seen by everyone"
+  function folded(item) {
+    if (viewer) return isAutoStale(item) || isSeen(item.id, viewer);
+    return isEveryoneSeen(item);
+  }
 
   // ---- render --------------------------------------------------------------
   function render() {
@@ -618,8 +646,8 @@
     // ---------- HAPPENING: dated agenda grouped by day; seen ones folded ----------
     const datedAll = lastItems.map(it => ({ it, p: parseDue(it.due_at) }))
       .filter(x => x.p && AGENDA.has(x.it.type)).sort((a,b) => a.p.date - b.p.date);
-    const datedShown = datedAll.filter(x => !foldedForViewer(x.it.id));
-    const datedSeen  = datedAll.filter(x =>  foldedForViewer(x.it.id));
+    const datedShown = datedAll.filter(x => !folded(x.it));
+    const datedSeen  = datedAll.filter(x =>  folded(x.it));
 
     let html = "";
     if (!datedAll.length) {
@@ -653,8 +681,8 @@
     renderMenu();
 
     setCount("ct-events",  datedShown.length);
-    setCount("ct-needs",   needs.filter(it => !foldedForViewer(it.id)).length);
-    setCount("ct-links",   links.filter(it => !foldedForViewer(it.id)).length);
+    setCount("ct-needs",   needs.filter(it => !folded(it)).length);
+    setCount("ct-links",   links.filter(it => !folded(it)).length);
 
     renderFamily();
     renderViewerNote();
@@ -662,8 +690,8 @@
 
   // shared renderer for the two flat (non-grouped) lanes
   function renderLane(elId, all, cardFn, three, emptyHTML) {
-    const shown = all.filter(it => !foldedForViewer(it.id));
-    const seen  = all.filter(it =>  foldedForViewer(it.id));
+    const shown = all.filter(it => !folded(it));
+    const seen  = all.filter(it =>  folded(it));
     let html = "";
     if (!all.length) html = emptyHTML;
     else {
@@ -676,7 +704,8 @@
 
   function foldHTML(cards) {
     if (!cards.length) return "";
-    return '<details class="fold"><summary>Seen by you <span class="n">('+cards.length+')</span></summary>' +
+    const label = viewer ? "Seen by you" : "Seen by everyone";
+    return '<details class="fold"><summary>'+label+' <span class="n">('+cards.length+')</span></summary>' +
       '<div class="grid">' + cards.join("") + '</div></details>';
   }
 
