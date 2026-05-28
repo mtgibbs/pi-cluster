@@ -430,7 +430,10 @@
     const res = await fetch("/api/menu", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify(payload) });
     if (!res.ok) throw new Error("menu " + res.status);
-    return res.json();
+    // n8n's respondToWebhook returns an EMPTY body when zero rows (e.g. after the
+    // last item is deleted) — JSON.parse('') would throw and silently stall the UI.
+    const text = await res.text();
+    return text ? JSON.parse(text) : [];
   }
   async function loadMenu() {
     try { const rows = await apiMenu({ action: "list" }); menu = Array.isArray(rows) ? rows : []; }
