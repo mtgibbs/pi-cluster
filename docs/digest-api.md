@@ -25,6 +25,12 @@ POST https://n8n.lab.mtgibbs.dev/webhook/digest-rebuild
 A scheduled trigger runs the builder **hourly on the hour**, so a row is always present
 shortly after each top of hour. The rebuild webhook is for on-demand refresh.
 
+The `inbound-mail` workflow **also pings the rebuild webhook after each `Cleanup`** (the
+final node) — fire-and-forget, `executeOnce: true`, `continueOnFail: true`. So a new
+forward shows up in the digest within ~30 seconds, not "up to an hour" worst-case. If the
+ping fails for any reason (digest tier down, etc.) the intake flow is unaffected — the
+hourly schedule still catches up.
+
 ### Same-origin via the board (when the proxy is in place)
 
 The board's renderer should call `/api/digest` same-origin and let the board's nginx
@@ -153,4 +159,4 @@ A starter `digest.sample.json` body:
 ## Known limits
 
 - The digest sees `intake_items` rows only — `title`, `source_hint`, dates, `student`. **It does not see full email bodies**, so it's slightly thinner than Gemini's (which has the entire mailbox). Future enhancement: a sibling `intake_email_bodies` table for richer summarization. **Not blocking** the v1 digest.
-- An automatic refresh on new inbound mail (so the digest updates within seconds of a forward, not up to an hour) is a planned 1-line addition to the inbound-mail workflow — also not blocking.
+- *(Resolved 2026-05-28)* Automatic refresh on new inbound mail is wired — `inbound-mail` pings the rebuild webhook after `Cleanup`.
