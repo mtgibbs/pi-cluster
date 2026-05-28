@@ -171,6 +171,16 @@
     .tag.amt { color: var(--gold); background: rgba(245,197,99,.14); font-weight: 700; }
     .src { font-size: .82em; color: var(--faint); font-style: italic; margin: -6px 0 14px; max-width: 46ch; }
 
+    /* ---- card drill-in (tap a card to expand details) ---- */
+    .card { cursor: pointer; }
+    .card-details { display: none; margin-top: 12px; padding-top: 14px; border-top: 1px dashed var(--line); }
+    .card.expanded .card-details { display: block; }
+    .card-details .d-row { margin-bottom: 10px; }
+    .card-details .d-row:last-child { margin-bottom: 0; }
+    .card-details .d-lab { display: block; font-family: var(--display); font-weight: 500; font-size: .68em;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 3px; }
+    .card-details .d-val { color: var(--muted); font-size: .92em; line-height: 1.45; word-break: break-word; }
+
     /* ---- the 4-player ack quadrant ---- */
     /* acks tucked into the card's top-right corner — no vertical footprint */
     .acks { position: absolute; top: 12px; right: 12px; z-index: 2; }
@@ -589,7 +599,7 @@
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
-      quadHTML(it) + '</article>';
+      quadHTML(it) + detailsHTML(it) + '</article>';
   }
   function infoCard(it) {
     const fc = forColor(it.student), rl = receivedLabel(it);
@@ -597,7 +607,7 @@
       (rl ? '<div class="when">'+esc(rl)+'</div>' : '') +
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
-      quadHTML(it) + '</article>';
+      quadHTML(it) + detailsHTML(it) + '</article>';
   }
   function linkCard(it) {
     const fc = forColor(it.student), rl = receivedLabel(it);
@@ -606,7 +616,7 @@
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
       '<div class="tags">' + tagsFor(it) + '</div>' +
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
-      quadHTML(it) + '</article>';
+      quadHTML(it) + detailsHTML(it) + '</article>';
   }
   function tagsFor(it) {
     let t = '<span class="tag for">'+esc(forLabel(it.student))+'</span>';
@@ -615,6 +625,21 @@
     if (it.course)  t += '<span class="tag">'+esc(it.course)+'</span>';
     if (it.teacher) t += '<span class="tag">'+esc(it.teacher)+'</span>';
     return t;
+  }
+  // Drill-in details — hidden by default, revealed when the card is tapped.
+  // Shows what the email actually said (source_hint), where it came from
+  // (subject + sender), and the extraction confidence.
+  function detailsHTML(it) {
+    const rows = [];
+    if (it.source_hint)    rows.push('<div class="d-row"><span class="d-lab">Quoted from email</span><span class="d-val">“'+esc(it.source_hint)+'”</span></div>');
+    if (it.source_subject) rows.push('<div class="d-row"><span class="d-lab">Email subject</span><span class="d-val">'+esc(it.source_subject)+'</span></div>');
+    if (it.source_from)    rows.push('<div class="d-row"><span class="d-lab">Sent by</span><span class="d-val">'+esc(it.source_from)+'</span></div>');
+    if (typeof it.confidence === 'number') {
+      const pct = Math.round(it.confidence * 100);
+      rows.push('<div class="d-row"><span class="d-lab">Confidence</span><span class="d-val">'+pct+'%</span></div>');
+    }
+    if (!rows.length) return '';
+    return '<div class="card-details">' + rows.join("") + '</div>';
   }
 
   // ---- staleness / "everyone seen" — client-side, replaces the server SQL CASE
@@ -765,6 +790,16 @@
       setStatus("offline — change not saved", true);
       renderFamily(); if (viewer === person) render();
     }
+  });
+
+  // card drill-in — tap anywhere on the card body (NOT a seat) to expand the
+  // details panel. Accordion behavior: opening one closes any other.
+  document.querySelector("main").addEventListener("click", e => {
+    if (e.target.closest(".seat")) return;                 // seats handled above
+    const card = e.target.closest(".card"); if (!card) return;
+    const wasOpen = card.classList.contains("expanded");
+    document.querySelectorAll("main .card.expanded").forEach(c => c.classList.remove("expanded"));
+    if (!wasOpen) card.classList.add("expanded");
   });
 
   // family bar — tap your icon to "be me" (fold your seen items); tap again to leave
