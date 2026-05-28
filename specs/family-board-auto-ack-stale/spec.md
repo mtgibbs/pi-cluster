@@ -1,29 +1,44 @@
 # Spec: Family Board — auto-ack items older than 7 days
 
-- **Status:** Planned (OQs resolved)
+- **Status:** v0.2 (criterion tuned — see §14)
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `clusters/pi-k3s/family-board/CLAUDE.md`)
 - **Design / taste:** `clusters/pi-k3s/family-board/DESIGN.md`
 - **Touches:** `clusters/pi-k3s/n8n/workflows/feed-api.json` (only — one query string).
 
 ## 1. Why · [R]
-The kitchen wall accumulates stale items that nobody bothered to ack. Treating anything
-older than 7 days as "everybody's already seen this" makes those items fold into every
-viewer's *Seen by you* group → restores focus to what's actually fresh — without writing
-anything to `board_acks` or running scheduled jobs.
+The kitchen wall accumulates items whose *due date* has passed — homework due last week,
+events that already happened — and nobody bothered to ack them. Treating anything **whose
+`due_at` is more than 7 days in the past** as "everybody's already seen this" makes those
+items fold into every viewer's *Seen by you* group → restores focus to what's actually
+upcoming, without writing anything to `board_acks` or running scheduled jobs.
+
+> *Why `due_at`, not `received_at`:* forwarded emails carry old content with a *fresh*
+> ingestion timestamp — `received_at` lies. The actual deadline/event date is what makes a
+> thing old. **Undated items** (`info` / `site-pointer` with `due_at = null`) have no
+> calendar notion of "stale" — they are **not auto-acked** by this rule and remain visible
+> until manually marked.
 
 ## 2. Outcomes (Definition of Done) · [R]
 1. `/api/feed` returns `acks: ["julia","matt","ronin","rory"]` for any item where
-   `received_at` is older than 7 days (regardless of `board_acks` state).
-2. Items with `received_at` within the last 7 days return the **real** acks from
-   `board_acks` (empty `[]` when none), exactly as today.
-3. `board_acks` is **not written** — synthesis is read-time only. Real acks for stale
+   `due_at` is **strictly more than 7 days in the past** (regardless of `board_acks`).
+2. Items where `due_at` is within the last 7 days, or in the future, return the **real**
+   acks from `board_acks` (empty `[]` when none), exactly as today.
+3. Items with `due_at IS NULL` (`info` / `site-pointer`) return the **real** acks only —
+   they are never auto-synthesized. (SQL `null < anything` is false → the CASE falls
+   through to the real-acks branch; no special null-handling code needed.)
+4. `board_acks` is **not written** — synthesis is read-time only. Real acks for stale
    items remain in the table untouched (just shadowed by the synthesis).
-4. The feed contract is otherwise unchanged — every other column comes through identically.
+5. The feed contract is otherwise unchanged — every other column comes through identically.
 
 ## 3. Entities · [E]
 Read-only query change. Existing entities used (no schema change):
-- `intake_items.received_at` — `TIMESTAMPTZ NOT NULL DEFAULT now()`. Every row has it.
+- `intake_items.due_at` — `TIMESTAMPTZ` (**nullable**; `info` / `site-pointer` items have
+  no due date). The criterion compares it against `now() - interval '7 days'`; a NULL
+  `due_at` makes the comparison false → the CASE falls through to real acks. No
+  null-handling code needed.
+- `intake_items.received_at` — still present in the SELECT list (returned to the board);
+  NOT used as the staleness criterion (it lies about forwarded emails).
 - `board_acks(item_id BIGINT, person TEXT CHECK IN ('julia','matt','ronin','rory'))` —
   unchanged, never written by this spec.
 
@@ -65,13 +80,15 @@ the family-board frontend (`index.html`); kustomization / nginx / any YAML.
 - The four person ids, **in alphabetical order** (matches `json_agg(person ORDER BY person)`):
   `julia`, `matt`, `ronin`, `rory`.
 - Postgres standard syntax: `now() - interval '7 days'`.
-- `received_at` is `TIMESTAMPTZ NOT NULL DEFAULT now()` — never null, comparisons are safe.
+- `due_at` is `TIMESTAMPTZ` and **nullable**; null comparisons evaluate to null → the CASE
+  branch is not taken → real acks are used (the intended behavior for undated items). No
+  special null guard needed in the SQL.
 - The n8n Postgres node executes this query (no params, no `queryReplacement`); the file
   stores it as a single-line string in `parameters.query`. Keep it single-line.
 
 ## 7. Norms · [N]
 **Use exactly these tokens (the gate greps them):**
-- `CASE WHEN i.received_at < now() - interval '7 days' THEN`
+- `CASE WHEN i.due_at < now() - interval '7 days' THEN`
 - `'["julia","matt","ronin","rory"]'::json`
 - `ELSE COALESCE(a.acks, '[]'::json) END AS acks`
 
@@ -94,12 +111,13 @@ gate by design; specificity is the lever.)
   surrounding `SELECT`/`FROM`/`LEFT JOIN`/`ORDER BY`/`LIMIT` stay byte-identical.
 
 ## 10. Acceptance criteria (EARS) · [O]
-- **AC1** *(ubiquitous)* — While `i.received_at < now() - interval '7 days'`, the query
-  shall project `acks` as the literal JSON `["julia","matt","ronin","rory"]` (the four
-  person ids, alphabetical).
-- **AC2** *(ubiquitous)* — While `i.received_at >= now() - interval '7 days'`, the query
-  shall project `acks` as `COALESCE(a.acks, '[]'::json)` (the real value from `board_acks`,
-  or empty `[]`).
+- **AC1** *(ubiquitous)* — While `i.due_at < now() - interval '7 days'`, the query shall
+  project `acks` as the literal JSON `["julia","matt","ronin","rory"]` (the four person
+  ids, alphabetical).
+- **AC2** *(ubiquitous)* — While `i.due_at IS NULL` OR `i.due_at >= now() - interval '7 days'`,
+  the query shall project `acks` as `COALESCE(a.acks, '[]'::json)` (the real value from
+  `board_acks`, or empty `[]`). Null `due_at` falls through naturally via SQL three-valued
+  logic; no explicit null guard needed.
 - **AC3** *(ubiquitous — safeguard)* — The LEFT JOIN to the `board_acks` aggregation shall
   remain intact in the query.
 - **AC4** *(ubiquitous — safeguard)* — The other 15 columns in the SELECT and the
@@ -128,3 +146,24 @@ would be a separate spec.)
 ## Two-way sync rule
 If we later change the threshold or person set, fix this spec first and regenerate, don't
 hand-edit the live workflow.
+
+## 14. Tuning log
+
+### v0.2 — 2026-05-28 — criterion corrected: `received_at` → `due_at`
+The v0.1 ship (commit `13fd352`) synthesized acks based on
+`intake_items.received_at < now() - 7d`. After deploy, the user pointed out that
+`received_at` is **just metadata** — forwarded emails carry old content with a *fresh*
+ingestion timestamp, so received_at lies about how old a thing actually is. The data
+point that matters is **`due_at`** — when the event happens or the thing is owed.
+
+v0.2 swaps the criterion to `due_at`. **Undated items** (`info`/`site-pointer` with
+`due_at = null`) are now explicitly *not* auto-acked — they have no calendar notion of
+stale; they remain visible until manually ack'd. SQL three-valued logic handles the null
+case for free (no explicit guard needed in the CASE).
+
+**Lesson banked for future "what's stale" specs:** identify the *semantic* timestamp
+(`due_at`, event date, deadline), not the *ingestion* one — and state the null-handling
+behavior explicitly in §3 and §10, even when it falls out of SQL semantics.
+
+*(Live re-deploy of v0.2 follows the same path as v0.1: PUT `feed-api.json` to the n8n API
++ activate. board_acks is still never written.)*

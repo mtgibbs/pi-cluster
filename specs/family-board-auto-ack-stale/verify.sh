@@ -32,7 +32,7 @@ PY
 [ -n "$Q" ] && ok "extract:Get-Feed-query" || { no "extract:Get-Feed-query"; echo "VERIFY: FAIL"; exit 1; }
 
 # AC1/AC2 — the CASE projection with the exact pinned tokens (§7)
-grep -q "CASE WHEN i.received_at < now() - interval '7 days' THEN" <<<"$Q" && ok "case:stale-branch-condition" || no "case:stale-branch-condition"
+grep -q "CASE WHEN i.due_at < now() - interval '7 days' THEN" <<<"$Q" && ok "case:stale-branch-condition" || no "case:stale-branch-condition"
 grep -q "'\\[\"julia\",\"matt\",\"ronin\",\"rory\"\\]'::json"        <<<"$Q" && ok "case:synthesized-acks-literal"  || no "case:synthesized-acks-literal"
 grep -q "ELSE COALESCE(a.acks, '\\[\\]'::json) END AS acks"          <<<"$Q" && ok "case:fresh-branch-fallback"   || no "case:fresh-branch-fallback"
 
