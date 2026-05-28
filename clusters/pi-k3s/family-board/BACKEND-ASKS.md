@@ -98,6 +98,30 @@ checklist + add-input + edit sheet write there. Throwaway — replace with the r
 
 ---
 
+## 5. Extract the *original* sender from forwarded emails  🟡
+**What:** `intake_items.source_from` today is the `From:` header of whatever email landed
+in the intake — which, for forwarded family mail, is the **forwarder** (Matt/Julia), not
+the original school/community sender. The board's drill-in had a "Sent by" row that
+exposed this misleadingly; it's been removed (2026-05-28) until we can surface the real
+originator.
+
+**Needs from backend:** during n8n intake (`inbound-mail.json`), detect forwarded mail
+(common markers: `Subject:` begins with `Fwd:` / `FWD:`; body contains a "Begin forwarded
+message:" block or an Outlook-style `From: … Sent: … To:` quote header) and parse the
+**original `From:`** out of the forwarded body. Store as a **new column**
+`intake_items.original_from TEXT` (nullable when we can't parse). Add it to the feed.
+
+**On the board:** when present, the drill-in shows it as **"Originally from"**. When
+absent, the row is omitted (don't lie with the forwarder address).
+
+**Why it matters:** lets a viewer tell at a glance whether a notice came from the principal,
+the PTA, a teacher, the district office, etc. — which is half the context behind a
+"Technical Support Contact"-type info item.
+
+**Client stub today:** none — the row is just hidden. No fallback fakery.
+
+---
+
 ## Frontend infra notes (not backend — for the operator/cluster-ops)
 - **Self-host the fonts.** The prototype loads Atkinson Hyperlegible + Lexend from Google
   Fonts CDN for speed of iteration. The real kiosk is LAN-only and resilience-first, so

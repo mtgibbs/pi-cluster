@@ -627,13 +627,15 @@
     return t;
   }
   // Drill-in details — hidden by default, revealed when the card is tapped.
-  // Shows what the email actually said (source_hint), where it came from
-  // (subject + sender), and the extraction confidence.
+  // Shows what the email actually said (source_hint), the email subject, and
+  // the extraction confidence. We intentionally DO NOT show source_from —
+  // for forwarded mail it's the forwarder (you), not the original sender,
+  // which is misleading. Surfacing the original sender requires backend work
+  // (parse "From: …" out of the forwarded body during intake) — BACKEND-ASKS #5.
   function detailsHTML(it) {
     const rows = [];
     if (it.source_hint)    rows.push('<div class="d-row"><span class="d-lab">Quoted from email</span><span class="d-val">“'+esc(it.source_hint)+'”</span></div>');
     if (it.source_subject) rows.push('<div class="d-row"><span class="d-lab">Email subject</span><span class="d-val">'+esc(it.source_subject)+'</span></div>');
-    if (it.source_from)    rows.push('<div class="d-row"><span class="d-lab">Sent by</span><span class="d-val">'+esc(it.source_from)+'</span></div>');
     if (typeof it.confidence === 'number') {
       const pct = Math.round(it.confidence * 100);
       rows.push('<div class="d-row"><span class="d-lab">Confidence</span><span class="d-val">'+pct+'%</span></div>');
