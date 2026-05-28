@@ -47,7 +47,7 @@ return arr.map(r => {
     source_channel: src.envelopeTo || '',
     source_subject: src.subject || '',
     source_from: src.from || '',
-    original_from: r.originalFrom || null,
+    original_from: (r.originalFrom && r.originalFrom !== 'null' && r.originalFrom !== 'None') ? r.originalFrom : null,
     item_key
   } };
 });

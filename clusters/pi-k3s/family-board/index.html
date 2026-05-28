@@ -636,7 +636,8 @@
     const rows = [];
     if (it.source_hint)    rows.push('<div class="d-row"><span class="d-lab">Quoted from email</span><span class="d-val">“'+esc(it.source_hint)+'”</span></div>');
     if (it.source_subject) rows.push('<div class="d-row"><span class="d-lab">Email subject</span><span class="d-val">'+esc(it.source_subject)+'</span></div>');
-    if (it.original_from)  rows.push('<div class="d-row"><span class="d-lab">Originally from</span><span class="d-val">'+esc(it.original_from)+'</span></div>');
+    if (it.original_from && it.original_from !== 'null' && it.original_from !== 'None')
+                           rows.push('<div class="d-row"><span class="d-lab">Originally from</span><span class="d-val">'+esc(it.original_from)+'</span></div>');
     if (typeof it.confidence === 'number') {
       const pct = Math.round(it.confidence * 100);
       rows.push('<div class="d-row"><span class="d-lab">Confidence</span><span class="d-val">'+pct+'%</span></div>');
