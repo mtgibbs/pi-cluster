@@ -304,13 +304,50 @@
       .card { opacity: 1; transform: none; }
       .art-scene { transition: opacity 1s ease !important; transform: translateY(-50%) !important; }
       .art-scene.active { transform: translateY(-50%) !important; }
+      .shell, .sliver { transition: none !important; }
+      .sliver.grabbing { box-shadow: none !important; }
     }
+
+    /* ===================== POWER SURFACE DRAWER =====================
+       Hidden right-edge drawer. .shell wraps .wrap; on .shell.open the whole
+       UI translates left -360px, and the drawer (position:fixed, right:-360)
+       slides into view because the transform on .shell makes it the
+       containing block for the fixed-positioned drawer (CSS spec quirk). */
+    .shell { transition: transform .28s var(--pop); will-change: transform; }
+    .shell.open { transform: translateX(-360px); }
+    .shell.dragging { transition: none; }
+
+    .drawer { position: fixed; top: 0; bottom: 0; right: -360px; width: 360px;
+      background: linear-gradient(180deg, var(--surface), var(--bg-2));
+      border-left: 1px solid var(--line);
+      padding: calc(env(safe-area-inset-top) + 22px) 22px 28px; overflow-y: auto;
+      box-sizing: border-box; z-index: 5; color: var(--text); }
+    .drawer-section { margin-bottom: 22px; }
+    .drawer-section h2 { font-family: var(--display); font-weight: 600; font-size: 1.2em;
+      margin: 0 0 4px; letter-spacing: -.01em; color: var(--text); text-transform: none; }
+    .drawer-section .sub { font-family: var(--display); font-weight: 400; font-size: .82em;
+      color: var(--muted); margin-bottom: 18px; letter-spacing: .02em; }
+    .qr-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+      padding: 16px; margin-bottom: 14px; }
+    .qr-card h3 { font-family: var(--display); font-weight: 600; font-size: 1em;
+      margin: 0 0 12px; color: var(--text); }
+    .qr-card img { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 1;
+      background: white; border-radius: 8px; margin: 0 0 12px; padding: 10px; box-sizing: border-box; }
+    .qr-card .inst { font-size: .82em; color: var(--muted); margin-bottom: 8px; line-height: 1.4; }
+    .qr-card .url { font-size: .66em; color: var(--faint); font-family: var(--read);
+      word-break: break-all; line-height: 1.45; opacity: .85; }
+
+    .sliver { position: fixed; top: 0; bottom: 0; right: 0; width: 4px;
+      background: var(--gold); opacity: .22; z-index: 6; pointer-events: none;
+      transition: opacity .15s ease, box-shadow .15s ease; }
+    .sliver.grabbing { opacity: 1; box-shadow: 0 0 24px var(--gold); }
   </style>
 </head>
 <body>
   <div class="aurora"><b class="a1"></b><b class="a2"></b><b class="a3"></b><b class="a4"></b></div>
   <div class="grain"></div>
 
+  <div class="shell">
   <div class="wrap">
     <header>
       <div class="mast">
@@ -346,6 +383,30 @@
     </div>
   </div>
 
+    <aside class="drawer" aria-hidden="true">
+      <div class="drawer-section">
+        <h2>Connect</h2>
+        <div class="sub">Scan to subscribe on a phone</div>
+
+        <div class="qr-card">
+          <h3>Ronin's calendar</h3>
+          <img src="/qr-cal-ronin.svg" alt="Ronin's calendar QR" />
+          <div class="inst">Scan with your phone's camera — tap Subscribe.</div>
+          <div class="url">webcal://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a</div>
+        </div>
+
+        <div class="qr-card">
+          <h3>Rory's calendar</h3>
+          <img src="/qr-cal-rory.svg" alt="Rory's calendar QR" />
+          <div class="inst">Scan with your phone's camera — tap Subscribe.</div>
+          <div class="url">webcal://n8n-hook.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e</div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sliver" aria-hidden="true"></div>
+  </div><!-- /.shell -->
+
   <div id="sheet" class="sheet" hidden></div>
   <div id="art" aria-hidden="true"></div>
   <div class="idle-hint">touch to wake</div>
@@ -359,6 +420,9 @@
      =========================================================================== */
 
   const FEED_URL   = "/api/feed";
+  const DRAWER_WIDTH = 360;        // px — the drawer width and the open-state translate distance
+  const EDGE_ZONE = 32;            // px from the right edge where a pointerdown begins a drag-open
+  const COMMIT_THRESHOLD = 0.3;    // fraction of DRAWER_WIDTH that commits open (else snaps back)
   const REFRESH_MS = 3 * 60 * 1000;
   const TZ         = "America/New_York";
   const IDLE_MS    = 90 * 1000;     // go to "art mode" after 90s untouched
@@ -374,6 +438,8 @@
   let lastItems = [];
   let activeLane = "events";
   let viewer = null;               // active viewer (person id) — "tap to be me"; null = shared board
+  let drawerOpen = false;          // power-surface right drawer
+  const drag = { active: false, startX: 0, startedOpen: false };
   let acks = {};   // id -> Set(person), hydrated from the feed (item.acks)
   let menu = [];   // board_menu rows, loaded from /api/menu
 
@@ -816,6 +882,7 @@
   let idleTimer, artTimer, artScenes = [], artIdx = 0;
   function enterArt() {
     if (viewer) { viewer = null; render(); }   // walked away → board returns to the shared view
+    if (drawerOpen) setDrawer(false);          // close the drawer too — clean wake-from-idle
     buildArtScenes(); updateArtClock();
     artScenes = [...document.querySelectorAll("#art .art-scene")];
     artIdx = 0; artScenes.forEach((s,i) => s.classList.toggle("active", i === 0));
@@ -838,7 +905,70 @@
   document.addEventListener("keydown", e => {
     const typing = e.target.matches && e.target.matches("input, textarea");
     if (!typing && (e.key === "a" || e.key === "A")) { document.body.classList.contains("idle") ? wake() : enterArt(); return; }
+    if (!typing && (e.key === "`" || e.code === "Backquote")) { setDrawer(!drawerOpen); return; }   // power drawer toggle
+    if (e.key === "Escape" && drawerOpen) { setDrawer(false); return; }                            // power drawer close
     poke();
+  });
+
+  // ---- power surface drawer (gestures + state) ----------------------------
+  function setDrawer(open) {
+    drawerOpen = !!open;
+    const sh = document.querySelector(".shell");
+    const dr = document.querySelector(".drawer");
+    if (sh) sh.classList.toggle("open", drawerOpen);
+    if (dr) dr.setAttribute("aria-hidden", drawerOpen ? "false" : "true");
+  }
+  function _shellOffset(dx, startedOpen) {
+    // closed → open: swiping left (dx < 0) pulls the shell left, capped at -DRAWER_WIDTH.
+    // open  → close: swiping right (dx > 0) pushes the shell back toward 0.
+    if (startedOpen) {
+      const close = Math.max(0, Math.min(DRAWER_WIDTH, dx));
+      return -(DRAWER_WIDTH - close);
+    }
+    const open = Math.max(0, Math.min(DRAWER_WIDTH, -dx));
+    return -open;
+  }
+  document.addEventListener("pointerdown", e => {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest(".drawer")) return;                    // never start a drag from inside the drawer
+    if (e.target.closest("input, textarea, button")) return;    // don't fight with interactive controls
+    if (drawerOpen) {
+      drag.active = true; drag.startX = e.clientX; drag.startedOpen = true;
+    } else {
+      if (e.clientX < window.innerWidth - EDGE_ZONE) return;     // only the right edge can pull it open
+      drag.active = true; drag.startX = e.clientX; drag.startedOpen = false;
+    }
+  });
+  document.addEventListener("pointermove", e => {
+    if (!drag.active) return;
+    const sh = document.querySelector(".shell"); const sl = document.querySelector(".sliver");
+    if (!sh || !sl) return;
+    const dx = e.clientX - drag.startX;
+    sh.classList.add("dragging");
+    sh.style.transform = `translateX(${_shellOffset(dx, drag.startedOpen)}px)`;
+    const ramp = Math.min(1, Math.abs(dx) / DRAWER_WIDTH);
+    sl.classList.add("grabbing");
+    sl.style.opacity = String(0.22 + 0.78 * ramp);
+    sl.style.boxShadow = ramp > 0.05 ? `0 0 ${24 * ramp}px var(--gold)` : "";
+  });
+  function _endDrag(e) {
+    if (!drag.active) return;
+    const dx = (e && typeof e.clientX === "number") ? e.clientX - drag.startX : 0;
+    drag.active = false;
+    const sh = document.querySelector(".shell"); const sl = document.querySelector(".sliver");
+    if (sh) { sh.classList.remove("dragging"); sh.style.transform = ""; }
+    if (sl) { sl.classList.remove("grabbing"); sl.style.opacity = ""; sl.style.boxShadow = ""; }
+    const past = Math.abs(dx) >= COMMIT_THRESHOLD * DRAWER_WIDTH;
+    setDrawer(drag.startedOpen ? !past : past);
+  }
+  document.addEventListener("pointerup", _endDrag);
+  document.addEventListener("pointercancel", _endDrag);
+  // Tap on the shifted main area closes the drawer. Attached to .wrap (NOT to <main>)
+  // so it doesn't intercept ack-seat clicks (which the existing handler delegates on main).
+  document.querySelector(".wrap").addEventListener("click", e => {
+    if (!drawerOpen) return;
+    if (e.target.closest(".drawer")) return;
+    setDrawer(false);
   });
 
   // ---- boot ----------------------------------------------------------------
