@@ -180,6 +180,9 @@
     .card-details .d-lab { display: block; font-family: var(--display); font-weight: 500; font-size: .68em;
       letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 3px; }
     .card-details .d-val { color: var(--muted); font-size: .92em; line-height: 1.45; word-break: break-word; }
+    .card-details .body-text { max-height: 280px; overflow-y: auto; padding: 12px; background: var(--bg-2);
+      border: 1px solid var(--line); border-radius: 8px; font-size: .82em; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word; color: var(--muted); margin-top: 4px; }
 
     /* ---- the 4-player ack quadrant ---- */
     /* acks tucked into the card's top-right corner — no vertical footprint */
@@ -641,6 +644,9 @@
     if (typeof it.confidence === 'number') {
       const pct = Math.round(it.confidence * 100);
       rows.push('<div class="d-row"><span class="d-lab">Confidence</span><span class="d-val">'+pct+'%</span></div>');
+    }
+    if (it.body_text) {
+      rows.push('<div class="d-row"><span class="d-lab">Full email</span><div class="body-text">'+esc(it.body_text)+'</div></div>');
     }
     if (!rows.length) return '';
     return '<div class="card-details">' + rows.join("") + '</div>';

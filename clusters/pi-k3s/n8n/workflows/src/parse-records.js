@@ -48,6 +48,7 @@ return arr.map(r => {
     source_subject: src.subject || '',
     source_from: src.from || '',
     original_from: (r.originalFrom && r.originalFrom !== 'null' && r.originalFrom !== 'None') ? r.originalFrom : null,
+    body_text: src.text ? String(src.text).slice(0, 10000) : null,
     item_key
   } };
 });

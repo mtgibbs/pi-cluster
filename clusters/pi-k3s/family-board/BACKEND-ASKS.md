@@ -122,6 +122,29 @@ the PTA, a teacher, the district office, etc. — which is half the context behi
 
 ---
 
+## 6. Store the full email body (`body_text`) for drill-in reference  🟢 BUILT 2026-05-28
+**What:** Capture the plain-text body of each inbound email so a board user can read the
+whole thing on drill-in (not just the LLM-extracted `source_hint` snippet). The Cloudflare
+Email Worker already gives us `text` via postal-mime — we just store it.
+
+**Schema:** `intake_items.body_text TEXT` (nullable). Capped at **10,000 chars** in
+`parse-records.js` (`String(src.text).slice(0, 10000)`) so a degenerate ultra-long body
+can't bloat the feed payload (the board polls `/api/feed` every 3 minutes).
+
+**Flow added (same shape as `#5 original_from`):**
+- `inbound-mail.json` Ensure Table: `ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS body_text TEXT;`
+- `Parse Records` (+ `src/parse-records.js` mirror): `body_text: src.text ? String(src.text).slice(0, 10000) : null`
+- `Store`: `body_text` appended at position **17** (after `original_from` at 16). $1..$16 stay byte-identical.
+- `feed-api.json` `Get Feed`: SELECTs `i.body_text` between `i.original_from` and `COALESCE(a.acks, …)`.
+- `index.html` `detailsHTML`: a final "Full email" row renders a scrollable monospaced block (`max-height: 280px`, `white-space: pre-wrap`) when `body_text` is present.
+
+**Privacy:** the body lives behind a tap on a LAN-only board. No new exposure.
+
+**Items that came in before this ship date** have `body_text` NULL — the row just doesn't
+render. They self-fill on the next re-extraction of their source email.
+
+---
+
 ## Frontend infra notes (not backend — for the operator/cluster-ops)
 - **Self-host the fonts.** The prototype loads Atkinson Hyperlegible + Lexend from Google
   Fonts CDN for speed of iteration. The real kiosk is LAN-only and resilience-first, so
