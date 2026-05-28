@@ -100,6 +100,8 @@ client still consuming the markdown blob.
 | `action_required`| bool           | Show a "do something" badge. |
 | `amount`         | string \| null | e.g. `"$25"` for `dues`. |
 | `teacher`/`course` | string \| null | When extracted (assignments). |
+| `action_url`     | string \| null | A URL the user should visit to act on this item — sign-up form, vendor page, scheduling page (e.g. an Outlook Bookings link). Literal from the source; never invented. Render as the row's primary tap target when present. |
+| `action_target`  | string \| null | A contact destination to send/reply to — typically an email address (`"TRMSResidency@fultonschools.org"`), phone number, or named office (`"Main Office"`). Literal from the source. Render as a copyable chip / `mailto:` / `tel:` when present. |
 
 ### Rendering the markdown (legacy `body`)
 
@@ -172,6 +174,7 @@ EMAIL DAY: Thursday
 | `v4-pronouns-locked` | Added gendered-pronoun ban + validator. |
 | `v5-split-fields`    | **Architectural:** split `body` → dateless `lead` + structured `highlights`. The lead's date validator becomes "no dates at all"; highlights' dates come from `due_at`. |
 | `v6-attribution-locked` | Added the attribution allow-list (solo + joint), keyed on items' `student`. |
+| `v7-action-fields`      | Added `action_url` + `action_target` to `intake_items` and to the highlight shape — extraction pulls scheduling URLs (e.g. Outlook Bookings), portal links, and contact addresses/phones; the renderer can render them as primary tap targets or `mailto:`/`tel:` chips. |
 
 ---
 
@@ -240,7 +243,8 @@ A starter `digest.sample.json` body:
 ## Known limits
 
 - The digest sees `intake_items` rows only — `title`, `source_hint`, dates, `student`. **It does not see full email bodies**, so it's slightly thinner than Gemini's. Future enhancement: a sibling `intake_email_bodies` table. **Not blocking.**
-- **Schema gap — action targets / links.** The extraction can recognize an email address to send to (e.g. `TRMSResidency@…`) or a URL (e.g. a "Bookings" scheduling link), but `intake_items` has no `action_url` / `action_target` column — those values either collapse into `source_hint` or are lost. Highlights inherit this limit. Adding two nullable columns is on the backlog.
 - **Soft attribution drift beyond lock 3.** Lock 3 catches *unjustified* solo mentions. The LLM can still narrate the right kids around the wrong items if multiple `student` values are present. The locks reduce mischief; visual review is still the human's last word.
+- **`action_target` false positives.** Qwen sometimes invents a plausible-looking phone number when given only an action description. The extraction prompt rule says *"literal from the source"* but it's not deterministically enforced; in practice some phones land that aren't in the email body. Flag for a future verifier-style check (regex-extract the action_target, confirm it appears in `source_hint` or `body`).
 - *(Resolved 2026-05-28)* Automatic refresh on new inbound mail is wired — `inbound-mail` pings the rebuild webhook after `Cleanup`.
 - *(Resolved 2026-05-28)* Inbound `Build Request` includes `EMAIL DATE (ISO)` + `EMAIL DAY` as anchors for relative-date resolution (e.g. *"this Friday"*).
+- *(Resolved 2026-05-28, v7-action-fields)* Schema now has `action_url` + `action_target` on `intake_items` — Bookings URLs, ClassLink launches, portal links, email/phone contacts now ride through to the feed and digest highlights.
