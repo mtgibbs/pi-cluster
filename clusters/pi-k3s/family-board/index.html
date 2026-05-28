@@ -181,6 +181,8 @@
     .seat:active { transform: scale(.86); }
     .seat .ck { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(.4); }
     .seat.seen { background: var(--c); color: var(--bg); border-color: var(--c); box-shadow: 0 0 18px -4px var(--c); }
+    .seat.locked { opacity: .38; pointer-events: none; cursor: default; box-shadow: none; }
+    .seat.mine   { box-shadow: 0 0 0 2px var(--text), 0 0 0 4px var(--bg); }
     /* the flip-pop */
     .seat.pop { animation: pop .42s var(--pop); }
     @keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.28) rotate(-4deg); } 70% { transform: scale(.92); } 100% { transform: scale(1); } }
@@ -485,7 +487,9 @@
     return '<div class="acks"><div class="quad" data-id="'+id+'">' +
       PEOPLE.map(p => {
         const seen = isSeen(id, p.id) ? " seen" : "";
-        return '<button class="seat s-'+p.id+seen+'" data-person="'+p.id+'" aria-pressed="'+(seen?'true':'false')+'" aria-label="'+esc(p.name)+'" title="'+esc(p.name)+'">'+p.short+'</button>';
+        const lockCls = viewer ? (p.id === viewer ? " mine" : " locked") : "";
+        const ariaDisabled = lockCls.includes("locked") ? ' aria-disabled="true" tabindex="-1"' : "";
+        return '<button class="seat s-'+p.id+seen+lockCls+'" data-person="'+p.id+'" aria-pressed="'+(seen?'true':'false')+'"'+ariaDisabled+' aria-label="'+esc(p.name)+'" title="'+esc(p.name)+'">'+p.short+'</button>';
       }).join("") + "</div></div>";
   }
 
@@ -642,6 +646,7 @@
   // ack toggle (event-delegated, optimistic, with the flip-pop) → POST /api/ack
   document.querySelector("main").addEventListener("click", async e => {
     const seat = e.target.closest(".seat"); if (!seat) return;
+    if (seat.classList.contains("locked")) return;
     const id = seat.closest(".quad").dataset.id;
     const person = seat.dataset.person;
     const next = !isSeen(id, person);
