@@ -19,13 +19,16 @@ const slugify = (t) => String(t || '')
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-+|-+$/g, '')
   .slice(0, 40);
+// LLM occasionally returns the literal string "null" / "None" for nullable fields;
+// coalesce ALL nullable string fields through this helper so we store real null.
+const nz = (v) => (v && v !== 'null' && v !== 'None') ? v : null;
 return arr.map(r => {
   const type = r.type || 'info';
   const title = r.title || '';
-  const due_at = r.dueAt || null;
+  const due_at = nz(r.dueAt);
   const student = r.student || 'unknown';
-  const amount = r.amount || null;
-  const course = r.class || null;
+  const amount = nz(r.amount);
+  const course = nz(r.class);
   // due_date = YYYY-MM-DD of due_at, '' when null (matches docs/feed all-day contract:
   // take the date portion verbatim, no TZ conversion).
   const due_date = due_at ? String(due_at).slice(0, 10) : '';
@@ -40,14 +43,14 @@ return arr.map(r => {
     student,
     action_required: r.actionRequired === true,
     amount,
-    teacher: r.teacher || null,
+    teacher: nz(r.teacher),
     course,
-    source_hint: r.source_hint || null,
+    source_hint: nz(r.source_hint),
     confidence: (typeof r.confidence === 'number' ? r.confidence : null),
     source_channel: src.envelopeTo || '',
     source_subject: src.subject || '',
     source_from: src.from || '',
-    original_from: (r.originalFrom && r.originalFrom !== 'null' && r.originalFrom !== 'None') ? r.originalFrom : null,
+    original_from: nz(r.originalFrom),
     body_text: src.text ? String(src.text).slice(0, 10000) : null,
     item_key
   } };

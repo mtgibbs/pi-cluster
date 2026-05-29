@@ -621,12 +621,18 @@
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
       quadHTML(it) + detailsHTML(it) + '</article>';
   }
+  // Defensive: the LLM occasionally returns the string "null" / "None" instead of
+  // JSON null. Treat those as missing for ALL nullable string fields.
+  function nonNullStr(v) { return (v && v !== 'null' && v !== 'None') ? v : null; }
   function tagsFor(it) {
     let t = '<span class="tag for">'+esc(forLabel(it.student))+'</span>';
     if (it.action_required) t += '<span class="tag act">! needs you</span>';
-    if (it.amount)  t += '<span class="tag amt">'+esc(it.amount)+'</span>';
-    if (it.course)  t += '<span class="tag">'+esc(it.course)+'</span>';
-    if (it.teacher) t += '<span class="tag">'+esc(it.teacher)+'</span>';
+    const amount  = nonNullStr(it.amount);
+    const course  = nonNullStr(it.course);
+    const teacher = nonNullStr(it.teacher);
+    if (amount)  t += '<span class="tag amt">'+esc(amount)+'</span>';
+    if (course)  t += '<span class="tag">'+esc(course)+'</span>';
+    if (teacher) t += '<span class="tag">'+esc(teacher)+'</span>';
     return t;
   }
   // Drill-in details — hidden by default, revealed when the card is tapped.
@@ -637,10 +643,12 @@
   // (parse "From: …" out of the forwarded body during intake) — BACKEND-ASKS #5.
   function detailsHTML(it) {
     const rows = [];
-    if (it.source_hint)    rows.push('<div class="d-row"><span class="d-lab">Quoted from email</span><span class="d-val">“'+esc(it.source_hint)+'”</span></div>');
-    if (it.source_subject) rows.push('<div class="d-row"><span class="d-lab">Email subject</span><span class="d-val">'+esc(it.source_subject)+'</span></div>');
-    if (it.original_from && it.original_from !== 'null' && it.original_from !== 'None')
-                           rows.push('<div class="d-row"><span class="d-lab">Originally from</span><span class="d-val">'+esc(it.original_from)+'</span></div>');
+    const hint = nonNullStr(it.source_hint);
+    const subj = nonNullStr(it.source_subject);
+    const orig = nonNullStr(it.original_from);
+    if (hint) rows.push('<div class="d-row"><span class="d-lab">Quoted from email</span><span class="d-val">“'+esc(hint)+'”</span></div>');
+    if (subj) rows.push('<div class="d-row"><span class="d-lab">Email subject</span><span class="d-val">'+esc(subj)+'</span></div>');
+    if (orig) rows.push('<div class="d-row"><span class="d-lab">Originally from</span><span class="d-val">'+esc(orig)+'</span></div>');
     if (typeof it.confidence === 'number') {
       const pct = Math.round(it.confidence * 100);
       rows.push('<div class="d-row"><span class="d-lab">Confidence</span><span class="d-val">'+pct+'%</span></div>');
