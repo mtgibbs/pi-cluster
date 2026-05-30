@@ -1780,7 +1780,18 @@ transforms:
 
 ### 33. CARL - Canvas Assignment Reminder Liaison
 
-**Decision**: Deploy custom Canvas LMS integration service with local LLM inference
+> **⚠️ RETIRED 2026-05-30.** CARL (custom Node/Express + Ollama Canvas service) is
+> **decommissioned** — removed from the GitOps tree (`clusters/pi-k3s/carl/` no longer
+> exists) and scaled to zero (the `carl` namespace is an empty shell: no pods, deployments,
+> or PVCs). **Successor:** the Canvas → family-board flow is now the **n8n modular-ingestion
+> pipeline** — `bronze: canvas-poller` → `silver: intake-sink` → digest/board (see
+> [`docs/canvas-ingestion.md`](docs/canvas-ingestion.md) and
+> [`docs/data-architecture.md`](docs/data-architecture.md)). That path uses the
+> `op://pi-cluster/canvas` item; the old `CARL` 1Password item + the empty `carl` namespace
+> can be deleted. The diagrams / port tables / §34 references below are **historical** —
+> kept for provenance, not current state.
+
+**Decision** *(historical)*: Deploy custom Canvas LMS integration service with local LLM inference
 
 **Why**:
 - Automate assignment reminder workflows from Canvas LMS
@@ -2514,7 +2525,7 @@ This ensures:
 - [x] **Hardware expansion**: 4-node cluster with 3x Pi 5 and 1x Pi 3
 - [x] **Modular knowledge base**: 11 specialized skills for AI-assisted operations
 - [x] **Log aggregation**: Loki + Vector + Cloudflare Tunnel for Heroku log drains
-- [x] **CARL deployment**: Canvas Assignment Reminder Liaison with LLM integration
+- [~] **CARL deployment**: ~~Canvas Assignment Reminder Liaison with LLM integration~~ **RETIRED 2026-05-30** — superseded by n8n canvas-poller (§33)
 - [x] **On-cluster LLM**: Ollama local inference server for AI-enhanced features
 - [ ] **Unbound HA**: Secondary Unbound instance for complete DNS redundancy
 - [ ] **Shared storage**: Migrate remaining workloads from local-path to NFS
