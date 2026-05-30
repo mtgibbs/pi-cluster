@@ -23,6 +23,14 @@ All media is stored on the QNAP NAS (`storage.lab.mtgibbs.dev` → `192.168.1.61
 
 Migration history: Originally Synology DS420 (192.168.1.60). QNAP TS-435XeU brought up 2026-04-20. All PVs cutover to QNAP 2026-04-30. Synology retained read-only briefly; status TBD.
 
+### Reading QNAP storage usage correctly (do NOT trust "pool % full")
+
+The QNAP **Storage Pool** view (and MCP `list_storages` / `get_system_info`) shows Pool 1 at **~95% used / ~1.1 TB free** — **this is reservation, not data.** `DataVol1` is **thick-provisioned**: it reserves its full **15 TB** from the pool whether used or not, plus a **1.8 TB snapshot reserve** (0 actually used) + 0.2 TB system. So the pool *looks* ~95% "full" while **real data is only ~5.58 TB (≈37%)**.
+
+- **Judge real usage by the Volume's "Used Capacity"** (`5.58 / 14.88 TB`), NOT the pool free-space.
+- **"Pool 95% full" is normal here and is NOT a capacity OR performance problem.** Do not blame storage-full for slow reads. (Verified 2026-05-29: all 3 HDDs Good, no disk/RAID errors, pool status fine; `pool_status:-1` / `usable:false` in the API are display quirks, not faults.)
+- Real free space inside the volume is ~9 TB. The 80% pool *alert* is just the thick reservation crossing the threshold — cosmetic.
+
 ### Common NFS Settings
 - **Protocol**: NFSv3 (negotiated by default; NFSv4 explicitly set on any PV caused mount failures for immich — remove `nfsvers=4` if present)
 - **DNS name**: All PVs use `storage.lab.mtgibbs.dev` — IP change requires only a Pi-hole DNS flip + pod restart
@@ -62,25 +70,27 @@ Jellyfin's `LibraryMonitor` uses Linux `inotify` to watch for new files. **inoti
 
 The Sonarr/Radarr Emby/Jellyfin notifications ARE configured and working (host: `jellyfin.jellyfin.svc.cluster.local`, port: 8096, API keys valid, HTTP 200 on test). However, these send **targeted updates** (`/emby/Library/Series/Updated`, `/emby/Library/Movies/Updated`) which only refresh metadata for **existing** items in Jellyfin's database. They cannot discover **new** titles on NFS. Keep the notifications (they help with metadata refresh) but they do not solve discovery.
 
-### Fix: Scheduled Library Scan (Applied 2026-02-11)
+### Library Scan Schedule — daily 4 AM (NOT a short interval; see history)
 
-Jellyfin's scheduled "Scan Media Library" task had no triggers (`"Triggers": []`). Set a 15-minute interval via Jellyfin API:
+Jellyfin's "Scan Media Library" task (key `RefreshLibrary`, id `7738148ffcd07979c7ceb148e06b3aed`) is the only way to discover *new* titles on NFS (inotify can't). Set the trigger via the Jellyfin API:
 
 ```bash
 JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
-curl -X POST -H "X-Emby-Token: $JF_KEY" \
-  "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/7738148f-fcd0-7979-c7ce-b148e06b3aed/Triggers" \
-  -H "Content-Type: application/json" \
-  -d '[{"IntervalTicks":9000000000,"Type":"Interval"}]'
+# Daily 4:00 AM. TimeOfDayTicks = 14400s * 1e7. DO NOT use a short IntervalTrigger — see below.
+curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
+  "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/7738148ffcd07979c7ceb148e06b3aed/Triggers" \
+  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":144000000000}]'
 ```
 
-- Config persisted to PVC: `/config/config/ScheduledTasks/7738148f-fcd0-7979-c7ce-b148e06b3aed.js`
-- Scan takes ~10 seconds, negligible resource impact
-- Also enable "Automatically refresh metadata from the internet" in Jellyfin library settings
+**History / why NOT a 15-minute interval:**
+- 2026-02-11: set to a **15-min interval** (`IntervalTicks: 9000000000`) so new downloads appeared fast (inotify is dead over NFS).
+- 2026-05-29: changed to **daily 4 AM** after the 15-min scan was traced to **hard streaming drops mid-movie**. A scan does thousands of *random* metadata reads across 1,100+ files; a movie is one *sequential* read; on the QNAP's 3-disk spinning RAID5 the two **contend for disk seeks** and thrash the heads → a scan that's normally ~11s balloons to **10+ minutes** AND the stream starves and dies. It does **not** show as CPU / network / NAS-CPU load — it's pure seek latency, so don't chase those. Off-hours scheduling removes the collision entirely.
+
+**Tradeoff:** new media now appears after the 4 AM scan, not within 15 min. The proper fix to keep fast discovery *without* the choke is on-import scan triggers from Sonarr/Radarr (host `jellyfin.jellyfin.svc.cluster.local:8096`, `/Library/Media/Updated` with `Updated` type to force a path scan) — once wired, the periodic scan can be dropped. Also enable "Automatically refresh metadata from the internet" in Jellyfin library settings.
 
 ## Jellyfin: Media Not Appearing After Download
 
-**Root Cause A** (new title): NFS inotify — see above. Scheduled scan will pick it up within 15 minutes.
+**Root Cause A** (new title): NFS inotify — see above. The daily 4 AM scan picks it up (or trigger a manual scan / on-import Sonarr-Radarr scan — see scan-schedule note above).
 
 **Root Cause B** (title visible but wrong/missing metadata): Item exists in database with incomplete metadata (`NULL DateLastRefreshed`). Jellyfin won't display items with failed/interrupted metadata fetches.
 
