@@ -307,8 +307,15 @@ decode batching. **Disaggregation = separate device pools** (prefill compute-opt
 bandwidth-optimal with big batches), **KV shipped between them** (NVLink/RDMA/**NIXL** = the zero-copy
 hot path). Payoff: scale prefill vs decode pools **independently** + kill interference.
 
-**"The ABCD exercise" (QCon) — TODO:** speaker's worked scheduling example; A/B/C/D labeling not yet
-captured (likely 4 prefill/decode jobs placed across devices). *Fill in from notes.*
+**"The ABCD exercise" (QCon) — the switch-tax analogy.** The speaker had the room read aloud: reciting
+`A B C D` (or `1 2 3 4`) straight through is fast and effortless — but **interleaving** them, `A1 B2 C3
+D4`, is slow and taxing *even though it's the same symbols*. The cost isn't the work; it's the **constant
+context-switch between two kinds of work.** That's the human stand-in for **prefill (letters) vs decode
+(numbers)**: each rips through fast *homogeneously*, but force one device to interleave them and you pay
+the switch tax on every flip. The exercise is the intuition pump **for** disaggregation — split the
+streams so each device runs its own easy `A B C D`, never `A1 B2 C3 D4`. (And it's why the single-box
+mitigation is *chunked* prefill: chop the letters small so the switches are cheap, since we can't avoid
+them on one GPU.)
 
 **For us:** full disaggregation is gated (needs multiple devices + NIXL/RDMA). One iGPU does both. **But
 the interference is real on one GPU too — esp. family mode** (one kid's long prefill freezes another's
