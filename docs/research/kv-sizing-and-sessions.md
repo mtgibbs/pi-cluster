@@ -476,6 +476,117 @@ reach for and why.
 
 ---
 
+## 10. Quantization for our stack
+
+Two **independent** axes, both under-used. On 128 GB unified RAM we're *not* bit-starved like a 24 GB
+consumer GPU — so for us quantization is mostly about **fitting more models resident + leaving KV
+headroom**, not desperately shrinking one model.
+
+### Axis 1 — weight quantization (the model itself)
+
+GGUF ladder, lowest-effort-to-highest-quality:
+
+| Quant | ~bits | Use |
+|---|---|---|
+| `Q4_K_M` | ~4.5 | **sweet spot**; minimal loss. `qwen3-coder:30b` (25 GB) lives here. Family/multi-resident/speed. |
+| `Q5_K_M` / `Q6_K` | 5–6 | closer to fp16; quality-sensitive work with budget to spare. |
+| `Q8_0` | 8 | near-lossless. Q8 Qwen3-Coder-Next (85 GB) = work-mode flagship. |
+| `IQ4_XS` / `IQ3_M` / `IQ2` | <4 | **importance-matrix** quants — better quality *per bit* at the low end. The lever to **fit a bigger model than would otherwise go** (e.g. a 70B-class at `IQ4` inside budget). |
+
+- **Don't go below `Q4` for coding** — quality falls off a cliff at `Q3`/`Q2`; reserve those for
+  "fit it at all" experiments.
+- **`IQ` only to fit a *bigger* model** — otherwise K-quants are simpler and (often) faster on Vulkan.
+
+### Axis 2 — KV-cache quantization (the §1 lever — our biggest unused win)
+
+Shrinks the **cache**, not the weights — attacks the budget §1 says actually blows up
+(`gemma3:27b @ 131K = 42 GB KV` vs 17 GB weights).
+
+- **Ollama:** `OLLAMA_KV_CACHE_TYPE=q8_0` (or `q4_0`). **Requires flash attention — already on**
+  (`OLLAMA_FLASH_ATTENTION=1`). One env-var change.
+- **llama-server:** `--cache-type-k q8_0 --cache-type-v q8_0`.
+- **Payoff:** `q8_0` KV ≈ **half** the bytes at near-zero quality cost → **double the context** *or*
+  room for a 4th model. `q4_0` ≈ quarter, but measurable long-context quality risk — use sparingly.
+- **Synergy with §2:** a quantized KV makes *cached prefixes* cheaper to hold too → more sessions stay
+  warm in the same budget.
+
+### Concrete moves (matched to our two modes)
+
+1. **Turn on `OLLAMA_KV_CACHE_TYPE=q8_0` now** — prerequisite (FA) already met; loosens the §1 budget
+   across every loaded model. **Cheapest move on the board.**
+2. **Match weight quant to mode:** family/multi-resident → `Q4_K_M`; sole-tenant coder quality → `Q8`.
+3. **`IQ4_XS`** only to fit a model bigger than the budget otherwise allows.
+
+### Verify at the box (Vulkan-specific — ⚠️)
+
+- **KV-quant rides the flash-attention kernel**, and Vulkan FA has historically lagged CUDA. Confirm
+  `q8_0` KV actually loads (and doesn't silently fall to CPU) before trusting it.
+- **`IQ` quants can be slower on Vulkan** (importance-matrix lookups add decode overhead). Benchmark
+  tok/s before adopting `IQ` over `Q4_K_M`.
+
+---
+
+## 11. Optimizing agentic flows on our box
+
+Agentic flows (OpenCode + `qwen3-coder`, Dewey, anything MCP-driven) are the **canonical "long stable
+prefix + growing context + heavy tool use" workload** — so they're where every lever in this doc pays
+off most. Ordered by leverage:
+
+### 1. Prefix reuse is the whole game (§2)
+
+Each turn re-sends a prompt **~95% identical** to last turn + a small delta. Without reuse we re-prefill
+~30K tokens *every step* — seconds of dead time per turn on this iGPU.
+- **`NUM_PARALLEL=1` in work-mode** → slot affinity (growing context pinned to one slot, only the delta
+  prefills). `=2` round-robins slots and **breaks** affinity. Likely *why* work-mode is on llama-server.
+- **Verify:** `prompt_eval_count` should crater on turn 2+. If it doesn't, the cache isn't reusing —
+  that's the #1 fix.
+
+### 2. Context-assembly discipline — don't sabotage the cache (§2, §8)
+
+Reuse only survives to the **first changed token**:
+- **No volatile content near the top** (timestamp, "current time", regenerated file-tree in the system
+  prompt) — it orphans everything below. **Audit OpenCode + Dewey prompt assembly.**
+- **Stable tool set** (§8) — don't add/remove MCP servers mid-session; the tool block is in the prefix.
+  `go-unifi-mcp` lazy-mode (3 stable meta-tools) is the cache-kind shape.
+- **Order:** system → tool defs → fixed context → conversation. Volatile last, always.
+
+### 3. Manage context *growth* — every token is state you carry (§7)
+
+Loops accumulate history until they hit the cap, then thrash:
+- **Truncate/summarize tool outputs** before they enter context — don't leave 50 KB of file content as
+  permanent KV weight on every later turn.
+- **Compaction:** summarize old turns. Costs **one** cache-bust, then stable again — net win on long loops.
+- **Fresh context for bounded sub-tasks** rather than dragging the whole history into a small job.
+
+### 4. Tune the KV budget for the agentic *shape* (§1, §10)
+
+Agentic wants **more context, less parallelism** (opposite of family chat):
+- **Per-model `num_ctx` > 32K for the coder** — the global 32K cap actively hurts long loops.
+- **`q8_0` KV-quant** (§10) buys that context for ~half the bytes.
+- **`NUM_PARALLEL=1`** — less wasted KV *and* better prefix affinity.
+
+### 5. Route by step type — footprint admission for sub-steps (§1)
+
+Agentic flows are heterogeneous: planning needs the big model; tool-arg formatting, classification,
+"is it done?" checks don't. **Route light steps to `qwen3.5:9b`** at LiteLLM; reserve the coder for
+reasoning → frees its KV, runs cheap steps faster.
+
+### 6. Reliability levers (correctness, not just speed)
+
+- **Quant matters for agentic *specifically*:** our finding — **Q8 is meaningfully better for agentic
+  ops** even though 30B-Q4 is ~95% on raw codegen. Tool-call discipline degrades faster under
+  quantization than raw coding does. Keep work-mode on Q8.
+- **Text-format tool-call fallback parser** — qwen3 sometimes emits tool calls as prose; our pipelines
+  already handle it. Keep it.
+
+### 7. Frontier (benchmark before adopting)
+
+- **Speculative decoding** (`--model-draft`) — small draft proposes, coder verifies; speeds decode-bound
+  generation. **But** on one shared iGPU the draft also eats memory/compute → win uncertain. Measure tok/s.
+- **Chunked prefill** (§6) — keeps a big agent context from head-of-line-stalling other work in family mode.
+
+---
+
 ## Open questions / next measurements
 
 - [ ] Measure real **prefill tok/s** on the iGPU (`prompt_eval`) — quantify what a cache miss costs.
@@ -488,3 +599,6 @@ reach for and why.
 - [ ] **Chunked prefill?** Confirm whether our Ollama/llama.cpp interleaves prefill with decode (vs prefill-then-decode) — the family head-of-line-stall question.
 - [ ] **NVMe-pin the fixed system prompt** (`--prompt-cache`) to skip cold re-prefill after an `aimode` switch — measure load-from-NVMe vs recompute on this iGPU.
 - [ ] **Cache-hit-rate observability at LiteLLM** (§8) — log `cache_read` vs `input` tokens per key; first metric for a model-cost-optimization pass. Audit whether MCP tool sets stay stable within a session (tool churn = cache miss).
+- [ ] **Turn on `OLLAMA_KV_CACHE_TYPE=q8_0`** (§10) — FA prerequisite already met; ⚠️ verify it loads on RADV/Vulkan and doesn't fall to CPU. Cheapest single budget win.
+- [ ] **Audit OpenCode + Dewey for agentic prefix-reuse** (§11) — `prompt_eval_count` drop on turn 2; volatile content near prompt top; tool-set stability within a session.
+- [ ] **Route agentic light-steps to `qwen3.5:9b`** at LiteLLM (§11) — classification / tool-arg / "is it done?" off the coder.
