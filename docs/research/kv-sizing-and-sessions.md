@@ -316,6 +316,47 @@ load-rebalance (blind affinity can hot-spot). The 80/20 that *isn't* gated.
 
 ---
 
+## 7. The talk's close — three pillars + the philosophy
+
+The speaker's closing slide reduced the whole thing to **three pillars**, then a set of
+"mechanical empathy" reminders. Mapped to our box:
+
+| Closing pillar | The talk's point | Our reality |
+|---|---|---|
+| **Cache-aware placement** | put the request where its KV already lives (§6 routing) | LiteLLM is KV-blind today; the gated-free 80/20 is **consistent-hash-on-session** when we fan out. |
+| **Disaggregation** | split prefill vs decode onto device pools (§6) | one iGPU does both → gated; the single-box echo is **chunked prefill** (verify it fires). |
+| **KV state** | the KV cache *is* state — size it, place it, own it (§1) | **admit by projected KV footprint, not concurrency** — our partial fix is per-model `num_ctx` + LiteLLM route-by-size. |
+
+### The reminders (mechanical empathy)
+
+> **Every token becomes state that someone has to carry.**
+
+That's the thesis of the whole doc. A token isn't free once generated — it lives in the KV cache,
+occupies budget, must be placed, may be evicted, may be shipped. **Generating context is taking out a
+loan against the KV budget.**
+
+- **As users:** long context is powerful — **use it deliberately.** Don't pad prompts; every padded
+  token is KV someone carries. (Our lever: trim OpenCode/Dewey system prompts; route light work to a
+  small-`num_ctx` model.)
+- **As capacity planners:** **plan the KV, not just the QPS.** Request *count* is a lie — footprint
+  varies 500× by workflow (§1). Size the box by Σ KV-bytes, not requests/sec.
+- **As designers:** **locality is not an optimization, it is respect for the work already done.** Don't
+  scatter a session off its warm cache; don't bust the prefix with a volatile token up top (§2). The
+  prefill already happened — honor it.
+
+> **Design for the state you create.** The single sentence that ties §0 ("minimize copies") to §1–§6:
+> the copies, the evictions, the routing, the disaggregation — all of it is *managing state you chose
+> to bring into existence by accepting a token.* The cheapest KV is the token you didn't generate; the
+> second-cheapest is the one you never moved.
+
+**For us, concretely:** we are a *very* small shop, so "design for the state you create" mostly means
+**don't create state we then have to carry on one iGPU** — short stable-first prompts (§2), per-model
+`num_ctx` instead of a blanket 32K (§1), and route-by-size at LiteLLM (§1). The fancy carrying
+machinery (remote KV, disaggregation, overlap-score routing) is for shops whose state already exceeds
+one box. Ours doesn't yet — so the win is *creating less state*, not *carrying it better*.
+
+---
+
 ## Open questions / next measurements
 
 - [ ] Measure real **prefill tok/s** on the iGPU (`prompt_eval`) — quantify what a cache miss costs.
