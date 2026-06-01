@@ -235,6 +235,34 @@ as: frontier, gated, but pre-stocked.**
   squeeze it dry (verify it's on, `parallel=1` for solo, stable-prefix prompts, KV-quant for headroom).
 - Revisit if AMD fixes ROCm for Strix Halo (then: vLLM + LMCache + Valkey backend — see §4).
 
+## 6. Scaling out (multi-GPU) — where it all composes, and our fan-out path
+
+Multi-GPU is where the gated building blocks (remote KV, zero-copy/RDMA, footprint admission) assemble
+into a distributed KV fabric. Parallelism taxonomy + interconnect needs:
+
+| Parallelism | What's split | KV implication | Interconnect |
+|---|---|---|---|
+| **Tensor (TP)** | each layer's weights | KV sharded per-GPU | **tight** — NVLink/PCIe (100s GB/s), per-layer all-reduce |
+| **Pipeline (PP)** | layers across GPUs | KV per-GPU for its layers | medium — activations at boundaries |
+| **Replica / data** | full copies, load-balanced | own KV + **shared pool reuses prefixes across replicas** | **loose** — network speed |
+| **Prefill–decode disagg** | prefill pool ↔ decode pool | **KV transferred between them** (the zero-copy/RDMA hot path) | loose-ish, bandwidth-sensitive |
+
+This is where remote KV (Valkey/LMCache) and "minimize copies" earn their keep: a prefix prefilled on
+replica A is reused on B; prefill GPUs hand KV to decode GPUs without recompute.
+
+**Our position: single GPU today → not live (doubly gated: no 2nd GPU + ROCm broken). BUT our realistic
+fan-out is the *loose-coupling* path, and the scaffolding already stands:**
+- **Tensor parallelism is out** — needs NVLink-class bandwidth; our **dual 10 GbE (1.25 GB/s)** would
+  bottleneck per-layer all-reduce. ❌
+- **Replica parallel + shared KV + PD-disaggregation suit 10 GbE** (move whole requests + KV *chunks*,
+  not per-token activations): **Valkey** (deployed) = shared KV store ✅; **dual 10 GbE** = fabric ✅;
+  **LiteLLM** (already routing/load-balancing per key) = request distributor ✅.
+
+> We have the entire fan-out **scaffolding** standing; what's missing is **GPUs + a working framework**
+> (a 2nd serving box + vLLM-on-ROCm, which doesn't exist for gfx1151). The day either lands, we plug
+> GPUs into a fabric already shaped like a multi-GPU serving cluster. **The consistent gate across this
+> whole doc is GPUs + ROCm/CUDA — never the surrounding system.**
+
 ---
 
 ## Open questions / next measurements
