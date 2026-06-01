@@ -10,6 +10,8 @@
   ~96–111 GB GPU budget.** No separate VRAM to spill into.
 - **Related:** `docs/beelink-ai-stack.md` (stack + Ollama env), `docs/model-eval-2026-05.md`,
   `docs/recaps/2026-05-21-q8-coder-agent-comparison.md` (the `OLLAMA_CONTEXT_LENGTH=32768` fix).
+- **TL;DR / start here:** §9 *"Steal the principle, skip the framework"* — the one-table summary of every
+  gated datacenter idea paired with the 80/20 that runs on our single iGPU today.
 
 ---
 
@@ -432,6 +434,38 @@ A proxy in the path exposes the **cache-hit telemetry** that turns this from vib
 
 **→ Future thread:** stand up cache-hit-rate observability at LiteLLM (local) — candidate first metric
 for a "model cost optimization" pass. Mirrors §1's "measure before you tune."
+
+---
+
+## 9. Steal the principle, skip the framework
+
+The whole talk describes a **datacenter** KV stack (vLLM, SGLang, LMCache, Dynamo, NIXL) — almost all of
+it CUDA/ROCm-gated and built for fleets whose state exceeds one box. **The frameworks don't run on a
+single Vulkan iGPU. The principles do.** Every gated idea has a hardware-agnostic 80/20 on our stack:
+
+| § | Principle (the idea) | Framework / gated form | Why gated for us | Our 80/20 (runs today) | Status |
+|---|---|---|---|---|---|
+| §0 | **Minimize copies** | zero-copy / GDS / RDMA host→VRAM | needs discrete GPU + PCIe | **unified memory already kills the PCIe copy** — `mmap` weights in place | ✅ free by architecture |
+| §1 | **Admit by projected KV footprint, not concurrency** | vLLM PagedAttention + token-budget admission + continuous batching + preempt | CUDA/ROCm | per-model `num_ctx` (static footprint) + **route-by-size at LiteLLM** + TPM caps | ⚠️ partial — `num_ctx` lever unused |
+| §1 | **Shrink the KV itself** | — (just a knob) | not gated | **`q8_0`/`q4_0` KV-cache quant** (≈½/¼ KV) | 🔧 untouched lever |
+| §2 | **Reuse the prefix** (cross-session) | vLLM Automatic Prefix Caching / SGLang RadixAttention | ROCm broken on gfx1151 | **within-session** reuse: llama-server slots + Ollama context-extend | ✅ the main win |
+| §2 | **Stable-first, volatile-last** (incl. tool defs, §8) | — (the design rule) | not gated | the part we fully control — author prompts/tool sets for it | ✅ free, needs an audit |
+| §3 | **Tiered / remote KV** (spill, survive churn) | LMCache + Valkey (CPU/disk/remote, 256-tok chunks) | overkill for one box; no second tier in unified RAM | **`--prompt-cache` to NVMe** for the fixed system prompt | 🔧 future, low effort |
+| §6 | **Disaggregate prefill vs decode** | separate device pools + KV via NIXL/RDMA | needs ≥2 devices | **chunked prefill** (interleave on the one GPU) — *verify it fires* | ⚠️ verify |
+| §6 | **Cache-aware routing** (don't scatter a session off its warm cache) | Dynamo Smart Router (overlap score) / vLLM consistent-hash | CUDA + KV-event plumbing | **consistent-hash-on-session at LiteLLM** (sticky → warm replica) | 🔮 when we fan out |
+| §8 | **Don't bust the prefix** (cost) | Anthropic/OpenAI prompt caching (~10% per `cache_read`) | not gated — it's the *cloud* plane | stable system prompt + **stable MCP tool set**; same rule, billed | ✅ free discount, easy to forfeit |
+| §8 | **Measure the hit rate** | — (observability) | not gated | **LiteLLM logs `cache_read`/`input`** = hit rate; one dashboard, both planes | 🔮 first cost-opt metric |
+
+**The pattern in one line:** the gated stuff exists to *carry state across many boxes efficiently*. We
+have one box and (for now) little enough state to fit it — so our wins are **(a) the copies we avoid for
+free by unified-memory architecture, (b) creating less state in the first place (§7), and (c) the handful
+of unused knobs — `num_ctx`, KV-quant, `--prompt-cache`, stable tool sets — that need no framework at
+all.** When our state finally outgrows one box, the *same principles* tell us exactly which framework to
+reach for and why.
+
+> Litmus test for any future "should we adopt $FANCY_KV_THING?": **is it minimizing a copy we actually
+> pay, or carrying state we actually have?** On one unified-memory box the answer is usually "neither yet"
+> — revisit when §1's budget equation stops closing.
 
 ---
 
