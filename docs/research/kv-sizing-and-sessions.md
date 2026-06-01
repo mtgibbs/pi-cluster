@@ -94,6 +94,32 @@ few long, dynamically, preempt on overrun) — is CUDA/ROCm-gated.
 
 ## 2. Prefix caching — the real lever for weak hardware
 
+### Why it's *prefix* caching: the causal chain (the load-bearing intuition)
+
+A token's KV is **not a standalone value you can pluck out.** K and V are vectors bound to a position in
+a **causal chain**:
+
+- A token's K/V is computed from its hidden state.
+- That hidden state was built by **attending back over every prior token, at every layer.**
+- So token *N* is, transitively, a function of tokens *0 … N−1*.
+
+**Eviction damage is directional.** Evict a token at position *k*:
+- Tokens *before* it (`0 … k−1`) stay valid — they never depended on *k*.
+- Everything **from *k* onward is forfeit for reuse.** Regenerating *k*'s KV means re-running the forward
+  pass over `0 … k`. So it's not "recompute everything" — it's **"recompute from the broken link forward."**
+
+> **This is *the* reason caching is prefix-shaped, not "cache any token I like":** reuse is only a
+> **contiguous run from token 0**, and the first hole ends it. A mid-prefix eviction doesn't cost you one
+> token — it costs you **the entire tail behind it.** PagedAttention/blocks don't change this: pages can
+> sit in non-contiguous *physical* memory, but the *logical* sequence is still one chain — a hole in the
+> logical middle forfeits the logical tail.
+
+Two later rules fall straight out of this:
+- **§2 "stable-first, volatile-last":** a changed token high up isn't a 1-token miss — it *orphans
+  everything below* (same chain, mutation instead of eviction).
+- **§1/§3 "spill only helps if it survives churn":** eviction is a **cliff, not graceful degradation** —
+  lose a mid-prefix block and the suffix re-prefills wholesale.
+
 **Prefill vs decode:**
 - **Prefill** = process the whole prompt at once to build its KV. Compute-heavy; it's your TTFT.
   On an iGPU, prefilling 32K can take *many seconds*.
