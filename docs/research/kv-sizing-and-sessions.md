@@ -13,6 +13,29 @@
 
 ---
 
+## 0. Guiding principle (QCon, standout quote)
+
+> **"Minimize copies whenever possible."**
+
+Copies come in three flavors; the principle kills all three:
+
+| Flavor | Example | Killed by |
+|---|---|---|
+| **Memory copy** | host RAM → VRAM over PCIe | zero-copy / DMA / **unified memory** |
+| **Serialization copy** | (de)serialize across a network/proxy hop | shared memory, RDMA, fewer hops |
+| **Compute "copy" (redo)** | re-prefilling the same prefix every turn | **prefix caching** |
+
+**The twist for us:** on a discrete GPU the #1 copy is host RAM → VRAM over PCIe — the whole
+zero-copy/GDS/RDMA industry exists to minimize *that*. **Strix Halo has no such copy** — the iGPU reads
+the *same* unified RAM; weights are `mmap`'d from page cache and used in place. So we got the
+foundational "minimize copies" win **for free, by architecture** — much of the fancy GPU-zero-copy KV
+stack (§4) is clawing back a copy we never pay. The copies *we* can still hunt: the **compute redo**
+(re-prefill → prefix caching, §2) and the **one serialization hop we own** (Pi → LiteLLM →
+Ollama/llama-server; a copy per SSE chunk — negligible vs prefill/decode, but the only copy in our data
+path worth a glance for tail latency).
+
+---
+
 ## 1. KV cache sizing — the budget
 
 Everything that must fit in ~100 GB:
@@ -129,6 +152,21 @@ Our Beelink:        [ unified RAM ] ─────────► NVMe ──�
 nodes**. We have **one serving box** → remote KV buys ~nothing (no peer to share with), and it's
 CUDA/ROCm-gated anyway. The only "remote-ish" move is the NVMe `--prompt-cache` file as a crude
 persistent store across restarts.
+
+### Spill only helps when it survives churn (QCon)
+
+Spilling KV to a lower tier costs a copy **now** and only pays back on a **hit later**:
+> Spill is worth it **iff** `P(reused before evicted) × prefill_saved > spill_copy_cost`.
+> **High churn → `P(reused before evicted) → 0`** → you paid the spill copy *and* recompute anyway. Worse than not spilling.
+
+This is the exact line between our two cache tools:
+- **RAM slot cache** (within-session) — **does NOT survive** model eviction / `aimode` switch (churn = the model swap). Helps only within a residency window.
+- **NVMe `--prompt-cache`** (fixed system prompt) — **survives** (on disk, persists across reload/reboot). The one prefix worth spilling, because it must *outlive* the churn.
+
+→ Pin the stable system prompt (survives + reused → spill pays); don't spill volatile conversation KV
+(won't survive our `MAX_LOADED=3` + aimode eviction → pure loss, just recompute). And note: enterprise
+tiered-spill wins because a **huge** CPU/disk/remote pool lets entries survive longer (more hits) —
+**capacity buys churn-survival, and capacity is what we're short on.**
 
 **Punchline:** tiered/remote KV is for split-memory rigs and multi-node clusters; we're neither.
 Our actionable toolkit: **shrink KV** (quant + per-model ctx), **keep within-session prefixes warm in
