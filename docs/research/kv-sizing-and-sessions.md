@@ -263,6 +263,32 @@ fan-out is the *loose-coupling* path, and the scaffolding already stands:**
 > GPUs into a fabric already shaped like a multi-GPU serving cluster. **The consistent gate across this
 > whole doc is GPUs + ROCm/CUDA — never the surrounding system.**
 
+### Prefill/decode (P/D) disaggregation
+
+Rests on one fact: **prefill and decode are opposite workloads.**
+
+| | Prefill | Decode |
+|---|---|---|
+| Pattern | whole prompt in one parallel pass | one token at a time |
+| Bottleneck | **compute-bound** (FLOPs) | **memory-bandwidth-bound** (reads all weights+KV per token) |
+| Wants | compute throughput | bandwidth + big batches to amortize weight reads |
+| Latency role | TTFT (bursty) | inter-token latency (steady) |
+
+On shared hardware they fight: a long prefill stalls the steady decode stream (head-of-line) and breaks
+decode batching. **Disaggregation = separate device pools** (prefill compute-optimal; decode
+bandwidth-optimal with big batches), **KV shipped between them** (NVLink/RDMA/**NIXL** = the zero-copy
+hot path). Payoff: scale prefill vs decode pools **independently** + kill interference.
+
+**"The ABCD exercise" (QCon) — TODO:** speaker's worked scheduling example; A/B/C/D labeling not yet
+captured (likely 4 prefill/decode jobs placed across devices). *Fill in from notes.*
+
+**For us:** full disaggregation is gated (needs multiple devices + NIXL/RDMA). One iGPU does both. **But
+the interference is real on one GPU too — esp. family mode** (one kid's long prefill freezes another's
+decode). Single-device mitigation = **chunked prefill** (interleave prefill chunks with ongoing decode).
+⚠️ *Verify:* vLLM chunks prefill by default; whether our **Ollama/llama.cpp** build interleaves (vs
+prefill-then-decode) is unconfirmed — it's the difference between smooth concurrent family use and
+head-of-line stalls. → measurement list.
+
 ### Cache-aware routing — §2 slot-affinity at fleet scale
 
 Route a request to the worker that already has most of its prefix cached, balanced against load:
@@ -299,4 +325,5 @@ load-rebalance (blind affinity can hot-spot). The 80/20 that *isn't* gated.
 - [ ] Try **`q8_0` KV cache quant** — does it let the coder run >32K, or keep a 4th model resident?
 - [ ] Audit OpenCode + Dewey **prompt assembly** for volatile content near the top (cache-busters).
 - [ ] Evaluate **`--prompt-cache` to disk** for the fixed system prompts (worth the wiring?).
+- [ ] **Chunked prefill?** Confirm whether our Ollama/llama.cpp interleaves prefill with decode (vs prefill-then-decode) — the family head-of-line-stall question.
 - [ ] **NVMe-pin the fixed system prompt** (`--prompt-cache`) to skip cold re-prefill after an `aimode` switch — measure load-from-NVMe vs recompute on this iGPU.
