@@ -65,6 +65,31 @@ Everything that must fit in ~100 GB:
 - **`NUM_PARALLEL` per-mode** — family wants 2 (two kids, no head-of-line block); sole-tenant coder
   wants 1 (less wasted KV *and* better prefix reuse — see §2).
 
+### Admit by projected KV footprint, not concurrency (QCon)
+
+Gate admission on **KV bytes**, not **request count** — per-request footprint varies wildly by
+workflow (a 200-tok chat vs a 100K-tok agent are both "1 request" but one eats 500× the KV).
+Concurrency is wrong both ways: cap at N and N long-context users blow the budget → eviction thrash;
+N short ones waste capacity.
+
+**Uncomfortable mirror: Ollama is the anti-pattern.** It admits by **count** (`NUM_PARALLEL`) and
+reserves **worst-case footprint** (global `32K` × every slot, always — `2 × 32K` per model regardless
+of actual request size). That's *why* family-mode hits eviction churn: it's the model, not mis-tuning.
+The fix — **vLLM PagedAttention + token-budget admission + continuous batching** (pack many short OR
+few long, dynamically, preempt on overrun) — is CUDA/ROCm-gated.
+
+**Our partial approximations** (real dynamic admission is gated):
+1. **Per-model `num_ctx`** — footprint-aware *statically* (9b reserves small KV; coder big). Stop the
+   global 32K over-reserving light models.
+2. **Route by workflow at LiteLLM** — light/classification → `qwen3.5:9b`; heavy/agentic → coder.
+   Footprint-based admission *at the proxy*, before Ollama reserves KV.
+3. **TPM limits** (already set per virtual key) — crude footprint proxy; not real-time KV admission.
+
+> Nuance: you can project **prefill** footprint exactly (prompt length known); **decode** growth is
+> open-ended. vLLM admits on prompt + reserves incrementally + **preempts** on overrun. Ollama can't
+> preempt gracefully (it queues/evicts) → for us, footprint-admission = "bound worst case (ctx caps) +
+> route by size (LiteLLM)", not true dynamic admission.
+
 ---
 
 ## 2. Prefix caching — the real lever for weak hardware
