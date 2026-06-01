@@ -134,13 +134,43 @@ persistent store across restarts.
 Our actionable toolkit: **shrink KV** (quant + per-model ctx), **keep within-session prefixes warm in
 RAM** (slot cache), **NVMe-pin the fixed system prompt** for aimode-switch cold starts.
 
-## 4. The frontier (gated for us today)
+## 4. LMCache + Valkey (QCon talk) — the "removes copy from KV hot path" pitch
+
+**LMCache** = a KV cache *layer* for vLLM. Two corrected facts:
+- **Chunk = 256 *tokens* (default, configurable)** — groups pages across layers. The *byte* size is
+  model-derived; "4 MB" is a per-model figure, **not** a universal constant. Don't enshrine 4 MB.
+- **NOT remote-only — it's tiered:** CPU DRAM (hot, pinned, ~5 GB default) → local disk/NVMe →
+  remote (Redis / **Valkey** / Mooncake / InfiniStore / S3). CPU offload is the recommended baseline.
+- Also does **prefill-decode disaggregation** (one GPU prefills, another decodes, KV transferred) —
+  multi-node, irrelevant to a single box.
+
+**The Valkey pitch ("removes copy work from the KV hot path"):** Valkey is one of LMCache's *remote*
+backends. LMCache does **zero-copy** KV movement between tiers, and with **RDMA / GPUDirect Storage
+(GDS)** the GPU↔store path skips the CPU bounce buffer — so offloading/reloading KV to Valkey doesn't
+pay the serialization + memcpy tax that normally makes remote KV not worth it. Elegant: a fast,
+persistent, shareable KV tier *without* the copy overhead.
+
+**Reality check for our box:** the whole thing (zero-copy kernels, RDMA, GDS) is **vLLM + CUDA-coupled.**
+Beelink is Vulkan/RADV, ROCm broken for gfx1151, no GDS → **can't run it.** Same gate as vLLM-APC /
+SGLang. Single-node → cross-node sharing is moot anyway.
+
+**Silver lining — pre-stocked:** we **already run Valkey** (n8n-valkey on the Pi + the Beelink stack).
+The *store* half of the pitch is already deployed. The missing piece is the **GPU-side engine**
+(vLLM + working ROCm/CUDA + GDS), not the KV store. So if Strix Halo gets working ROCm — or we add an
+NVIDIA box / a second serving node — the Valkey-KV-backend path is unusually short to stand up. **File
+as: frontier, gated, but pre-stocked.**
+
+> Sources: LMCache [architecture](https://docs.lmcache.ai/developer_guide/architecture.html) /
+> [CPU RAM backend](https://docs.lmcache.ai/kv_cache/storage_backends/cpu_ram.html) /
+> [paper](https://arxiv.org/html/2510.09665v2); vLLM [KV offloading connector](https://blog.vllm.ai/2026/01/08/kv-offloading-connector.html).
+
+## 5. The frontier (gated for us today)
 
 - **vLLM Automatic Prefix Caching** (block-hash) + **SGLang RadixAttention** (radix tree) = shared
   cross-user prefix pool, the "identical system prompt prefilled once globally" win.
 - **Gated:** both want CUDA/ROCm; gfx1151 ROCm is broken. We're on the **llama.cpp slot-cache tier** —
   squeeze it dry (verify it's on, `parallel=1` for solo, stable-prefix prompts, KV-quant for headroom).
-- Revisit if AMD fixes ROCm for Strix Halo.
+- Revisit if AMD fixes ROCm for Strix Halo (then: vLLM + LMCache + Valkey backend — see §4).
 
 ---
 
