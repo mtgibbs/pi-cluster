@@ -263,6 +263,31 @@ fan-out is the *loose-coupling* path, and the scaffolding already stands:**
 > GPUs into a fabric already shaped like a multi-GPU serving cluster. **The consistent gate across this
 > whole doc is GPUs + ROCm/CUDA — never the surrounding system.**
 
+### Cache-aware routing — §2 slot-affinity at fleet scale
+
+Route a request to the worker that already has most of its prefix cached, balanced against load:
+- **vLLM-style:** consistent hashing on prefix (affinity) + load metrics (avoid hot spots).
+- **NVIDIA Dynamo Smart Router:** computes a KV-**overlap score** between the request and KV blocks live
+  across *every GPU* (tracked in a **RadixTree** fed by KV-cache events), weighted against load — and
+  **the cache-vs-load balance is the tunable knob** (ships an A/B tuning guide). `--router-track-output-blocks`
+  accounts for the *un-projectable decode-side KV growth* (callback to §1 admission).
+
+This is the **§2 slot-affinity insight at a different altitude**: single server → `NUM_PARALLEL=1` keeps
+the slot warm; fleet → cache-aware routing keeps the session on the replica that holds its prefix. Same
+rule: *don't scatter a session off its warm cache.*
+
+**For us:** LiteLLM is **KV-blind** — it routes by load/latency/cost/usage (the load half), with zero
+visibility into backend KV state (no overlap score). Full Dynamo/vLLM routers are CUDA-gated (Dynamo
+uses NIXL for KV transfer). **Hardware-agnostic poor-man's version when we fan out: consistent-hash-on-
+session at LiteLLM** → sticky sessions → warm-replica affinity, works on Ollama/llama.cpp with no
+KV-event plumbing. Gets most of the cache-hit win; misses Dynamo's precise overlap scoring + tunable
+load-rebalance (blind affinity can hot-spot). The 80/20 that *isn't* gated.
+
+> Sources: Dynamo [KV Router](https://docs.nvidia.com/dynamo/latest/router/README.html),
+> [routing guide](https://docs.nvidia.com/dynamo/latest/user-guides/kv-cache-aware-routing),
+> [smart-router blog](https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/),
+> [A/B tuning](https://docs.nvidia.com/dynamo/latest/benchmarks/kv-router-ab-testing.html).
+
 ---
 
 ## Open questions / next measurements
