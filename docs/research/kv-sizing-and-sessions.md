@@ -98,7 +98,43 @@ Ollama response JSON: `prompt_eval_count` (tokens prefilled) + `prompt_eval_dura
 
 ---
 
-## 3. The frontier (gated for us today)
+## 3. Tiered & remote KV caching — and why our hardware collapses it
+
+**The textbook hierarchy** `VRAM → DRAM → NVMe → Recompute` assumes a **discrete GPU**:
+small-fast VRAM, big-slower DRAM across PCIe, then disk. Tiering there spills KV out of cramped
+VRAM into roomy DRAM to gain capacity.
+
+**We don't have that split.** Strix Halo is **unified memory** — the iGPU's "VRAM" is a carved-out
+slice of the same 128 GB LPDDR5X the CPU uses. So our hierarchy collapses:
+
+```
+Discrete-GPU box:   VRAM ──PCIe──► DRAM ────► NVMe ──► Recompute
+Our Beelink:        [ unified RAM ] ─────────► NVMe ──► Recompute
+                      (VRAM ≡ DRAM, one pool)
+```
+
+- **VRAM→DRAM collapses to one tier.** "Offloading KV from GPU to CPU memory" moves it within the
+  *same* DIMMs — no capacity gained, no PCIe penalty. The classic tiered-KV *capacity* win (relieve a
+  24 GB card with 256 GB DRAM) **doesn't apply** — 128 GB is the whole pool, ceiling included.
+  *Caveat:* memory tiers collapse, but **GPU-vs-CPU compute does not** — a model shoved to CPU compute
+  is unusably slow even on the same RAM (the `FA=1` lesson).
+- **NVMe tier** exists (2 TB P310) but llama.cpp/Ollama **don't auto-page KV to it.** Only handle:
+  **`--prompt-cache <file>`** (manual, static save/load of one prefix). Decision rule:
+  > **NVMe-load beats recompute when prefill is slow + prefix is big & stable.**
+  > 32K KV from NVMe ≈ 2–5 s; re-prefilling 32K on the iGPU ≈ tens of seconds. → Pin the **fixed
+  > system prompt** to NVMe — biggest win right after an `aimode` switch (currently reloads + re-prefills cold).
+- **Recompute** = the default fallback prefix caching exists to avoid.
+
+**Remote / distributed KV (vLLM LMCache, Mooncake)** shares a KV pool across **multiple inference
+nodes**. We have **one serving box** → remote KV buys ~nothing (no peer to share with), and it's
+CUDA/ROCm-gated anyway. The only "remote-ish" move is the NVMe `--prompt-cache` file as a crude
+persistent store across restarts.
+
+**Punchline:** tiered/remote KV is for split-memory rigs and multi-node clusters; we're neither.
+Our actionable toolkit: **shrink KV** (quant + per-model ctx), **keep within-session prefixes warm in
+RAM** (slot cache), **NVMe-pin the fixed system prompt** for aimode-switch cold starts.
+
+## 4. The frontier (gated for us today)
 
 - **vLLM Automatic Prefix Caching** (block-hash) + **SGLang RadixAttention** (radix tree) = shared
   cross-user prefix pool, the "identical system prompt prefilled once globally" win.
@@ -117,3 +153,4 @@ Ollama response JSON: `prompt_eval_count` (tokens prefilled) + `prompt_eval_dura
 - [ ] Try **`q8_0` KV cache quant** — does it let the coder run >32K, or keep a 4th model resident?
 - [ ] Audit OpenCode + Dewey **prompt assembly** for volatile content near the top (cache-busters).
 - [ ] Evaluate **`--prompt-cache` to disk** for the fixed system prompts (worth the wiring?).
+- [ ] **NVMe-pin the fixed system prompt** (`--prompt-cache`) to skip cold re-prefill after an `aimode` switch — measure load-from-NVMe vs recompute on this iGPU.
