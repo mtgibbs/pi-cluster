@@ -357,6 +357,58 @@ one box. Ours doesn't yet — so the win is *creating less state*, not *carrying
 
 ---
 
+## 8. Tool definitions live in the prefix — MCP churn busts the cache (+ the cost angle)
+
+The §2 "stable-first, volatile-last" rule has a sharp, under-appreciated edge: **tool / function
+definitions are part of the prefix.** Chat-with-tools prompts are laid out:
+
+```
+[ system prompt ]  →  [ tool / function definitions ]  →  [ conversation messages ]
+```
+
+Tools sit high — right after the system prompt, before the conversation. So **changing the tool set
+(add/remove an MCP server, reorder tools, edit one description) breaks the cache at the tool block and
+re-prefills everything after it.** Tool churn = cache miss.
+
+> **Live irony:** dynamic tool loading (Claude Code's `ToolSearch` / deferred tools) loads schemas
+> *on demand* to save context — but each mid-session load *changes the tool block*, so the next call
+> can't reuse the prefix from that point down. It's a **context-size ↔ cache-stability trade.** Most
+> tuning only sees the context-size half.
+
+**Design implication for our MCP stack:** a request's reachable tool set should be **stable within a
+session.** If `mcp-homelab` + `local-llm-mcp` + `kiwix-mcp` are all always-present, the tool block is
+constant and caches. If we lazy-attach/detach MCP servers per task, we pay a re-prefill each time the
+set flips. (Same reason `go-unifi-mcp` "lazy mode" — `tool_index`/`execute`/`batch` — is *cache-kind*:
+3 stable meta-tools instead of a churning list of N concrete ones.)
+
+### The cost angle — same idea, billed (future cost-optimization work)
+
+This is where local prefix caching and **cloud API cost** are literally the same mechanism:
+
+- **Anthropic / OpenAI prompt caching** = prefix caching with a price tag: a **`cache_read` token costs
+  ~10% of a normal input token.** Stable prefix → ~90% off those tokens.
+- The rules are *identical* to our local ones: **stable system prompt, stable tool set, volatile last.**
+  A churny MCP tool list silently forfeits the discount on every call.
+- Other "cheaper large-model" levers, all mirroring local §1: **route-by-size** (small model for light
+  work), **Batch API** (50% off non-interactive), **shorter stable prompts** (fewer tokens to cache *or*
+  carry).
+
+### Proxy = the measurement that makes it real (you can't optimize what you can't see)
+
+A proxy in the path exposes the **cache-hit telemetry** that turns this from vibe to KPI:
+
+- The response usage carries `cache_read_input_tokens` vs `cache_creation_input_tokens` vs plain
+  `input_tokens`. **`cache_read / (cache_read + input)` _is_ the cache hit rate.**
+- **LiteLLM already sits in our local path** — it can log/aggregate these per virtual key. If we ever
+  proxy Anthropic-API traffic the same way, we get one dashboard for both planes.
+- Once it's a tracked number, "keep the tool set stable" becomes a **regression-testable metric**: a
+  cache-hit-rate drop after a prompt/tool change is a measurable cost regression, not a guess.
+
+**→ Future thread:** stand up cache-hit-rate observability at LiteLLM (local) — candidate first metric
+for a "model cost optimization" pass. Mirrors §1's "measure before you tune."
+
+---
+
 ## Open questions / next measurements
 
 - [ ] Measure real **prefill tok/s** on the iGPU (`prompt_eval`) — quantify what a cache miss costs.
@@ -368,3 +420,4 @@ one box. Ours doesn't yet — so the win is *creating less state*, not *carrying
 - [ ] Evaluate **`--prompt-cache` to disk** for the fixed system prompts (worth the wiring?).
 - [ ] **Chunked prefill?** Confirm whether our Ollama/llama.cpp interleaves prefill with decode (vs prefill-then-decode) — the family head-of-line-stall question.
 - [ ] **NVMe-pin the fixed system prompt** (`--prompt-cache`) to skip cold re-prefill after an `aimode` switch — measure load-from-NVMe vs recompute on this iGPU.
+- [ ] **Cache-hit-rate observability at LiteLLM** (§8) — log `cache_read` vs `input` tokens per key; first metric for a model-cost-optimization pass. Audit whether MCP tool sets stay stable within a session (tool churn = cache miss).
