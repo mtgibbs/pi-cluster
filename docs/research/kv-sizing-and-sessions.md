@@ -1,0 +1,119 @@
+# KV Sizing & Sessions — Local Model Serving Notes
+
+> Living notes (started at QCon, 2026-06-01) on KV cache sizing and prefix caching for
+> the Beelink local-model serving plane. The goal: get the most out of *very* constrained
+> hardware (one unified-memory APU) by not wasting prefill. Append as we learn.
+
+- **Box:** Beelink GTR9 Pro — Ryzen AI Max+ 395 (Strix Halo, gfx1151), **128 GB unified RAM**,
+  Ollama + llama-server on **Vulkan/RADV** (ROCm broken for gfx1151 — see `docs/beelink-ai-stack.md`).
+- **Serving constraint:** unified memory → **weights + KV + parallel slots all share one
+  ~96–111 GB GPU budget.** No separate VRAM to spill into.
+- **Related:** `docs/beelink-ai-stack.md` (stack + Ollama env), `docs/model-eval-2026-05.md`,
+  `docs/recaps/2026-05-21-q8-coder-agent-comparison.md` (the `OLLAMA_CONTEXT_LENGTH=32768` fix).
+
+---
+
+## 1. KV cache sizing — the budget
+
+Everything that must fit in ~100 GB:
+
+```
+Σ_models [ weights  +  (NUM_PARALLEL × CONTEXT × kv_bytes_per_token) ]   ≤  ~100 GB
+```
+
+- 30B-class GQA model: `kv_bytes_per_token` ≈ **~0.25 MB/tok** at fp16.
+- Example: coder = 25 GB weights **+ 2 slots × 32K × 0.25 MB ≈ 16 GB KV = ~41 GB**.
+- **KV, not weights, blows the budget** — observed: `gemma3:27b @ 131K ctx = 42 GB` (vs 17 GB weights).
+
+**Current Ollama knobs (from the runbook):**
+
+| Knob | Value | Effect on KV |
+|---|---|---|
+| `OLLAMA_CONTEXT_LENGTH` | `32768` | caps KV at 32K tok per model, **globally** |
+| `OLLAMA_NUM_PARALLEL` | `2` | **2× KV** — each model reserves 2 slots |
+| `OLLAMA_MAX_LOADED_MODELS` | `3` | up to 3 models resident (weights+KV) |
+| `OLLAMA_FLASH_ATTENTION` | `1` | **non-negotiable** — FA=0 bloats KV → model falls to CPU |
+
+**Sizing levers (not yet pulled):**
+- **Per-model `num_ctx`** instead of the blunt global 32K (Dewey keyword model needs ~1K; coder
+  wants *more* than 32K). Lever exists via LiteLLM per-model overrides; unused.
+- **KV cache quantization** (`q8_0` ≈ ½ KV, `q4_0` ≈ ¼) — doubles context or model headroom for
+  near-zero quality cost. Untouched. Synergistic with prefix caching (cached prefixes get cheaper too).
+- **`NUM_PARALLEL` per-mode** — family wants 2 (two kids, no head-of-line block); sole-tenant coder
+  wants 1 (less wasted KV *and* better prefix reuse — see §2).
+
+---
+
+## 2. Prefix caching — the real lever for weak hardware
+
+**Prefill vs decode:**
+- **Prefill** = process the whole prompt at once to build its KV. Compute-heavy; it's your TTFT.
+  On an iGPU, prefilling 32K can take *many seconds*.
+- **Decode** = generate one token at a time. Bandwidth-bound.
+
+In an **agentic loop**, each turn re-sends a prompt that's *mostly identical* to last turn. Without
+caching you **re-prefill the same ~30K tokens every turn.** Prefix caching keeps the shared prefix's
+KV and only prefills the *new* tokens (the delta). **The weaker the prefill, the bigger the win** —
+which is exactly why this matters most on this box.
+
+### Taxonomy (QCon notes) + what this box can actually do
+
+| Category | What it is | On the Beelink? |
+|---|---|---|
+| **Cross-session** (system prompt identical for every user) | shared KV pool across different users/requests | **❌ Mostly no** — this is vLLM Automatic Prefix Caching / SGLang RadixAttention; needs CUDA/ROCm. gfx1151 ROCm broken. |
+| **Within-session** (prior turns still in cache) | one conversation's growing prefix reused turn-to-turn | **✅ Yes — the main win.** llama-server slots (work-mode) + Ollama context reuse. |
+| **Shared prefixes allow reuse** | the principle: longest *identical* leading prefix is reused | **✅ The design rule** behind both — the part we control. |
+
+### The design rule (maximizes all three)
+
+> **Reuse = longest *identical* prefix from token 0; any divergence ends it.**
+> So: **stable & identical content FIRST, volatile content LAST.** System prompt → tool defs →
+> fixed context up top; the new user turn at the bottom. One changing token near the top (timestamp,
+> per-user value inlined into the system prompt) silently kills the whole downstream cache.
+> *Watch-out:* Dewey's system prompt names the kids inline — keep it identical across kids so the
+> (limited) reuse survives; don't fork it per-user.
+
+### What each serving path does
+
+| Path | Caching reality |
+|---|---|
+| **llama-server** (Q8 work-mode) | **slot-based prompt cache** — reuses longest common prefix in a slot. Agentic coder's growing context → only new tokens prefilled. Likely the real reason work-mode is on llama-server. |
+| **Ollama** (family-mode, incl. `qwen3-coder:30b`) | keeps the *last* context per loaded model, reuses if the new prompt **extends** it. Coarser; `NUM_PARALLEL=2` works against it (round-robin slots break prefix affinity). |
+
+### Verify it's working (do this at the box)
+
+Ollama response JSON: `prompt_eval_count` (tokens prefilled) + `prompt_eval_duration`.
+- Turn 1: `prompt_eval_count` ≈ whole prompt (full prefill).
+- Turn 2 (cache hit): should **drop to just the new tokens.** If it stays high → caching NOT working,
+  you're paying full prefill every turn.
+- Bonus: `prompt_eval_count / prompt_eval_duration` = **real prefill tok/s on this iGPU** = the cost
+  of a cache *miss*. (llama-server: `timings.prompt_n` / `prompt_ms`.)
+
+### Hardware trick for the ❌ cross-session row
+
+> **`llama.cpp --prompt-cache <file>`** can pre-bake a fixed system prompt's KV to disk and load it —
+> a poor-man's cross-session cache for one stable prefix (prefill once ever, not per cold start). Not
+> a dynamic shared pool like vLLM, but it's the lever that exists without ROCm. Integration with the
+> LiteLLM→llama-server path needs thought (runtime slot cache already covers within-session).
+
+---
+
+## 3. The frontier (gated for us today)
+
+- **vLLM Automatic Prefix Caching** (block-hash) + **SGLang RadixAttention** (radix tree) = shared
+  cross-user prefix pool, the "identical system prompt prefilled once globally" win.
+- **Gated:** both want CUDA/ROCm; gfx1151 ROCm is broken. We're on the **llama.cpp slot-cache tier** —
+  squeeze it dry (verify it's on, `parallel=1` for solo, stable-prefix prompts, KV-quant for headroom).
+- Revisit if AMD fixes ROCm for Strix Halo.
+
+---
+
+## Open questions / next measurements
+
+- [ ] Measure real **prefill tok/s** on the iGPU (`prompt_eval`) — quantify what a cache miss costs.
+- [ ] Confirm **within-session caching is actually firing** in (a) llama-server work-mode, (b) the
+      Ollama family-mode coder. (`prompt_eval_count` drop on turn 2.)
+- [ ] Decide **`NUM_PARALLEL` per-mode** (family=2, coder=1) — is that worth the aimode complexity?
+- [ ] Try **`q8_0` KV cache quant** — does it let the coder run >32K, or keep a 4th model resident?
+- [ ] Audit OpenCode + Dewey **prompt assembly** for volatile content near the top (cache-busters).
+- [ ] Evaluate **`--prompt-cache` to disk** for the fixed system prompts (worth the wiring?).
