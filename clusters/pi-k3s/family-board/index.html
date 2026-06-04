@@ -169,6 +169,26 @@
     .tag.for { color: var(--for); background: color-mix(in srgb, var(--for) 16%, transparent); }
     .tag.act { color: var(--alert); background: rgba(251,113,133,.15); font-weight: 700; }
     .tag.amt { color: var(--gold); background: rgba(245,197,99,.14); font-weight: 700; }
+
+    /* ---- urgency: OVERDUE / DUE TODAY / DUE TOMORROW ---- */
+    .tag.urg-overdue { background: var(--alert); color: var(--bg); font-weight: 700; letter-spacing: .05em; }
+    .tag.urg-today   { background: var(--gold);  color: var(--bg); font-weight: 700; letter-spacing: .05em; }
+    .tag.urg-soon    { color: var(--gold); font-weight: 700; letter-spacing: .04em; }
+
+    .card.urgent.overdue { box-shadow: inset 0 0 0 1px rgba(251,113,133,.55), 0 6px 30px -12px rgba(251,113,133,.45); }
+    .card.urgent.overdue::before { background: var(--alert); width: 8px; }
+    .card.urgent.today   { box-shadow: inset 0 0 0 1px rgba(245,197,99,.5), 0 6px 30px -12px rgba(245,197,99,.4); }
+    .card.urgent.today::before   { background: var(--gold);  width: 8px; }
+
+    /* Top-of-lane urgency banner — alert-red when any overdue, gold when only today. */
+    .urgency-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 18px;
+      margin: 0 0 18px; background: rgba(251,113,133,.13); border: 1px solid rgba(251,113,133,.42);
+      border-radius: 14px; font-family: var(--display); font-weight: 600; color: var(--alert); font-size: .98em; }
+    .urgency-banner.today-only { background: rgba(245,197,99,.13); border-color: rgba(245,197,99,.4); color: var(--gold); }
+    .urgency-banner .u-part { display: inline-flex; align-items: baseline; gap: 6px; }
+    .urgency-banner .u-part.today { color: var(--gold); }
+    .urgency-banner .num { font-size: 1.35em; font-weight: 700; }
+    .urgency-banner .dot { color: var(--faint); margin: 0 6px; }
     .src { font-size: .82em; color: var(--faint); font-style: italic; margin: -6px 0 14px; max-width: 46ch; }
 
     /* ---- card drill-in (tap a card to expand details) ---- */
@@ -595,12 +615,30 @@
   }
 
   // ---- cards ---------------------------------------------------------------
+  // Urgency on dated items — surfaces overdue / today / tomorrow for the kitchen
+  // wall's quick read. null when nothing dated or in the comfortable future.
+  function urgencyOf(it) {
+    if (!it.due_at) return null;
+    const p = parseDue(it.due_at); if (!p) return null;
+    const k = dayKey(p), tk = todayKey();
+    if (k < tk) {
+      const days = Math.round((new Date(tk+'T00:00:00Z') - new Date(k+'T00:00:00Z')) / 86400000);
+      return { kind: 'overdue', label: days === 1 ? 'OVERDUE 1D' : 'OVERDUE ' + days + 'D' };
+    }
+    if (k === tk) return { kind: 'today', label: 'DUE TODAY' };
+    const days = Math.round((new Date(k+'T00:00:00Z') - new Date(tk+'T00:00:00Z')) / 86400000);
+    if (days === 1) return { kind: 'soon', label: 'DUE TOMORROW' };
+    return null;
+  }
   function agendaCard(it, p) {
     const fc = forColor(it.student);
-    return '<article class="card'+(it.action_required?' alert':'')+'" style="--for:'+fc+'">' +
+    const urg = urgencyOf(it);
+    const urgCls = urg ? ' urgent ' + urg.kind : '';
+    const urgPill = urg ? '<span class="tag urg-'+urg.kind+'">'+urg.label+'</span>' : '';
+    return '<article class="card'+urgCls+(it.action_required?' alert':'')+'" style="--for:'+fc+'">' +
       '<div class="when">'+(p.allDay?'':'<span class="clk">🕑</span>')+esc(timeLabel(p))+'</div>' +
       '<h3 class="ttl">'+esc(it.title)+'</h3>' +
-      '<div class="tags">' + tagsFor(it) + '</div>' +
+      '<div class="tags">' + urgPill + tagsFor(it) + '</div>' +
       (it.source_hint ? '<div class="src">“'+esc(it.source_hint)+'”</div>' : '') +
       quadHTML(it) + detailsHTML(it) + '</article>';
   }
@@ -693,8 +731,18 @@
     const datedSeen  = datedAll.filter(x =>  folded(x.it));
 
     let html = "";
+    // Urgency banner — only over VISIBLE (not-folded) items, so seen/auto-stale ones
+    // don't count toward the alert. Hidden when nothing is urgent.
+    const overdueN = datedShown.filter(x => (urgencyOf(x.it) || {}).kind === 'overdue').length;
+    const todayN   = datedShown.filter(x => (urgencyOf(x.it) || {}).kind === 'today').length;
+    if (overdueN || todayN) {
+      const parts = [];
+      if (overdueN) parts.push('<span class="u-part"><span class="num">'+overdueN+'</span> '+(overdueN===1?'thing':'things')+' overdue</span>');
+      if (todayN)   parts.push('<span class="u-part today"><span class="num">'+todayN+'</span> due today</span>');
+      html += '<div class="urgency-banner'+(overdueN ? '' : ' today-only')+'">' + parts.join('<span class="dot">·</span>') + '</div>';
+    }
     if (!datedAll.length) {
-      html = emptyState("🌤️", "The calendar's clear", "Nothing scheduled right now.");
+      html += emptyState("🌤️", "The calendar's clear", "Nothing scheduled right now.");
     } else {
       const groups = new Map();
       for (const x of datedShown) { const k = dayKey(x.p); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
