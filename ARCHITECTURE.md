@@ -724,8 +724,8 @@ Config lives in `mtgibbs/beelink-ansible`, deployed via Ansible + systemd-timer 
 │  ┌──────────────────────────┐  ┌──────────────────────────────────┐ │
 │  │  Ollama                  │  │  LiteLLM + Postgres 16           │ │
 │  │  Vulkan/RADV GFX1151     │  │  • Virtual keys (DB-backed)      │ │
-│  │  OLLAMA_MAX_LOADED=5     │  │  • Per-client model allowlists   │ │
-│  │  OLLAMA_NUM_PARALLEL=2   │  │  • ai.lab.mtgibbs.dev/v1/        │ │
+│  │  MAX_LOADED=3  NPAR=2    │  │  • Per-client model allowlists   │ │
+│  │  CONTEXT=32K  KV=q8_0   │  │  • ai.lab.mtgibbs.dev/v1/        │ │
 │  │  /srv/models (1TB LV)    │  │  • litellm_db named volume       │ │
 │  └──────────┬───────────────┘  └──────────────┬───────────────────┘ │
 │             │ :11434                           │ :4000               │
