@@ -159,11 +159,33 @@ which is exactly why this matters most on this box.
 ### Verify it's working (do this at the box)
 
 Ollama response JSON: `prompt_eval_count` (tokens prefilled) + `prompt_eval_duration`.
-- Turn 1: `prompt_eval_count` ≈ whole prompt (full prefill).
-- Turn 2 (cache hit): should **drop to just the new tokens.** If it stays high → caching NOT working,
-  you're paying full prefill every turn.
+- Turn 1: full prefill — slow `prompt_eval_duration`.
+- Turn 2 (cache hit): **`prompt_eval_duration` collapses.**
 - Bonus: `prompt_eval_count / prompt_eval_duration` = **real prefill tok/s on this iGPU** = the cost
   of a cache *miss*. (llama-server: `timings.prompt_n` / `prompt_ms`.)
+
+> ⚠️ **Correction from measurement:** watch **`prompt_eval_duration`, NOT `prompt_eval_count`.** Ollama
+> reports the *full* prompt token count every turn even on a cache hit (it counts the whole prompt, not
+> the un-cached delta). The **duration** is the honest signal.
+
+### ✅ MEASURED — 2026-06-04 (qwen3-coder:30b, ~5,078-token shared prefix, over Tailscale SSH)
+
+| call | `prompt_eval_count` | prefill time | prefill tok/s | |
+|---|---|---|---|---|
+| 1 (cold) | 5,078 | **22,615 ms** | 225 | full prefill |
+| 2–6 (warm) | 5,078 | **~290 ms** | ~17,000 | **prefix KV reused** |
+
+**Within-session prefix reuse is ON and the win is enormous: ~77× (22.6 s → 0.29 s).** The cold-prefill
+rate is **only ~225 tok/s** on this iGPU — so a cold **32K** agentic context would cost **~145 seconds**
+of prefill. Reuse is the difference between "instant" and "two-and-a-half-minute stall every turn." This
+is the §0/§2 thesis confirmed: *the weaker the prefill, the bigger the caching win.*
+
+**Two surprises:**
+- **No `NUM_PARALLEL=2` warm-up penalty** — call 2 *already* hit (290 ms), no 2-call slot-fill cost.
+  Why: llama.cpp picks the slot with the **longest common prefix**, so a single sequential stream lands
+  on its own warm slot. → **revises §11's affinity worry:** `NUM_PARALLEL=2` doesn't hurt a *single*
+  sequential agent; it only thrashes when **2+ different long sessions** compete for the 2 slots.
+- **`prompt_eval_count` is a red herring** (see correction above) — duration is truth.
 
 ### Hardware trick for the ❌ cross-session row
 
