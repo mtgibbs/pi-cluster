@@ -562,8 +562,11 @@ across 3 loaded models that's **~9 GB freed** → headroom for a bigger `num_ctx
 
 > **Prereq confirmed met:** `OLLAMA_FLASH_ATTENTION=1` is already set (q8_0 KV requires FA). Net: this is
 > a **one-line, zero-cost-quality, ~9 GB win** — the cheapest move on the board, now empirically verified.
-> *Not yet permanent* — tested via on-box compose edit, then reverted to avoid untracked drift; promote it
-> through whatever manages `/opt/ai-stack/docker-compose.yml` to make it stick.
+>
+> ✅ **PERMANENT (deployed 2026-06-04).** Committed to the **`beelink-ansible`** repo (`9a2cdfd`,
+> `playbooks/50-ai-stack.yml` — the box is Ansible-managed, *not* Flux/K3s) and applied via
+> `ansible-playbook 50-ai-stack.yml`. The `/opt/ai-stack/docker-compose.yml` on the box is a rendered
+> artifact, so hand-edits there get overwritten on the next git-pull — the playbook is the source of truth.
 
 ---
 
@@ -640,6 +643,6 @@ reasoning → frees its KV, runs cheap steps faster.
 - [ ] **Chunked prefill?** Confirm whether our Ollama/llama.cpp interleaves prefill with decode (vs prefill-then-decode) — the family head-of-line-stall question.
 - [ ] **NVMe-pin the fixed system prompt** (`--prompt-cache`) to skip cold re-prefill after an `aimode` switch — measure load-from-NVMe vs recompute on this iGPU.
 - [ ] **Cache-hit-rate observability at LiteLLM** (§8) — log `cache_read` vs `input` tokens per key; first metric for a model-cost-optimization pass. Audit whether MCP tool sets stay stable within a session (tool churn = cache miss).
-- [ ] **Turn on `OLLAMA_KV_CACHE_TYPE=q8_0`** (§10) — FA prerequisite already met; ⚠️ verify it loads on RADV/Vulkan and doesn't fall to CPU. Cheapest single budget win.
+- [x] **Turn on `OLLAMA_KV_CACHE_TYPE=q8_0`** (§10) — ✅ DONE 2026-06-04. Verified on RADV/Vulkan (KV 6.0→3.2 GiB, 100% GPU, no CPU fallback); committed to `beelink-ansible` `9a2cdfd` + deployed.
 - [ ] **Audit OpenCode + Dewey for agentic prefix-reuse** (§11) — `prompt_eval_count` drop on turn 2; volatile content near prompt top; tool-set stability within a session.
 - [ ] **Route agentic light-steps to `qwen3.5:9b`** at LiteLLM (§11) — classification / tool-arg / "is it done?" off the coder.
