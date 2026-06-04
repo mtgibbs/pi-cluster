@@ -546,6 +546,25 @@ Shrinks the **cache**, not the weights — attacks the budget §1 says actually 
 - **`IQ` quants can be slower on Vulkan** (importance-matrix lookups add decode overhead). Benchmark
   tok/s before adopting `IQ` over `Q4_K_M`.
 
+### ✅ MEASURED — 2026-06-04 (`OLLAMA_KV_CACHE_TYPE=q8_0`, qwen3-coder:30b @ 32K × 2 parallel)
+
+Added the env var, recreated the ollama container, read the load logs, reverted. Result:
+
+| KV type | KV-cache size (Vulkan0) | GPU offload | resident model SIZE | output |
+|---|---|---|---|---|
+| **f16** (default) | **6.0 GiB** | 49/49 layers | 25 GB | coherent |
+| **`q8_0`** | **3.2 GiB** | 49/49 layers | 22 GB | coherent ("KV test OK") |
+
+**The lever works on RADV/Vulkan — the ⚠️ is cleared.** KV ~halved (6.0 → 3.2 GiB, −47%), **stayed 100%
+GPU** (`kv cache device=Vulkan0`, `offloaded 49/49 layers` — *no CPU fallback*), `KvCacheType:q8_0`
+confirmed in the runner load request, generation coherent. Per-model resident footprint dropped ~3 GB;
+across 3 loaded models that's **~9 GB freed** → headroom for a bigger `num_ctx` *or* a 4th model.
+
+> **Prereq confirmed met:** `OLLAMA_FLASH_ATTENTION=1` is already set (q8_0 KV requires FA). Net: this is
+> a **one-line, zero-cost-quality, ~9 GB win** — the cheapest move on the board, now empirically verified.
+> *Not yet permanent* — tested via on-box compose edit, then reverted to avoid untracked drift; promote it
+> through whatever manages `/opt/ai-stack/docker-compose.yml` to make it stick.
+
 ---
 
 ## 11. Optimizing agentic flows on our box
