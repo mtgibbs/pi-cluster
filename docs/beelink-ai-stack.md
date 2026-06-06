@@ -306,6 +306,27 @@ restart is insufficient; only a host reboot clears the iGPU/driver state. Then r
 
 > Watch `BeelinkGPUSaturated` / latency. If wedges recur, next levers: lower `OLLAMA_NUM_PARALLEL`, pin fewer models / shorter `keep_alive`. (FA=0 is NOT a lever — it breaks GPU placement.)
 
+#### 2026-06-06 — root cause confirmed: the unsloth **UD-Q4_K_XL** quant
+
+The trigger is a **specific model/quant**, not load in general: `qwen3-30b-instruct`,
+which was the **unsloth `Qwen3-30B-A3B-Instruct-2507-GGUF:UD-Q4_K_XL`** (dynamic mixed
+quant). It hangs the Vulkan compute ring **every time it's loaded/run** — confirmed it
+re-wedged immediately after a clean reboot. Other models are fine on the same box:
+`gemma3:27b`, `qwen3-4b-instruct`, `qwen3-coder:30b`, and `qwen3.6:35b-a3b-q4_K_M`
+(standard q4_K_M) all generate normally.
+
+**Two wedge signatures seen** — both recover only with a reboot:
+1. *(2026-05-22)* GPU busy **0%**, runner blocked waiting on a submission, dmesg clean.
+2. *(2026-06-06)* GPU busy **pegged 100% at idle**, model stuck in `Stopping…` (runner
+   can't die), `dmesg`: `amdgpu … Fence fallback timer expired on ring comp_1.1.0`.
+   This one silently drags **all** other inference (planner +~2s, qwen3.6 decode 44→31 tok/s).
+
+**Permanent fix (done 2026-06-06):** `ollama rm qwen3-30b-instruct` + deregistered it from
+LiteLLM (`/model/delete`) + dropped from the Dewey key allowlist. Not in the playbook (it
+was manual per-box state), so it won't return on deploy. **Rule: do not pull unsloth `UD-*`
+dynamic quants for MoE models on this RADV/GFX1151 Vulkan box — use a standard `q4_K_M`
+quant or the official Ollama tag.** Dewey's answer model is now `qwen3.6:35b-a3b-q4_K_M`.
+
 ## Decisions Log
 
 ### Vulkan over ROCm — FORCED WORKAROUND (2026-05-20)

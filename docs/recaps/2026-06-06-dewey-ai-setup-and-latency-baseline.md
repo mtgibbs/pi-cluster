@@ -108,6 +108,24 @@ Source of truth for config = `beelink-ansible` (commits below) + `docs/beelink-a
 3. **Answer prefill (~7s)** — prefix-cache the constant system prompt (KV research §2: ~77×
    on prefix reuse), trim the system prompt, and/or lower `ARTICLE_CHARS`.
 
+## UPDATE 2026-06-06 — the GPU wedge WAS the dominant latency cause (cleared)
+
+Lever #1 turned out to be most of the problem. The idle GPU was **pegged at 100%** by the
+wedged `qwen3-30b-instruct` (unsloth UD quant) stuck in `Stopping…` — it dragged every
+inference. Removed it from LiteLLM, rebooted, `ollama rm`'d the quant (permanent — see the
+wedge runbook in `beelink-ai-stack.md`). Re-measured on the clean GPU (idle now **0%**):
+
+| Prompt | Before (pegged GPU) | After (clean GPU) |
+|---|---|---|
+| photosynthesis (1 lookup) | 17s first / 25s total | **~7s first / ~14s total** |
+| assignment (2 lookups, 5.6k-char answer) | 29s first / 67s total | **8.5s first / 37s total** |
+| qwen3.6 decode | 31 tok/s | **44 tok/s** |
+| idle GPU | 100% | **0%** |
+
+First-token roughly **halved** just from clearing the wedge. Levers #2 (parallel retrieval)
+and #3 (prefix-cache / trim prompt) remain available to push first-token toward ~3-4s, but
+are now optional rather than urgent.
+
 ## Commits today
 
 **beelink-ansible:**
