@@ -83,6 +83,46 @@ For ad-blocking to work remotely:
 2.  **Override Local DNS**: Enabled.
 3.  **Use with Exit Node**: Enabled.
 
+## Remote Ops (deploy / diagnose the lab from off-net)
+
+**The gap (learned 2026-06-04, fixed 2026-06-06):** member devices (laptop,
+`autogroup:member`) only get the `192.168.1.55/.56` Pi-hole `/32`s advertised —
+**not** the full home `/24`. So anything addressed by a LAN IP other than those two
+(e.g. the Beelink at `192.168.1.70`) is **unrouted over Tailscale**. Off-net, only
+ICMP + SSH to the tailnet `100.x` IPs work; service ports (`:443` Caddy, `:6443`
+k8s API) return `000` because `autogroup:member` has no grant to `tag:inference`.
+
+**Rule: address cross-site ops by the tailnet, never the LAN IP.** Use the MagicDNS
+name (stable across IP changes) or the `100.x` literal.
+
+- **Tailnet domain (MagicDNS suffix):** `tailf8d786.ts.net`.
+- **Beelink:** `beelink-ai.tailf8d786.ts.net` → `100.123.94.31`, `tag:inference`.
+- **`get_tailscale_status` (MCP) reports `ready:false` even when healthy** — trust
+  `tailscale status` / `kubectl describe connector` instead.
+
+### Ansible deploys to the Beelink
+The `beelink-ansible` inventory pins `ansible_host: beelink-ai.tailf8d786.ts.net`,
+so `ansible-playbook … -l inference` connects over the tailnet from **anywhere**
+with **no `-e ansible_host=` override**. Requires Tailscale **up** on the control
+machine (there is no bare-LAN `.70` fallback by design). On-LAN, Tailscale still
+prefers a direct path, so home deploys stay fast. (First use of a new MagicDNS
+hostname needs its key in `known_hosts`; it presents the same host key as the IP.)
+
+### Break-glass: reach a host's internal Docker services from off-net
+Ollama (`:11434`) and LiteLLM (`:4000`) are **Docker-internal by design — never
+host-expose them.** To hit them remotely, tunnel through SSH to the tailnet IP, then
+address the container on the Docker network:
+```bash
+ssh mtgibbs@100.123.94.31           # tailnet IP (or MagicDNS name)
+#  on-box, find the container IP:
+docker inspect <ctr> | grep IPAddress
+curl http://172.18.0.5:11434/...    # e.g. Ollama on the bridge network
+```
+The Caddy `:443` front door (`https://ai.lab.mtgibbs.dev`) is the *intended* remote
+path, but needs the Phase-2 `autogroup:member → tag:inference` grant (below) first.
+
+> Spec & verify gate for this work: `specs/remote-ops-access/`.
+
 ## Troubleshooting
 
 ### Verification Commands

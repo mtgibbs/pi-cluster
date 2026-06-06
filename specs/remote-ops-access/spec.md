@@ -2,7 +2,7 @@
 
 > **REASONS Canvas** (see `specs/TEMPLATE.md`). Constraints-before-work order.
 
-- **Status:** Draft v0.1
+- **Status:** Phase 1 + Phase 3 DONE (LIVE-verified 2026-06-06); Phase 2 pending (human ACL edit)
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md` Core Mandates)
 - **Touches:** `beelink-ansible` repo → `inventory.yml` (Phase 1); Tailscale tailnet ACL policy + MagicDNS (Phase 2); `.claude/skills/tailscale-ops/SKILL.md` (capture the gap + the fix).
@@ -146,8 +146,9 @@ gives `beelink-ai` a tailnet `ansible_host` (not a LAN-only alias) and contains 
 
 ## 12. Open questions
 
-- **OQ1:** Exact MagicDNS tailnet domain (`beelink-ai.<tailnet>.ts.net`)? If unknown, ship Phase 1 with the
-  `100.123.94.31` literal and switch to the name once confirmed.
+- **OQ1:** ~~Exact MagicDNS tailnet domain?~~ **RESOLVED 2026-06-06:** suffix `tailf8d786.ts.net` →
+  `beelink-ai.tailf8d786.ts.net` (→ `100.123.94.31`). Inventory now uses the MagicDNS name; host key
+  confirmed identical to the trusted IP and added to `known_hosts`. LIVE `ansible -m ping` → `pong`.
 - **OQ2:** Phase-2 grant scope — `tag:inference:443` (least-priv) vs `*` (mirrors existing member grant)?
 - **OQ3:** Does the existing `192.168.1.0/24` subnet-route grant already let the laptop resolve Pi-hole
   off-net (making split-DNS unnecessary), or is MagicDNS split-DNS required for `*.lab.mtgibbs.dev`?
