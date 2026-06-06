@@ -1,8 +1,80 @@
+# Session recap — 2026-06-06 (full day)
+
+Four threads, two repos, one very long day. The threads are ordered as they ran;
+later sections of this doc contain the detailed metrics and config for threads 3–4.
+
+## Session overview
+
+| # | Thread | Outcome | Key artefacts |
+|---|---|---|---|
+| 1 | **Remote-ops over Tailscale** (spec resumed) | Beelink reachable off-LAN and over exit-node via Tailscale subnet route; `beelink-ansible` deploys via MagicDNS with no overrides | `beelink-ansible` `cec8440`, `546bcf4`; pi-cluster `47d1fba`, `29f4fb6`; `specs/remote-ops-access/` |
+| 2 | **Model-landscape research triage** | §15 of the local-coding-agent research log: gpt-oss-120b, Qwen3.6, K8sGPT/HolmesGPT evaluated; Qwen3.6 confirmed real | pi-cluster `528d633`; `docs/research/local-coding-agent-sdd.md` §15 |
+| 3 | **Kids' AI setup for summer school** | Ronin + Rory accounts on Dewey; Dewey rebuilt (Qwen3.6 answer model, query planning, parallel retrieval, schoolwork system prompt) | `beelink-ansible` `b2e8c78`–`998a19a`; see [Accounts](#accounts) and [Dewey pipeline behavior](#dewey-pipeline-behavior-as-built-today) below |
+| 4 | **GPU wedge saga + true root cause** | Traced recurring iGPU hangs to Ollama 0.17.7 running concurrent requests on a Qwen MoE architecture; fixed by bumping to 0.30.6 + `OLLAMA_IGPU_ENABLE=1`; decode 44 → 65.6 tok/s | `beelink-ansible` `e4a7057`, `201b1ac`; `docs/beelink-ai-stack.md` wedge runbook |
+
+Threads 3–4 are documented in full below (metrics baseline, stage breakdown, final numbers,
+permanent-fix invariants). Threads 1–2 are summarised in their own sections immediately below;
+for the deep detail see the linked artefacts.
+
+---
+
+## Thread 1 — Remote-ops over Tailscale (Phase 1–3)
+
+This resumed the spec at `specs/remote-ops-access/`. Three phases shipped today.
+
+**Phase 1 — beelink-ansible inventory fix** (`cec8440`, `546bcf4`, beelink-ansible)
+
+`inventory.yml` was pointing at `192.168.1.70` — the Beelink's LAN IP, which is
+unroutable from off-network even over the tailnet. Switched `ansible_host` to
+`beelink-ai.tailf8d786.ts.net` (MagicDNS, resolves to Tailscale IP `100.123.94.31`).
+Live-verified with `ansible -m ping beelink`. Deploys now work from anywhere without
+an `-e ansible_host=` override.
+
+**Phase 2 — subnet route advertisement** (`47d1fba`, pi-cluster)
+
+Added `192.168.1.70/32` to the Tailscale connector's `advertiseRoutes` in
+`clusters/pi-k3s/tailscale-config/connector.yaml` and approved the route. This makes
+`chat.lab.mtgibbs.dev`, `dewey.lab.mtgibbs.dev`, `ai.lab.mtgibbs.dev`, and
+`controlpanel.lab.mtgibbs.dev` reachable over the tailnet — including from a device
+using the Pi cluster as an exit node.
+
+**Phase 3 — documentation + OQ1 resolved** (`29f4fb6`, pi-cluster)
+
+Captured the off-net gap and SSH break-glass procedure in `.claude/skills/tailscale-ops/SKILL.md`.
+OQ1 (tailnet domain) resolved: `tailf8d786.ts.net`.
+
+SSH break-glass: `ssh -i ~/.ssh/beelink-ai -o IdentitiesOnly=yes matt@beelink-ai.tailf8d786.ts.net`
+(use `-o IdentitiesOnly=yes` when the 1Password SSH agent is locked, to prevent agent-negotiation
+failures from blocking the on-disk key).
+
+---
+
+## Thread 2 — Model-landscape research triage (§15)
+
+Commit `528d633` added §15 to `docs/research/local-coding-agent-sdd.md`. Three models evaluated:
+
+- **gpt-oss-120b** — OpenAI's rumoured open-weight 120B model. Verified it does not yet exist
+  as a publicly released artefact; watching but not planning around it.
+- **Qwen3.6 (35B-A3B)** — verified real: `qwen3.6:35b-a3b-q4_K_M` exists on the Ollama registry;
+  MoE, A3B active params, hybrid-thinking. Adopted same day as the Dewey answer model (thread 3).
+- **K8sGPT / HolmesGPT** — AI-assisted Kubernetes diagnostics tools. Evaluated for the homelab.
+  HolmesGPT in particular can analyse Flux/pod issues from natural-language queries. Noted as
+  a candidate for the cluster; no deployment decision yet.
+
+---
+
+## Thread 3–4 — Kids' AI setup + GPU wedge (detailed)
+
+The rest of this doc covers threads 3 and 4 in full. The original framing below
+("metrics baseline") is preserved because the numbers are the durable record.
+
+---
+
 # Recap: Kids' AI Setup + Dewey rebuild + latency baseline (2026-06-06)
 
-Big session. Stood up the kids' AI for summer school (accounts + a working,
-schoolwork-tuned Dewey), fixed a GPU wedge, and rebuilt Dewey's retrieval.
-**This doc is the metrics baseline captured right before starting latency work** —
+Stood up the kids' AI for summer school (accounts + a working, schoolwork-tuned Dewey),
+fixed a GPU wedge, and rebuilt Dewey's retrieval.
+**This section is the metrics baseline captured right before starting latency work** —
 so the numbers survive context compaction and we can measure optimization against them.
 
 Source of truth for config = `beelink-ansible` (commits below) + `docs/beelink-ai-stack.md`.
@@ -87,15 +159,11 @@ Source of truth for config = `beelink-ansible` (commits below) + `docs/beelink-a
   Login verified HTTP 200. (Stale dup `dewey-*` items in `pi-cluster` vault were deleted.)
 - **Adults chat:** Matt (admin) + Julia already existed.
 
-## Tailscale / remote ops (earlier today)
+## Tailscale / remote ops
 
-- `beelink-ansible/inventory.yml` addresses the Beelink via MagicDNS
-  **`beelink-ai.tailf8d786.ts.net`** (→ 100.123.94.31) — remote ansible deploys work with no
-  `-e ansible_host=` override.
-- Connector advertises **`192.168.1.70/32`** (approved, durable) so chat/Dewey/ai/controlpanel
-  are reachable over the tailnet (incl. on the exit node). See `specs/remote-ops-access/`.
-- SSH to the Beelink: on-disk key `~/.ssh/beelink-ai` (`-o IdentitiesOnly=yes`) when the
-  1Password SSH agent is locked.
+Covered in full in [Thread 1](#thread-1--remote-ops-over-tailscale-phase-13) above.
+Summary: MagicDNS inventory + `192.168.1.70/32` subnet route + SSH break-glass documented.
+Spec: `specs/remote-ops-access/`.
 
 ## Latency optimization plan (next — measure against the baseline above)
 
@@ -153,23 +221,27 @@ diminishing returns. Final state:
 
 ## Commits today
 
-**beelink-ansible:**
-- `cec8440` inventory: address beelink-ai over the tailnet (ansible_host)
-- `546bcf4` inventory: use beelink-ai MagicDNS name
-- `b2e8c78` dewey: gemma3-27b answer model + BYPASS_MODEL_ACCESS_CONTROL (interim wedge fix)
-- `071717d` dewey: Qwen3.6-35B-A3B answer model (think:false) + pre-warm both models
-- `83763e9` dewey: source-evaluation + AI-answer-skepticism prompt tuning
-- `e278ba9` dewey: retrieval relevance (keep qualifiers, roman numerals, best-result picker)
-- `faa68e8` dewey: query planning (decompose multi-part prompts)
-- `998a19a` dewey: parallel multi-query retrieval
+**beelink-ansible** (local only, no remote):
+- `cec8440` thread 1 — inventory: address beelink-ai over the tailnet (ansible_host)
+- `546bcf4` thread 1 — inventory: use beelink-ai MagicDNS name
+- `b2e8c78` thread 3 — dewey: gemma3-27b answer model + BYPASS_MODEL_ACCESS_CONTROL (interim)
+- `071717d` thread 3 — dewey: Qwen3.6-35B-A3B answer model (think:false) + pre-warm
+- `83763e9` thread 3 — dewey: source-evaluation + AI-answer-skepticism prompt tuning
+- `e278ba9` thread 3 — dewey: retrieval relevance (keep qualifiers, roman numerals, best-result)
+- `faa68e8` thread 3 — dewey: query planning (decompose multi-part prompts)
+- `998a19a` thread 3 — dewey: parallel multi-query retrieval
+- `e4a7057` thread 4 — dewey: pin WEBUI_SECRET_KEY + disable OWUI aux-generation
+- `201b1ac` thread 4 — fix(ollama): bump 0.17.7 → 0.30.6 + OLLAMA_IGPU_ENABLE=1
 
-**pi-cluster (origin/main):**
-- `29f4fb6` docs(remote-ops): off-net gap + break-glass; OQ1 resolved (Phase 3)
-- `528d633` docs(research): §15 model-landscape triage
-- `47d1fba` feat(tailscale): advertise 192.168.1.70/32 (Phase 2)
-- `3d6142b` docs(recap): this file (metrics baseline)
-- `48db335` docs: GPU wedge root cause + latency halved
-- _(this update: final latency numbers)_
+**pi-cluster (origin/main @ `0e12ac1`):**
+- `ef91ff3` thread 1 — spec(remote-ops-access): plan spec
+- `29f4fb6` thread 1 — docs(remote-ops): off-net gap + break-glass; OQ1 resolved (Phase 3)
+- `47d1fba` thread 1 — feat(tailscale): advertise 192.168.1.70/32 (Phase 2)
+- `528d633` thread 2 — docs(research): §15 model-landscape triage
+- `3d6142b` thread 3 — docs(recap): this file (metrics baseline)
+- `48db335` thread 4 — docs: GPU wedge root cause (unsloth UD quant) + latency halved
+- `3ddf7e4` thread 4 — docs(recap): final latency numbers + permanent-fix invariants
+- `0e12ac1` thread 4 — docs: GPU wedge TRUE root cause (concurrent MoE + stale Ollama 0.17.7)
 
 ## UPDATE 2026-06-06 (final) — GPU wedge TRUE root cause + Ollama bump
 
@@ -198,16 +270,3 @@ months behind. Fix = **bump Ollama (not the host — host was already current)**
   (one message = one pipeline request, not four — was a concurrency source).
 - Pre-warm task pins `qwen3.6:35b-a3b-q4_K_M` (think:false) + `qwen3-4b-instruct`.
 
-**beelink-ansible:**
-- `cec8440` inventory: address beelink-ai over the tailnet (ansible_host)
-- `546bcf4` inventory: use beelink-ai MagicDNS name
-- `b2e8c78` dewey: gemma3-27b answer model + BYPASS_MODEL_ACCESS_CONTROL (interim wedge fix)
-- `071717d` dewey: Qwen3.6-35B-A3B answer model (think:false) + pre-warm both models
-- `83763e9` dewey: source-evaluation + AI-answer-skepticism prompt tuning
-- `e278ba9` dewey: retrieval relevance (keep qualifiers, roman numerals, best-result picker)
-- `faa68e8` dewey: query planning (decompose multi-part prompts)
-
-**pi-cluster (origin/main):**
-- `29f4fb6` docs(remote-ops): off-net gap + break-glass; OQ1 resolved (Phase 3)
-- `528d633` docs(research): §15 model-landscape triage
-- `47d1fba` feat(tailscale): advertise 192.168.1.70/32 (Phase 2)
