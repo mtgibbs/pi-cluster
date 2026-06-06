@@ -9,12 +9,17 @@ spec:
   hostname: pi-cluster-exit
   # Enable as exit node for full tunnel mode
   exitNode: true
-  # Advertise Pi-hole IPs as subnet routes for DNS
-  # This ensures DNS queries to these IPs route through the tunnel
+  # Advertise specific LAN IPs as subnet routes so they're reachable over the
+  # tailnet (incl. while using this Connector as a full-tunnel exit node — without
+  # a /32 here, traffic to the IP blackholes at the exit node). NOT the full /24
+  # (brittle, broader than needed); one /32 per host we actually need off-LAN.
+  # .70/32 falls inside the existing 192.168.1.0/24 autoApprover for
+  # tag:k8s-operator, so it auto-approves with no admin-console step.
   subnetRouter:
     advertiseRoutes:
-      - 192.168.1.55/32   # Pi-hole primary (pi-k3s)
-      - 192.168.1.56/32   # Pi-hole secondary (pi5-worker-1)
+      - 192.168.1.55/32   # Pi-hole primary (pi-k3s) — remote DNS
+      - 192.168.1.56/32   # Pi-hole secondary (pi5-worker-1) — remote DNS
+      - 192.168.1.70/32   # Beelink — Caddy :443 (chat/dewey/ai/controlpanel) off-LAN
   # Tag for ACL rules and auto-approval
   tags:
     - tag:k8s-operator

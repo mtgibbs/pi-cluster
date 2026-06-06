@@ -2,7 +2,8 @@
 
 > **REASONS Canvas** (see `specs/TEMPLATE.md`). Constraints-before-work order.
 
-- **Status:** Phase 1 + Phase 3 DONE (LIVE-verified 2026-06-06); Phase 2 pending (human ACL edit)
+- **Status:** Phase 1 + Phase 3 DONE (LIVE-verified 2026-06-06). Phase 2 RESCOPED + shipped
+  2026-06-06 — route advertisement, NOT an ACL grant (see §4 / OQ3 below).
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md` Core Mandates)
 - **Touches:** `beelink-ansible` repo → `inventory.yml` (Phase 1); Tailscale tailnet ACL policy + MagicDNS (Phase 2); `.claude/skills/tailscale-ops/SKILL.md` (capture the gap + the fix).
@@ -55,11 +56,17 @@ Two phases, smallest-blast-radius first.
   where the control machine sits. Preferred value: the **MagicDNS name** (`beelink-ai.<tailnet>.ts.net`,
   stable across IP changes); acceptable literal fallback: **`100.123.94.31`** (known-good, used in the
   2026-06-04 deploy). Tailscale prefers a direct path on-LAN, so on-prem deploys stay fast.
-- **Phase 2 (general service reachability):** add a Tailscale **grant** `autogroup:member → tag:inference`
-  (at least port `443`; `*` is simplest and matches the existing member↔k8s-operator grant), and ensure
-  `*.lab.mtgibbs.dev` **resolves over the tailnet** (MagicDNS split-DNS to Pi-hole, *or* rely on the
-  already-granted `192.168.1.0/24` subnet route reaching Pi-hole). Then `https://ai.lab.mtgibbs.dev` + a
-  LiteLLM virtual key works from anywhere.
+- **Phase 2 (general service reachability) — RESCOPED 2026-06-06.** The original plan
+  (member→`tag:inference` ACL grant + MagicDNS split-DNS) was **wrong** for the goal. Investigation
+  (OQ3) showed: (a) DNS already resolves off-net — `*.lab.mtgibbs.dev` → Pi-hole `.55` via its `/32`
+  route + Tailscale "Override Local DNS"; (b) `ai/chat/dewey.lab.mtgibbs.dev` all resolve to **`.70`**
+  (Caddy), set in `pihole-custom-dns.yaml`; (c) the ACL **already** grants `autogroup:member →
+  192.168.1.0/24`. The only gap is that **`.70` isn't advertised as a route** — so with the exit node
+  active, `.70` traffic blackholes (PROVEN 2026-06-06: ping/curl to `.70` fail while on the tailnet).
+  **Fix:** add `192.168.1.70/32` to the Connector's `advertiseRoutes` (`tailscale-config/connector.yaml`)
+  — same mechanism as `.55/.56`, falls inside the existing `192.168.1.0/24` autoApprover so it
+  **auto-approves** (no admin-console step, no ACL edit, no split-DNS). Then `https://ai.lab.mtgibbs.dev`
+  + a LiteLLM virtual key (and the chat/Dewey UIs) work over the tailnet from anywhere.
 - **Rejected:** advertising the full home `/24` to the laptop and addressing services by `192.168.1.x` —
   brittle (couples remote ops to LAN topology) and broader than needed. Tailnet-native addressing is the
   norm here.
