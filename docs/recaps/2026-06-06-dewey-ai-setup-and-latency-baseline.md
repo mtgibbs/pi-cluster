@@ -126,7 +126,59 @@ First-token roughly **halved** just from clearing the wedge. Levers #2 (parallel
 and #3 (prefix-cache / trim prompt) remain available to push first-token toward ~3-4s, but
 are now optional rather than urgent.
 
+## FINAL — latency work complete (2026-06-06)
+
+Shipped lever #2 (parallel retrieval); stopped at lever #3 after probing showed
+diminishing returns. Final state:
+
+| Case | Session start | Final |
+|---|---|---|
+| Single-query first token | 17s | **~7s** |
+| Multi-part, 3 lookups, first token | ~16s+ (est. sequential) | **~11s** (parallel retrieval) |
+| 2-lookup first token | 29s | **~8s** |
+| qwen3.6 decode | 31 tok/s | **44 tok/s** |
+| idle GPU | 100% (wedged) | **0%** |
+
+- **Parallel retrieval** (`998a19a`): independent kiwix lookups run in a ThreadPoolExecutor
+  (order preserved, deduped by URL). Saves ~4s on 3-lookup prompts; scales with lookup count;
+  single-query path unchanged.
+- **Lever #3 NOT pursued** — diminishing returns. The residual single-query ~7s = planner
+  ~2.5s (4B, already smallest) + kiwix `get_article` ~1–2.5s (render/network-bound inside
+  kiwix-mcp, noisy; **not** proportional to `max_chars`, so lowering `ARTICLE_CHARS` doesn't
+  help and only costs grounding) + prefill ~1.5s. Prefix-caching would shave a fraction and is
+  Ollama-version-dependent. None is a clean, low-risk win. With streaming, ~7s-to-first-token
+  is solid for a kids' study tool.
+- **If revisited later:** the only real lever left is speeding kiwix `get_article` (in the
+  kiwix-mcp service) or prefix-caching the constant system prompt.
+
 ## Commits today
+
+**beelink-ansible:**
+- `cec8440` inventory: address beelink-ai over the tailnet (ansible_host)
+- `546bcf4` inventory: use beelink-ai MagicDNS name
+- `b2e8c78` dewey: gemma3-27b answer model + BYPASS_MODEL_ACCESS_CONTROL (interim wedge fix)
+- `071717d` dewey: Qwen3.6-35B-A3B answer model (think:false) + pre-warm both models
+- `83763e9` dewey: source-evaluation + AI-answer-skepticism prompt tuning
+- `e278ba9` dewey: retrieval relevance (keep qualifiers, roman numerals, best-result picker)
+- `faa68e8` dewey: query planning (decompose multi-part prompts)
+- `998a19a` dewey: parallel multi-query retrieval
+
+**pi-cluster (origin/main):**
+- `29f4fb6` docs(remote-ops): off-net gap + break-glass; OQ1 resolved (Phase 3)
+- `528d633` docs(research): §15 model-landscape triage
+- `47d1fba` feat(tailscale): advertise 192.168.1.70/32 (Phase 2)
+- `3d6142b` docs(recap): this file (metrics baseline)
+- `48db335` docs: GPU wedge root cause + latency halved
+- _(this update: final latency numbers)_
+
+## Permanent-fix invariants (don't regress)
+
+- **Do NOT pull unsloth `UD-*` dynamic quants for MoE models** on the RADV/GFX1151 Vulkan box
+  — they hang the compute ring. Use standard `q4_K_M` or the official Ollama tag. (The broken
+  `qwen3-30b-instruct` is `ollama rm`'d + deregistered from LiteLLM.)
+- Qwen3.6 needs `think:false` on every call (the pipeline sends it).
+- Dewey OWUI keeps `BYPASS_MODEL_ACCESS_CONTROL=true` (single-model surface; kids must see it).
+- Pre-warm task pins `qwen3.6:35b-a3b-q4_K_M` (think:false) + `qwen3-4b-instruct`.
 
 **beelink-ansible:**
 - `cec8440` inventory: address beelink-ai over the tailnet (ansible_host)
