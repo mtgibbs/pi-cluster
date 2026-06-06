@@ -327,6 +327,41 @@ was manual per-box state), so it won't return on deploy. **Rule: do not pull uns
 dynamic quants for MoE models on this RADV/GFX1151 Vulkan box — use a standard `q4_K_M`
 quant or the official Ollama tag.** Dewey's answer model is now `qwen3.6:35b-a3b-q4_K_M`.
 
+#### 2026-06-06 (later) — TRUE root cause: concurrent requests on a Qwen MoE + a stale Ollama
+
+The entries above were real triggers, but the **general mechanism** was finally pinned by
+upgrading Ollama. **Ollama ≤0.17.7 ran CONCURRENT requests on the Qwen MoE architecture,
+which does not support them** — and that wedged the Vulkan compute ring. The smoking gun is
+in Ollama **0.30.6**, which now logs and *prevents* it:
+
+```
+WARN sched.go:505 "model architecture does not currently support parallel requests" architecture=qwen35moe
+```
+
+- We were running **Ollama 0.17.7 — ~13 versions / 6 months behind** (latest 0.30.6). It had
+  **no guard**, so any concurrency (`OLLAMA_NUM_PARALLEL=2` + the OWUI title/tag/autocomplete
+  storm, multiple users, or abandoned/retried requests) ran the MoE in parallel → wedge.
+- This is why **dense** models (`gemma3:27b`) never wedged (they support parallel) and why it
+  "followed heavy/concurrent use." The unsloth UD quant (above) was a *separate, worse* trigger
+  that wedged even single calls.
+
+**The fix — bump Ollama, do not chase the host drivers.** The host was already current
+(kernel 7.0, firmware current). The fragile Vulkan/llama.cpp stack lives **inside the Ollama
+container**, and it was stale. `ollama/ollama:0.17.7 → 0.30.6`:
+- **0.30.6 serializes MoE requests** → the wedge cannot happen under concurrency.
+- **Decode got ~50% faster** (qwen3.6: 44 → **65.6 tok/s**) from newer gfx1151 Vulkan kernels.
+- **0.30.x DROPS integrated GPUs by default** — set **`OLLAMA_IGPU_ENABLE=1`** or it places the
+  model 100% on CPU (`"dropping integrated GPU; to enable, set OLLAMA_IGPU_ENABLE=1"`,
+  `total_vram=0 B`). With the flag it sees the iGPU again (`type=iGPU total="111.2 GiB"`).
+
+**Belt-and-suspenders also applied (still good):** disabled OWUI title/tag/autocomplete/
+follow-up generation on Dewey (one message = one pipeline request, not four) and pinned
+`WEBUI_SECRET_KEY`. These reduce concurrency at the source and stop the session-500s.
+
+> **Takeaway for the next wedge:** check the **Ollama version first** (`docker exec ollama
+> ollama --version` vs latest) — the bundled Vulkan/llama.cpp + RADV is the stale layer, not
+> the host. Keep Ollama current; keep `OLLAMA_IGPU_ENABLE=1`.
+
 ## Decisions Log
 
 ### Vulkan over ROCm — FORCED WORKAROUND (2026-05-20)

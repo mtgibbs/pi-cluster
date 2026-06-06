@@ -171,13 +171,31 @@ diminishing returns. Final state:
 - `48db335` docs: GPU wedge root cause + latency halved
 - _(this update: final latency numbers)_
 
+## UPDATE 2026-06-06 (final) — GPU wedge TRUE root cause + Ollama bump
+
+The wedge wasn't really "physics" or a single bad quant — it was **Ollama 0.17.7 running
+concurrent requests on a Qwen MoE architecture, which doesn't support them.** Confirmed by
+bumping to **Ollama 0.30.6**, which logs `"model architecture does not currently support
+parallel requests" architecture=qwen35moe` and serializes them. We were ~13 versions / 6
+months behind. Fix = **bump Ollama (not the host — host was already current)**:
+
+- Wedge eliminated (concurrency-safe). Decode **44 → 65.6 tok/s** (~50% faster).
+- **`OLLAMA_IGPU_ENABLE=1` is now REQUIRED** — 0.30.x drops integrated GPUs by default (else
+  the model runs 100% on CPU; `total_vram=0 B`).
+- Full story + the "check Ollama version first" guidance is in `beelink-ai-stack.md` wedge runbook.
+
 ## Permanent-fix invariants (don't regress)
 
-- **Do NOT pull unsloth `UD-*` dynamic quants for MoE models** on the RADV/GFX1151 Vulkan box
-  — they hang the compute ring. Use standard `q4_K_M` or the official Ollama tag. (The broken
+- **Keep Ollama current and `OLLAMA_IGPU_ENABLE=1` set.** The fragile Vulkan/llama.cpp+RADV
+  stack is bundled *in the Ollama container*, not the host — a stale Ollama was the real wedge
+  cause. On any future wedge, check `ollama --version` vs latest FIRST.
+- **Do NOT pull unsloth `UD-*` dynamic quants for MoE models** on this box — a separate, worse
+  trigger (wedged even single calls). Use standard `q4_K_M` / official Ollama tags. (The broken
   `qwen3-30b-instruct` is `ollama rm`'d + deregistered from LiteLLM.)
 - Qwen3.6 needs `think:false` on every call (the pipeline sends it).
-- Dewey OWUI keeps `BYPASS_MODEL_ACCESS_CONTROL=true` (single-model surface; kids must see it).
+- Dewey OWUI: `BYPASS_MODEL_ACCESS_CONTROL=true` (kids must see the one model); `WEBUI_SECRET_KEY`
+  pinned (sessions survive restarts); title/tag/autocomplete/follow-up generation DISABLED
+  (one message = one pipeline request, not four — was a concurrency source).
 - Pre-warm task pins `qwen3.6:35b-a3b-q4_K_M` (think:false) + `qwen3-4b-instruct`.
 
 **beelink-ansible:**
