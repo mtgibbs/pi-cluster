@@ -327,3 +327,55 @@ we make AI-generated changes governable, reviewable, and reusable." That is our 
 - Their `openspdd` CLI (`/spdd-*` slash commands) is a tooling layer we don't need — our
   `ralph-qwen.sh` + `verify.sh` + Claude-orchestration already cover generation, validation,
   and the loop.
+
+## 15. Model-landscape triage — agentic coding + homelab ops (2026-06-06)
+
+Prompted by external research (another Claude session) on "best local models for agentic
+coding / k3s mgmt on the 96GB Beelink." Triaged against this stack and web-verified. The
+external read was **mostly correct** — the value below is the stack-specific reality it
+couldn't see.
+
+### Web-verified facts (don't re-litigate)
+- **Qwen3.6-35B-A3B is REAL** — released **2026-04-16**, Apache 2.0, 35B total / **3B active**,
+  262K ctx, **SWE-bench Verified 73.4**, on Ollama + GGUF (~22GB). (Initial skepticism that it
+  was a hallucinated model card was **wrong** — confirmed on HF/Ollama.)
+- **gpt-oss-120b on Strix Halo is AMD-blessed** — MXFP4 weights ~61GB fit the 96GB pool,
+  ~5B active, **~30 tok/s** per AMD's own demo. Apache 2.0, native tool calling, ~128K ctx,
+  reasoning-effort knob (low/med/high = a built-in two-tier in one model). MCP-Bench tool
+  *selection* ~97-98%; weak dimension is **long-horizon planning** (universal local-model
+  weakness, not gpt-oss-specific). Backend reference: kyuz0.github.io/amd-strix-halo-toolboxes.
+- **GLM-4.5-Air** (106B-A12B, ~60-70GB @ Q4) is the only GLM in our weight class — GLM-4.6/4.7
+  are 355-357B (~200GB, don't fit). 12B active → noticeably slower than gpt-oss on our bandwidth.
+- **K8sGPT** (rule-based scanner, LLM only explains, strictly read-only) and **HolmesGPT**
+  (RBAC-aware ReAct investigator, runbook-driven, BYO local LLM via Ollama) are both real CNCF-
+  adjacent tools. No OSS tool does autonomous closed-loop remediation by design.
+
+### Where the external read was thin (our stack)
+1. **Backend isn't generic LM Studio/llama.cpp** — we're Ollama + LiteLLM + Caddy, Ansible-managed
+   (`beelink-ansible/playbooks/50-ai-stack.yml`), on Vulkan/RADV (gfx1151). **MXFP4 gpt-oss kernel
+   support on our exact backend is NOT a given — smoke-test before committing.**
+2. **We're already past "plain Qwen3-Coder-30B"** — registry has `qwen3.5:35b`, `qwen2.5:72b`, and
+   a `qwen3-coder-next-q8` heavyweight via llama-server. The clean coder move is a same-family bump
+   `qwen3.5:35b → qwen3.6:35b-a3b` (same ~22GB footprint, low risk).
+3. **The 96GB rotation is the real friction.** We shipped q8_0 KV + 32K ctx cap + `MAX_LOADED=3`
+   (~86GB across 3 resident models; see §13 + docs/research/kv-sizing-and-sessions.md). gpt-oss-120b
+   at 61GB **cannot stay hot alongside the coder tier** — it's a dedicated mode-swap, and the
+   `keep_alive=-1` pinning logic needs rework to rotate it cleanly.
+
+### Why this validates our existing architecture (not a pivot)
+gpt-oss's strong tool-selection / weak multi-step-planning split **is** our existing model: Claude
+orchestrates the plan, the local model executes steps, remediation stays a PR you approve
+(see `[[feedback_agent_safety_pr_gated]]`). K8sGPT (read-only scan) + HolmesGPT (PR-gated ReAct)
+drop straight into that — additive, model-agnostic, the actual answer to "skills/tools for managing
+the network."
+
+### Recommended priority (PENDING — user decides, like §10)
+1. **Coder bump (easy win):** A/B `qwen3.6:35b-a3b` vs `qwen3.5:35b` on a real coding loop.
+2. **Ops harness (high value, fits philosophy):** stand up K8sGPT + HolmesGPT pointed at the Beelink,
+   read-only-first, remediation as PRs.
+3. **gpt-oss-120b (biggest payoff, most friction):** the agentic anchor — gated on a Vulkan/MXFP4
+   smoke test + the load-on-demand rotation rework. Do NOT download on faith.
+
+> Rejected (per existing norms): GLM-4.6/4.7 (don't fit); host-exposing Ollama/LiteLLM; autonomous
+> closed-loop remediation. GLM-4.5-Air kept as an optional A/B challenger only if the tool-calling
+> quality justifies the 12B-active speed hit.
