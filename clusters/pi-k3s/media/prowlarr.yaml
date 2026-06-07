@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: prowlarr
-          image: linuxserver/prowlarr:latest
+          image: linuxserver/prowlarr:2.3.5
           env:
             - name: PUID
               value: "1029"

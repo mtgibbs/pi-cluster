@@ -36,7 +36,7 @@ spec:
                       - pi-k3s
       containers:
         - name: kiwix-serve
-          image: ghcr.io/kiwix/kiwix-tools:latest
+          image: ghcr.io/kiwix/kiwix-tools:3.8.2
           command: ["kiwix-serve"]
           args:
             - "-p"

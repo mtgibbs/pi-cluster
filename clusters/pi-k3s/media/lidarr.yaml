@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: lidarr
-          image: linuxserver/lidarr:latest
+          image: linuxserver/lidarr:3.1.0
           env:
             - name: PUID
               value: "1029"

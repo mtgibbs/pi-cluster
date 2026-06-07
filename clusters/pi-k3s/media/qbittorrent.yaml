@@ -25,7 +25,7 @@ spec:
       containers:
         # Gluetun VPN sidecar with Proton VPN
         - name: gluetun
-          image: qmcgaw/gluetun:latest
+          image: qmcgaw/gluetun:v3.41.1
           securityContext:
             capabilities:
               add:
@@ -93,7 +93,7 @@ spec:
               cpu: "200m"
         # qBittorrent
         - name: qbittorrent
-          image: linuxserver/qbittorrent:latest
+          image: linuxserver/qbittorrent:5.2.1
           env:
             - name: PUID
               value: "1029"

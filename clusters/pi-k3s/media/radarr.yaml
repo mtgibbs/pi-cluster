@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: radarr
-          image: linuxserver/radarr:latest
+          image: linuxserver/radarr:6.1.1
           env:
             - name: PUID
               value: "1029"

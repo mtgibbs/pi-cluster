@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: sonarr
-          image: linuxserver/sonarr:latest
+          image: linuxserver/sonarr:4.0.17
           env:
             - name: PUID
               value: "1029"

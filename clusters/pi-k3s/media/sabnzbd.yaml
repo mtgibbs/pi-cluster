@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: sabnzbd
-          image: linuxserver/sabnzbd:latest
+          image: linuxserver/sabnzbd:5.0.3
           env:
             - name: PUID
               value: "1029"

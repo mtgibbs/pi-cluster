@@ -29,7 +29,7 @@ spec:
         runAsGroup: 100
       initContainers:
         - name: download
-          image: curlimages/curl:latest
+          image: curlimages/curl:8.20.0
           command: ["sh", "-c"]
           args:
             - |
@@ -66,7 +66,7 @@ spec:
               mountPath: /data
       containers:
         - name: kiwix-manage
-          image: ghcr.io/kiwix/kiwix-tools:latest
+          image: ghcr.io/kiwix/kiwix-tools:3.8.2
           command: ["sh", "-c"]
           args:
             - |

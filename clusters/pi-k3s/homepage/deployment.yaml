@@ -22,7 +22,7 @@ spec:
       # See docs/incidents/2026-05-24-pi3-worker-2-overload.md.
       initContainers:
         - name: copy-config
-          image: busybox:latest
+          image: busybox:1.38.0
           command:
             - sh
             - -c
@@ -36,7 +36,7 @@ spec:
               mountPath: /config
       containers:
         - name: homepage
-          image: ghcr.io/gethomepage/homepage:latest
+          image: ghcr.io/gethomepage/homepage:v1.4.5
           env:
             - name: HOMEPAGE_ALLOWED_HOSTS
               value: "home.lab.mtgibbs.dev"

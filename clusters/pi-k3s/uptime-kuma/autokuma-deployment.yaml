@@ -19,7 +19,7 @@ spec:
     spec:
       initContainers:
         - name: envsubst
-          image: alpine:latest
+          image: alpine:3.21
           env:
             - name: DISCORD_WEBHOOK_URL
               valueFrom:
@@ -40,7 +40,7 @@ spec:
               mountPath: /monitors
       containers:
         - name: autokuma
-          image: ghcr.io/bigboot/autokuma:latest
+          image: ghcr.io/bigboot/autokuma:0.7.0
           env:
             - name: AUTOKUMA__KUMA__URL
               value: "http://uptime-kuma:3001"

@@ -36,7 +36,7 @@ spec:
       initContainers:
         # Convert tunnel token to credentials.json format
         - name: create-credentials
-          image: alpine:latest
+          image: alpine:3.21
           command:
             - sh
             - -c
@@ -58,7 +58,7 @@ spec:
               mountPath: /credentials
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:latest
+          image: cloudflare/cloudflared:2026.5.2
           args:
             - tunnel
             - --config

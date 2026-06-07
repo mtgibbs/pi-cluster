@@ -29,7 +29,7 @@ spec:
                       - pi5-worker-2
       containers:
         - name: vector
-          image: timberio/vector:latest-alpine
+          image: timberio/vector:0.56.0-alpine
           args:
             - --config-dir
             - /etc/vector

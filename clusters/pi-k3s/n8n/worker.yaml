@@ -43,7 +43,7 @@ spec:
                       - pi5-worker-2
       containers:
         - name: n8n-worker
-          image: n8nio/n8n:latest
+          image: n8nio/n8n:2.23.4
           # WORKER tier: pulls jobs off the queue and executes workflows.
           # --concurrency = max parallel jobs in THIS worker. Start gentle (3) so
           # we don't fire parallel inference at the single-GPU Beelink. Tune here.

@@ -19,7 +19,7 @@ spec:
         kubernetes.io/hostname: pi-k3s
       containers:
         - name: unbound
-          image: madnuttah/unbound:latest
+          image: madnuttah/unbound:1.19.0
           ports:
             - containerPort: 5335
               protocol: UDP

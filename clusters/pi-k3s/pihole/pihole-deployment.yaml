@@ -23,7 +23,7 @@ spec:
         kubernetes.io/hostname: pi-k3s
       containers:
         - name: pihole
-          image: pihole/pihole:latest
+          image: pihole/pihole:2026.05.0
           securityContext:
             capabilities:
               add:

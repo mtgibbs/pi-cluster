@@ -24,7 +24,7 @@ spec:
                       - pi5-worker-1
       containers:
         - name: calibre-web
-          image: lscr.io/linuxserver/calibre-web:latest
+          image: lscr.io/linuxserver/calibre-web:0.6.26
           env:
             - name: PUID
               value: "1029"
