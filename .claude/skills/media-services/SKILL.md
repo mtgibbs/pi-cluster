@@ -1,6 +1,6 @@
 ---
 name: media-services
-description: Expert knowledge for media applications (Jellyfin, Immich). Use when managing media storage, NFS mounts, or application-specific configurations.
+description: Expert knowledge for media applications (Jellyfin, Immich, Jellyseerr). Use when managing media storage, NFS mounts, or application-specific configurations.
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 ---
 
@@ -112,6 +112,16 @@ JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
 curl -X POST "https://jellyfin.lab.mtgibbs.dev/Items/ITEM_ID_HERE/Refresh?metadataRefreshMode=FullRefresh&imageRefreshMode=FullRefresh" \
   -H "X-Emby-Token: $JF_KEY"
 ```
+
+## Jellyseerr (Request Manager) — pinned 2.7.3; "update available" is a FALSE nag
+
+- **URL**: `https://requests.lab.mtgibbs.dev`
+- **Pinned**: `fallenbagel/jellyseerr:2.7.3` — the newest **stable** release (from **Aug 2025**).
+- **The in-app amber "update available" arrow is a false positive — do NOT chase it.** Jellyseerr's updater counts *commits behind the branch HEAD*, not newer releases. 2.7.3 is the last stable; everything published since is `develop` / `preview-*`. The badge stays amber regardless of what we pin to; the only way to "satisfy" it is to run an unstable build. **Stay on stable.**
+
+### WATCH ITEM: Jellyseerr → "Seerr" rebrand (no action yet)
+
+The project is mid-rebrand from **Jellyseerr** to **Seerr** — see the `preview-seerr` / `preview-rename-tags` tags, and the ~10-month gap with no new stable since 2.7.3. When the successor ships its first **stable** release — possibly under a **new image name** (e.g. `seerr`) — *that* is the trigger to do a real migration (new manifest/image name, check for a config/data migration step). Until then, 2.7.3 is correct. **Treat the next *stable* release as the only real "update" — ignore the in-app nag in the meantime.**
 
 ## Known Jellyfin Issues
 
