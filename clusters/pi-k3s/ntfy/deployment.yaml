@@ -30,7 +30,7 @@ spec:
                       - pi5-worker-2
       containers:
         - name: ntfy
-          image: binwiederhier/ntfy:v2.11.0
+          image: binwiederhier/ntfy:v2.24.0
           args: ["serve"]
           # Seed the shared 'family' user + ACL AFTER the server has created auth.db
           # (the CLI can't create it). Idempotent (--ignore-exists), runs each start.
