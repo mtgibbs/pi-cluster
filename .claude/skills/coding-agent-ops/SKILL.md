@@ -71,6 +71,7 @@ relocate those.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Run hangs for a long time | un-timed-out streaming stall (NOT the GPU — verify model with a direct `/api/generate`) | watchdog kills it (`OC_RUN_TIMEOUT`); bound scope |
+| Headless `oc run` writes **no files** / stalls at step 1 | qwen3 emits a malformed **text-format tool call** (`<function=read>`…`</tool_call>`) and never executes it, so generation never starts (seen 2026-06-07 building the Renovate scaffold) | **Don't drive qwen as a tool-*user* when headless.** Make it a pure text generator: spec inline → output between explicit markers on stdout → the orchestrator does the file I/O + verify. The failure is orthogonal to codegen quality — 30B nailed the YAML once tools left the path |
 | Output looks correct but ugly | no taste in the spec/model | `design-principles.md` + human visual review |
 | Widget/config wrong despite "correct" spec | model executed a **spec bug** faithfully | specs must be correct; **test worked examples** before handoff |
 | ExternalSecret won't sync | verified the *item*, not the *field* | check the exact field exists (the prowlarr lesson) |

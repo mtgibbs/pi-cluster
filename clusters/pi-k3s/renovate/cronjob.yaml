@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: renovate
+  namespace: renovate
+spec:
+  schedule: "0 6 * * 6"
+  timeZone: America/Chicago
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: renovate
+              image: renovate/renovate:43
+              envFrom:
+                - secretRef:
+                    name: renovate-secrets
+              env:
+                - name: RENOVATE_PLATFORM
+                  value: github
+                - name: RENOVATE_AUTODISCOVER
+                  value: "false"
+                - name: RENOVATE_REPOSITORIES
+                  value: "[\"mtgibbs/pi-cluster\"]"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1
+                  memory: 1Gi
