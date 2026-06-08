@@ -1,0 +1,161 @@
+# Triggerable-Judge — evaluation set (ground truth).
+#
+# Each case is a CronJob manifest plus the verdict a CORRECT judge must reach.
+# This file is the ruler: the scorer (score.py) compares judge output — and the
+# deterministic lint baseline — against these labels.
+#
+# Fields
+#   id        stable case id (also the display name)
+#   source    path to the manifest (real cluster job, or a synthetic under ./synthetic/)
+#   verdict   pass | fail | flag
+#               pass = safe to be triggerable; no contract violation
+#               fail = clear contract violation; must block + escalate
+#               flag = borderline / cannot-prove-safe; must escalate (counts as "caught")
+#   criteria  which of the 6 contract criteria are violated ([] for pass)
+#               idempotent | concurrency-tolerant | time-insensitive |
+#               bounded | quota-safe | fails-safe
+#   lint      what the deterministic lint does TODAY (block | pass) — empirically
+#             verified via `triggerable_lint.py --all`; the baseline to beat
+#   judge_value
+#               baseline  = lint passes, judge should pass (tests precision)
+#               agreement = lint blocks, judge should also fail (no regression)
+#               judge-only = lint misses it, judge must catch (the value-add)
+#   why       one-line rationale
+#
+# Scoring treats {fail, flag} as the positive ("not safe to silently trigger")
+# class and pass as negative. The headline result is: does the judge keep the
+# lint's true positives, add the judge-only ones, and add ZERO false-blocks on
+# the PASS set.
+
+cases:
+  # ---- PASS (precision: judge must NOT block these) ----
+  - id: 01-renovate
+    source: clusters/pi-k3s/renovate/cronjob.yaml
+    verdict: pass
+    criteria: []
+    lint: pass
+    judge_value: baseline
+    why: Re-runs re-evaluate and dedupe branches; Forbid, no shared writable state. The canonical safe job.
+
+  - id: 02-orphan-sweep-report
+    source: clusters/pi-k3s/media/orphan-sweep-cronjob.yaml
+    verdict: pass
+    criteria: []
+    lint: pass
+    judge_value: baseline
+    why: >
+      Report-only, readOnly mount, no deletion. Adversarial: mentions "delete" in
+      comments and uses `find` — a naive judge may flag it. It must not.
+
+  - id: 03-postgres-backup
+    source: clusters/pi-k3s/backup-jobs/postgres-backup-cronjob.yaml
+    verdict: pass
+    criteria: []
+    lint: pass
+    judge_value: baseline
+    why: >
+      pg_dump (read-only) + rsync WITHOUT --delete to a date-stamped dir. A backup
+      that IS safe to trigger. Precision trap: distinguishes it from the --delete backups.
+
+  - id: 04-flock-writer
+    source: specs/triggerable-judge/eval/synthetic/04-flock-writer-pass.yaml
+    verdict: pass
+    criteria: []
+    lint: pass
+    judge_value: baseline
+    why: Writable PVC but takes a flock and writes a date-named (truncating) file — concurrency-safe + idempotent.
+
+  - id: 05-idempotent-upsert
+    source: specs/triggerable-judge/eval/synthetic/05-idempotent-upsert-pass.yaml
+    verdict: pass
+    criteria: []
+    lint: pass
+    judge_value: baseline
+    why: INSERT ... ON CONFLICT DO UPDATE — idempotent by construction. Discriminator partner to case 11.
+
+  # ---- FAIL, lint agrees (no-regression: judge must also fail) ----
+  - id: 06-pvc-backup
+    source: clusters/pi-k3s/backup-jobs/backup-cronjob.yaml
+    verdict: fail
+    criteria: [idempotent, concurrency-tolerant]
+    lint: block
+    judge_value: agreement
+    why: rsync --delete + xargs rm -rf cleanup to shared NAS; overlapping runs race, cleanup can rotate out a good backup.
+
+  - id: 07-git-mirror
+    source: clusters/pi-k3s/backup-jobs/git-mirror-cronjob.yaml
+    verdict: fail
+    criteria: [concurrency-tolerant, idempotent]
+    lint: block
+    judge_value: agreement
+    why: rsync --delete to a shared NAS git-mirrors dir; two overlapping runs pulling+pushing --delete corrupt the mirror set.
+
+  - id: 08-media-backup
+    source: clusters/pi-k3s/backup-jobs/media-backup-cronjob.yaml
+    verdict: fail
+    criteria: [idempotent, concurrency-tolerant]
+    lint: block
+    judge_value: agreement
+    why: rsync --delete, same shape as pvc-backup.
+
+  - id: 09-worker2-backup
+    source: clusters/pi-k3s/backup-jobs/worker2-backup-cronjob.yaml
+    verdict: fail
+    criteria: [idempotent, concurrency-tolerant]
+    lint: block
+    judge_value: agreement
+    why: rsync --delete, same shape as pvc-backup.
+
+  - id: 10-orphan-sweep-delete
+    source: specs/triggerable-judge/eval/synthetic/10-orphan-sweep-delete-fail.yaml
+    verdict: fail
+    criteria: [time-insensitive, concurrency-tolerant, idempotent]
+    lint: block
+    judge_value: agreement
+    why: Writable mount + find -delete on an mtime threshold; deletes in-flight content, irreversible.
+
+  # ---- FAIL, judge-only (recall: lint is blind, judge must catch) ----
+  - id: 11-duplicate-insert-rollup
+    source: specs/triggerable-judge/eval/synthetic/11-duplicate-insert-rollup-fail.yaml
+    verdict: fail
+    criteria: [idempotent]
+    lint: pass
+    judge_value: judge-only
+    why: Blind INSERT of one row per run — a second run double-counts the day. No DROP/TRUNCATE, no mount; lint blind.
+
+  - id: 12-quota-burn-loop
+    source: specs/triggerable-judge/eval/synthetic/12-quota-burn-loop-fail.yaml
+    verdict: fail
+    criteria: [quota-safe]
+    lint: pass
+    judge_value: judge-only
+    why: Unthrottled per-item public-API loop; a manual trigger doubles call volume and exhausts the daily quota. Lint has no quota concept.
+
+  - id: 13-external-counter-rmw
+    source: specs/triggerable-judge/eval/synthetic/13-external-counter-rmw-fail.yaml
+    verdict: fail
+    criteria: [concurrency-tolerant]
+    lint: pass
+    judge_value: judge-only
+    why: Non-atomic GET/compute/PUT on an external counter — overlapping runs lose updates. Shared state is external, not a volume; lint blind.
+
+  - id: 14-stale-window-reprocess
+    source: specs/triggerable-judge/eval/synthetic/14-stale-window-reprocess-fail.yaml
+    verdict: fail
+    criteria: [time-insensitive, idempotent]
+    lint: pass
+    judge_value: judge-only
+    why: Wall-clock "yesterday" window + additive external sink; off-schedule trigger processes wrong window and double-counts. Lint blind.
+
+  # ---- BORDERLINE (judge should escalate, not silently pass) ----
+  - id: 15-import-resolver
+    source: clusters/pi-k3s/media/import-resolver-cronjob.yaml
+    verdict: flag
+    criteria: [concurrency-tolerant, idempotent]
+    lint: pass
+    judge_value: judge-only
+    why: >
+      Mostly idempotent (succeeded imports leave the queue) but a manual run
+      overlapping the scheduled one can double-POST ManualImport for the same
+      downloadId. Shared state is the Sonarr/Radarr queue (external API), invisible
+      to the lint. Not a clear fail, but the judge should escalate, not wave through.

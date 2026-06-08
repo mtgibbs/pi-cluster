@@ -16,3 +16,8 @@ clusters/pi-k3s/monitoring/kube-prometheus-values.yaml
 *.swo
 .idea/
 .vscode/
+
+# Python tooling (triggerable-judge / lint local dev)
+.venv/
+__pycache__/
+*.pyc

@@ -23,7 +23,13 @@ import sys
 
 import yaml
 
-TRIGGERABLE_LABEL = "homelab.mcp/triggerable"
+# Shared extraction helpers (this script's dir is on sys.path when run directly).
+from cronjob_parse import (
+    TRIGGERABLE_LABEL,
+    job_spec_of,
+    script_text,
+    writable_shared_volumes,
+)
 
 # BLOCK: destructive operations — re-running, or two overlapping runs, risk
 # losing data. (`rm -f <file>` of a temp file is fine and is NOT matched; only
@@ -39,39 +45,10 @@ DESTRUCTIVE = [
 LOCK_HINT = re.compile(r"\bflock\b|coordination\.k8s\.io|\bLease\b", re.IGNORECASE)
 
 
-def script_text(job_spec):
-    parts = []
-    pod = (job_spec or {}).get("template", {}).get("spec", {}) or {}
-    containers = (pod.get("initContainers") or []) + (pod.get("containers") or [])
-    for c in containers:
-        for key in ("command", "args"):
-            v = c.get(key)
-            if isinstance(v, list):
-                parts.extend(str(x) for x in v)
-            elif isinstance(v, str):
-                parts.append(v)
-    return "\n".join(parts)
-
-
-def writable_shared_volumes(job_spec):
-    pod = (job_spec or {}).get("template", {}).get("spec", {}) or {}
-    containers = (pod.get("initContainers") or []) + (pod.get("containers") or [])
-    writable = {}  # volume name -> is mounted writable anywhere
-    for c in containers:
-        for m in c.get("volumeMounts") or []:
-            name = m.get("name")
-            writable[name] = writable.get(name, False) or (not m.get("readOnly", False))
-    out = []
-    for v in pod.get("volumes") or []:
-        if ("nfs" in v or "persistentVolumeClaim" in v) and writable.get(v.get("name"), False):
-            out.append(v.get("name"))
-    return out
-
-
 def lint_cronjob(doc, path, findings):
     meta = doc.get("metadata", {}) or {}
     ref = f"{meta.get('namespace', '?')}/{meta.get('name', '?')}"
-    job_spec = (doc.get("spec", {}) or {}).get("jobTemplate", {}).get("spec", {}) or {}
+    job_spec = job_spec_of(doc)
     text = script_text(job_spec)
 
     # #4 bounded -> WARN (hygiene, not blocking)

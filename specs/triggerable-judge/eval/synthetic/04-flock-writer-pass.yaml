@@ -1,0 +1,60 @@
+# EVAL CASE 04 — expected verdict: PASS  (judge_value: baseline)
+#
+# A job that writes to a WRITABLE shared PVC, which would normally trip the
+# deterministic lint's "writable shared storage with no visible lock" rule —
+# EXCEPT it takes a proper flock first, and writes to a date-named file
+# (truncating, not appending). So it is both concurrency-safe (flock
+# serialises overlapping runs) and idempotent (re-running the same day
+# rewrites the same file with the same content).
+#
+# Purpose: confirm BOTH layers credit a real lock. The lint passes it because
+# LOCK_HINT matches `flock`; the judge should pass it because the lock + the
+# date-named truncating write make overlap and re-runs safe.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: daily-disk-report
+  namespace: monitoring
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "0 5 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: report
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  REPORT_DIR=/reports
+                  TODAY=$(date +%F)
+                  # Hold a lock, then write today's report.
+                  flock "${REPORT_DIR}/.report.lock" -c "
+                    df -h > '${REPORT_DIR}/disk-${TODAY}.txt'
+                  "
+                  echo "wrote disk-${TODAY}.txt"
+              volumeMounts:
+                - name: reports
+                  mountPath: /reports
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: reports
+              persistentVolumeClaim:
+                claimName: ops-reports

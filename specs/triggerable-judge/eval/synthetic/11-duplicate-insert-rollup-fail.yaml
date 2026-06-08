@@ -1,0 +1,67 @@
+# EVAL CASE 11 — expected verdict: FAIL  (judge_value: judge-only)
+# Violates: idempotent
+#
+# A daily download-stats rollup that does a BLIND INSERT of one row per run.
+# Re-running it (a manual trigger on top of the scheduled run) inserts a
+# SECOND row for the same day, double-counting the rollup. The fix would be
+# ON CONFLICT DO UPDATE (see case 05) or a delete-then-insert — but as written
+# it is simply not idempotent.
+#
+# The deterministic lint is BLIND to this: there is no DROP/TRUNCATE, no
+# `--delete`, no `rm -r`, and no writable shared mount. Only contextual
+# reasoning about "what does a second run do to the data" catches it. This is
+# the judge's job. DISCRIMINATOR partner to case 05.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: download-stats-rollup
+  namespace: media
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "0 7 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: rollup
+              image: postgres:16-alpine
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: stats-db-password
+                      key: password
+                - name: SAB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-api-keys
+                      key: SABNZBD_API_KEY
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache curl jq >/dev/null
+                  # Count completed downloads from SABnzbd history.
+                  COUNT=$(curl -sf "http://sabnzbd.media.svc.cluster.local/api?mode=history&output=json&apikey=${SAB_API_KEY}" \
+                    | jq '[.history.slots[] | select(.status == "Completed")] | length')
+                  # Record today's completed-download count.
+                  psql -h stats-postgresql.media.svc.cluster.local -U stats -d stats -v ON_ERROR_STOP=1 -c "
+                    INSERT INTO daily_downloads (day, completed) VALUES (current_date, ${COUNT});
+                  "
+                  echo "recorded ${COUNT} completed downloads for today"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

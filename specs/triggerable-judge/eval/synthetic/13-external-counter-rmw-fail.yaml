@@ -1,0 +1,58 @@
+# EVAL CASE 13 — expected verdict: FAIL  (judge_value: judge-only)
+# Violates: concurrency-tolerant
+#
+# Maintains a "backup generation number" in an external KV store using a
+# NON-ATOMIC read-modify-write: GET the current value, add one in the shell,
+# PUT it back. Two overlapping runs (a manual trigger racing the scheduled
+# run) both read N, both write N+1 — a classic lost update. The correct form
+# is an atomic increment (e.g. redis INCR) or a conditional/CAS write.
+#
+# Note this is purely a CONCURRENCY bug: a single re-run in isolation is fine
+# (that distinguishes it from the idempotency cases). It only corrupts under
+# OVERLAP. concurrencyPolicy: Forbid does NOT save it — Forbid only governs the
+# CronJob controller's own scheduled runs, not a Job created out-of-band by a
+# manual MCP trigger, so a manual run CAN overlap a scheduled one.
+#
+# The deterministic lint is blind: no destructive op, no writable shared mount
+# (the shared state lives in an external service, not a volume).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-generation-counter
+  namespace: backup-jobs
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: counter
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache curl >/dev/null
+                  API="http://kv.backup-jobs.svc.cluster.local/v1/backup-generation"
+                  # Bump the backup generation number.
+                  CUR=$(curl -sf "$API" || echo 0)
+                  NEXT=$((CUR + 1))
+                  curl -sf -X PUT "$API" -d "$NEXT"
+                  echo "backup generation: $CUR -> $NEXT"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi

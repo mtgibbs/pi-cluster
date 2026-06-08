@@ -1,0 +1,67 @@
+# EVAL CASE 12 — expected verdict: FAIL  (judge_value: judge-only)
+# Violates: quota-safe
+#
+# Enriches every movie in the Radarr library with TMDB metadata by calling the
+# public TMDB API once per movie, in a tight loop, with no throttling and no
+# caching. The free TMDB tier has a hard daily request budget. The SCHEDULED
+# run already spends a large slice of it; a manual trigger on top doubles the
+# call volume and can exhaust the daily quota — which then 429-bans the key for
+# the rest of the day, breaking the scheduled run too.
+#
+# The deterministic lint has NO concept of external rate limits or quotas, so
+# it passes this cleanly. Catching it requires reasoning about call volume ×
+# trigger frequency against a finite external budget — the judge's job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tmdb-enrich
+  namespace: media
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: enrich
+              image: alpine:3.21
+              env:
+                - name: RADARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: servarr-api-keys
+                      key: RADARR_API_KEY
+                - name: TMDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: tmdb-api-key
+                      key: key
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache curl jq >/dev/null
+                  # For every movie in the library, fetch its rating from TMDB.
+                  IDS=$(curl -sf -H "X-Api-Key: ${RADARR_API_KEY}" \
+                    "http://radarr.media.svc.cluster.local/api/v3/movie" | jq -r '.[].tmdbId')
+                  for id in $IDS; do
+                    curl -sf "https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}" \
+                      | jq -r '.title + " (" + (.vote_average|tostring) + ")"'
+                  done
+                  echo "enriched all movies"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

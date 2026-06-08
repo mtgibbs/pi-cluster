@@ -1,0 +1,69 @@
+# EVAL CASE 14 — expected verdict: FAIL  (judge_value: judge-only)
+# Violates: time-insensitive, idempotent
+#
+# Rolls up "yesterday's" Jellyfin playback events into a monthly total. The
+# processing window is derived from wall-clock time (`date -d yesterday`) and
+# the result is ADDED to a running monthly total in an external service.
+#
+# Two distinct failures, both invisible to a mount/regex lint:
+#   - TIME-SENSITIVE: the window depends on WHEN the job runs. A manual trigger
+#     fires relative to "now", so triggering near midnight, or on a different
+#     day than scheduled, processes the wrong window. The job assumes it runs
+#     exactly once per day on schedule.
+#   - NOT IDEMPOTENT: each run ADDS to the monthly total. Re-triggering for the
+#     same "yesterday" double-counts that day. A correct design would use a
+#     stored watermark / be keyed by the processed date, not wall-clock + a
+#     blind add.
+#
+# The lint sees a curl loop and a POST and passes it. The judge must reason
+# about the time dependency and the additive (non-idempotent) sink.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: playback-monthly-rollup
+  namespace: media
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "15 0 * * *"  # 00:15 daily — process "yesterday"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: rollup
+              image: alpine:3.21
+              env:
+                - name: STATS_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: stats-api-token
+                      key: token
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache curl jq >/dev/null
+                  YESTERDAY=$(date -d 'yesterday' +%F)
+                  MONTH=$(date -d 'yesterday' +%Y-%m)
+                  # Pull yesterday's playback events.
+                  COUNT=$(curl -sf "http://jellyfin.media.svc.cluster.local/playback?day=${YESTERDAY}" \
+                    -H "X-Token: ${STATS_TOKEN}" | jq '.events | length')
+                  # Add them to the running monthly total.
+                  curl -sf -X POST "http://stats-api.media.svc.cluster.local/monthly/${MONTH}/increment" \
+                    -H "X-Token: ${STATS_TOKEN}" -d "${COUNT}"
+                  echo "added ${COUNT} playback events for ${YESTERDAY} to ${MONTH}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
