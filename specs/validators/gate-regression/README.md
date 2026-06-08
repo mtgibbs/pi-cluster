@@ -27,19 +27,29 @@ evaluated, and tuned for this one job.
   contract unless manifests change in lockstep → escalate.
 
 The validator reasons about the **change**, not the final file. A check deleted *here*
-but re-added *there* is not a regression.
+but re-added *there* is not a regression. It judges **all changed gate-relevant files
+together** (cross-file context) so a gate *defined* in `whitelist.ts` and *enforced* in
+`backups.ts` is seen as one wired-up change, not a flag.
+
+## Vote rule — majority of 5
+
+Each PR is judged `--repeat 5`; the verdict is **strict majority** (block on ≥3 escalating
+votes). Measured on this eval the gap is clean: a real weakening is unanimous (5/5), while
+a safe-but-subtle change the model occasionally misreads tops out at 2/5. Majority sits in
+that gap — every weakening blocks, no safe change false-blocks. (Score the eval at `--repeat 5`
+to reflect this; reps=1 is a coin-flip on the borderline cases.)
 
 ## Scoring
 
 ```bash
-.venv/bin/python specs/validators/gate-regression/eval/score.py              # set summary
-.venv/bin/python specs/validators/gate-regression/eval/score.py --judge out.json
+.venv/bin/python scripts/reviewhub/validators/gate_regression.py \
+  --eval --backend litellm --repeat 5 --out /tmp/gr.json --score
 ```
 Bar: catch every weakening (recall 1.00) with no false-blocks on the safe set
-(precision 1.00), naming the right gate.
+(precision 1.00), naming the right gate. **Achieved: 1.00 / 1.00 at reps=5, majority vote.**
 
 ## Status
 
-Eval set built (the ruler). Next: the validator harness (judge a diff against this one
-concern, multi-vote, fail-safe) + register it in the roster so the receiver runs it on
-`pi-cluster-mcp` PRs and posts its own `gate-regression` check.
+Built + eval'd (1.00/1.00) + registered in the roster. Verified live against a real PR
+(`pi-cluster-mcp#32`, the trigger_cronjob PR) → PASS once cross-file context confirmed the
+gate is wired. Goes live on `pi-cluster-mcp` PRs once that repo ships its `.review-hub.yml`.

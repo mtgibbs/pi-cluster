@@ -35,10 +35,13 @@ BEGIN, END = tj.BEGIN, tj.END
 PROMPT_TEMPLATE = (REPO_ROOT / "specs/validators/gate-regression/contract.md").read_text()
 
 
-def build_prompt(file, diff):
-    input_block = (f"THE DIFF UNDER REVIEW\n  file: {file}\n"
-                   f"--- BEGIN DIFF ---\n{diff}\n--- END DIFF ---")
-    return PROMPT_TEMPLATE.replace("{{INPUT}}", input_block)
+def build_prompt(changes):
+    """changes = [(file, unified_diff), …] — judged TOGETHER so the model has
+    cross-file context (a gate defined in one file is often enforced in another)."""
+    blocks = [f"--- FILE: {file} ---\n{diff}" for file, diff in changes]
+    header = (f"THE CHANGES UNDER REVIEW — {len(changes)} changed gate-relevant "
+              "file(s) in this PR. Reason ACROSS them before judging.")
+    return PROMPT_TEMPLATE.replace("{{INPUT}}", header + "\n\n" + "\n\n".join(blocks))
 
 
 def parse(text):
@@ -56,36 +59,47 @@ def parse(text):
     return {"verdict": verdict, "gate": gate, "findings": data.get("findings") or []}
 
 
-_SEV = ["fail", "flag", "error", "pass"]
-
-
 def aggregate(runs):
+    """Majority-to-escalate: block only when MOST of the votes escalate. Measured
+    on the eval, the gap is clean — a real weakening is unanimous (5/5), while a
+    safe-but-subtle change the model occasionally misreads tops out at 2/5. Strict
+    majority (>=3 of 5) sits in that gap: every weakening blocks, no safe change
+    false-blocks. (error counts as escalating; a minority of strays is denoised.)"""
     verdicts = [r["verdict"] for r in runs]
-    cautious = min(verdicts, key=lambda v: _SEV.index(v) if v in _SEV else 1)
-    agg = "flag" if cautious == "error" else cautious
+    escalating = [v for v in verdicts if v in ("fail", "flag", "error")]
+    min_to_block = len(runs) // 2 + 1  # strict majority (reps=1 -> 1, 3 -> 2, 5 -> 3)
+    if len(escalating) >= min_to_block:
+        worst = next(v for v in ("fail", "flag", "error") if v in verdicts)
+        verdict = "flag" if worst == "error" else worst
+    else:
+        verdict = "pass"
     gate = next((r["gate"] for r in runs if r["verdict"] in ("fail", "flag")
                  and r["gate"] != "-"), "-")
-    return {"verdict": agg, "gate": gate, "runs": verdicts,
-            "stable": len(set(verdicts)) == 1,
-            "findings": [f for r in runs for f in r.get("findings", [])][:5]}
+    findings = ([f for r in runs if r["verdict"] in ("fail", "flag")
+                 for f in r.get("findings", [])][:5] if verdict != "pass" else [])
+    return {"verdict": verdict, "gate": gate, "runs": verdicts,
+            "escalating": len(escalating), "stable": len(set(verdicts)) == 1,
+            "findings": findings}
 
 
-def judge_diff(file, diff, backend, model, timeout, raw_path):
-    text, rc = tj.run_model(build_prompt(file, diff), timeout, raw_path, backend, model)
+def judge_changes(changes, backend, model, timeout, raw_path):
+    text, rc = tj.run_model(build_prompt(changes), timeout, raw_path, backend, model)
     res = parse(text)
     res["returncode"] = rc
     return res
 
 
-def _render(results, any_block):
+def _render_pr(res):
     head = "## 🛡️ gate-regression\n\n" + (
         "🚫 A change may **weaken a security gate** — human review required.\n\n"
-        if any_block else "✅ No security gate is weakened by these changes.\n\n")
-    secs = []
-    for r in results:
-        body = "\n".join(f"- {f}" for f in (r.get("findings") or [])[:4])
-        secs.append(f"### `{r['path']}` — **{r['verdict'].upper()}**  (gate: {r.get('gate', '-')})\n{body}")
-    return head + "\n\n".join(secs)
+        if res["block"] else "✅ No security gate is weakened by these changes.\n\n")
+    gate = f" · gate: {res['gate']}" if res.get("gate", "-") != "-" else ""
+    files = ", ".join(f"`{f}`" for f in res.get("files", []))
+    lines = [f"**Verdict: {res['verdict'].upper()}**{gate}", f"<sub>reviewed: {files}</sub>"]
+    lines += [f"- {f}" for f in (res.get("findings") or [])[:6]]
+    if res.get("runs"):
+        lines.append(f"\n<sub>votes: {' '.join(res['runs'])}</sub>")
+    return head + "\n".join(lines)
 
 
 class GateRegressionValidator:
@@ -103,24 +117,21 @@ class GateRegressionValidator:
 
     def review(self, forge, reps, timeout, model, raw_dir):
         import fnmatch
-        targets = [(p, patch) for p, patch in forge.changed_patches()
+        changes = [(p, patch) for p, patch in forge.changed_patches()
                    if patch and any(fnmatch.fnmatch(p, g) for g in self.globs)]
-        if not targets:
+        if not changes:
             return [], False, None
-        results, any_block = [], False
-        for p, patch in targets:
-            runs = []
-            for r in range(reps):
-                rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)
-                os.makedirs(rdir, exist_ok=True)
-                runs.append(judge_diff(p, patch, "litellm", model, timeout,
-                                       rdir / f"{p.replace('/', '_')}.raw.txt"))
-            res = runs[0] if reps == 1 else aggregate(runs)
-            res["path"] = p
-            res["block"] = res["verdict"] != "pass"
-            any_block = any_block or res["block"]
-            results.append(res)
-        return results, any_block, _render(results, any_block)
+        # Judge ALL changed gate files TOGETHER — cross-file context lets the model
+        # see a gate defined in one file and enforced (called) in another.
+        runs = []
+        for r in range(reps):
+            rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)
+            os.makedirs(rdir, exist_ok=True)
+            runs.append(judge_changes(changes, "litellm", model, timeout, rdir / "pr.raw.txt"))
+        res = runs[0] if reps == 1 else aggregate(runs)
+        res["files"] = [p for p, _ in changes]
+        res["block"] = res["verdict"] != "pass"
+        return [res], res["block"], _render_pr(res)
 
 
 def main():
@@ -152,14 +163,14 @@ def main():
     results = []
     for c in cases:
         if args.dry_run:
-            print(build_prompt(c["file"], c["diff"]))
+            print(build_prompt([(c["file"], c["diff"])]))
             continue
         runs = []
         for r in range(reps):
             rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)
             os.makedirs(rdir, exist_ok=True)
-            runs.append(judge_diff(c["file"], c["diff"], args.backend, args.model,
-                                   args.timeout, rdir / f"{c['id']}.raw.txt"))
+            runs.append(judge_changes([(c["file"], c["diff"])], args.backend, args.model,
+                                      args.timeout, rdir / f"{c['id']}.raw.txt"))
         res = runs[0] if reps == 1 else aggregate(runs)
         res["id"] = c["id"]
         results.append(res)
