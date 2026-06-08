@@ -90,7 +90,7 @@ def judge_changes(changes, backend, model, timeout, raw_path):
 
 
 def _render_pr(res):
-    head = "## 🛡️ gate-regression\n\n" + (
+    head = tj.comment_marker("gate-regression") + "\n## 🛡️ gate-regression\n\n" + (
         "🚫 A change may **weaken a security gate** — human review required.\n\n"
         if res["block"] else "✅ No security gate is weakened by these changes.\n\n")
     gate = f" · gate: {res['gate']}" if res.get("gate", "-") != "-" else ""

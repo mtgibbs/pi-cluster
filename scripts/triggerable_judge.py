@@ -247,7 +247,11 @@ def aggregate_runs(results):
 # engine destined for a shared lib once a second evaluator exists; kept in-file
 # while triggerable is the only evaluator. The judge core never imports a forge.
 
-REVIEW_MARKER = "<!-- triggerable-judge -->"
+def comment_marker(name):
+    """A hidden per-validator marker each render prepends to its PR comment, so a
+    future version can find-and-update its own prior comment instead of stacking new
+    ones. Per-validator: each specialist's comment is identified independently."""
+    return f"<!-- review-hub:{name} -->"
 
 
 class Forge:
@@ -330,9 +334,10 @@ class GitHubForge(Forge):
         return base64.b64decode(data["content"]).decode("utf-8", "replace")
 
     def post_review(self, body, block):
+        # body already carries the validator's hidden marker (see comment_marker).
         try:
             self._req("POST", f"/repos/{self.repo}/issues/{self.pr}/comments",
-                      {"body": f"{REVIEW_MARKER}\n{body}"})
+                      {"body": body})
         except Exception as e:  # noqa: BLE001
             print(f"warning: could not post PR comment: {e}", file=sys.stderr)
 
@@ -439,7 +444,7 @@ def judge_targets(targets, reps, timeout, backend, model, raw_dir):
 
 
 def render_review(results, any_block):
-    head = ("## 🔒 Triggerable-Judge\n\n" + (
+    head = (comment_marker("triggerable-judge") + "\n## 🔒 Triggerable-Judge\n\n" + (
         "🚫 A changed triggerable CronJob may violate the triggerable contract — "
         "**human review required** before merge.\n\n" if any_block else
         "✅ All changed triggerable CronJobs uphold the contract.\n\n"))
