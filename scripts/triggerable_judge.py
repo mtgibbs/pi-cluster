@@ -6,27 +6,33 @@ concurrency-tolerant, time-insensitive, bounded, quota-safe, fails-safe) using
 the local qwen3-coder agent, catching the contextual violations the
 deterministic lint (`.github/scripts/triggerable_lint.py`) cannot prove.
 
-qwen is driven as a PURE TEXT GENERATOR (banked lesson, see
+The model is driven as a PURE TEXT GENERATOR (banked lesson, see
 `.claude/skills/coding-agent-ops/SKILL.md`): the whole task is inlined into one
-`oc run` prompt, the model emits a JSON verdict between explicit markers on
-stdout, and this orchestrator does all the I/O + parsing. No tool calls.
+prompt, the model emits a JSON verdict between explicit markers, and this
+orchestrator does all the I/O + parsing. No tool calls.
+
+Two model backends:
+  --backend oc       opencode -> qwen via `oc run` (macOS local dev; default)
+  --backend litellm  POST to the Beelink LiteLLM over HTTP (the in-cluster runner;
+                     pure text-gen by construction). Needs $TRIGGERABLE_JUDGE_LITELLM_KEY.
+
+Forge-agnostic review (the reactive entrypoint the runner calls): a thin Forge
+adapter abstracts "what changed" + "post the verdict" — GitHubForge today, a
+LocalGitForge for plain checkouts, a GitLabForge later.
 
 Usage:
-  # judge one or more manifests
-  triggerable-judge.py clusters/pi-k3s/renovate/cronjob.yaml
-
-  # judge the whole eval set, write output for the scorer, then score it
+  # judge the eval set, write output for the scorer, then score it
   triggerable-judge.py --eval --out /tmp/judge.json --score
 
-  # judge a single eval case by id (smoke test)
-  triggerable-judge.py --id 11-duplicate-insert-rollup
+  # judge a single eval case (smoke test) / N times for stability
+  triggerable-judge.py --id 11-duplicate-insert-rollup [--repeat 5]
 
-  # build + print the prompt without calling qwen (no agent needed)
+  # REACTIVE review of a PR's changed triggerable CronJobs (multi-vote, fail-safe)
+  triggerable-judge.py --pr 42 --backend litellm --repeat 5      # exit!=0 blocks merge
+  triggerable-judge.py --local-diff origin/main                  # local, no forge
+
+  # build + print the prompt without calling a model
   triggerable-judge.py --id 01-renovate --dry-run
-
-Model: judges whatever the Beelink `hot-coder` alias currently points at
-(`aimode family` = 30B, `aimode work` = Q8). --model only records the label in
-the output metadata; set the actual mode with `aimode` first.
 """
 import argparse
 import json
@@ -34,6 +40,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -44,9 +52,20 @@ EVAL_DIR = REPO_ROOT / "specs" / "triggerable-judge" / "eval"
 EXPECTED = EVAL_DIR / "expected.yaml"
 SCORER = EVAL_DIR / "score.py"
 
+# Model backends. `oc` (opencode→qwen) is the macOS local-dev path; `litellm`
+# calls the Beelink LiteLLM directly over HTTP (what the in-cluster runner uses
+# — no opencode, and a plain chat-completion with no tools is pure text-gen by
+# construction). Temperature > 0 so --repeat multi-vote samples actually differ.
+LITELLM_BASE_DEFAULT = "https://ai.lab.mtgibbs.dev/v1"
+LITELLM_KEY_ENV = "TRIGGERABLE_JUDGE_LITELLM_KEY"
+MODEL_DEFAULT = "hot-coder"
+TEMPERATURE = 0.4
+MAX_TOKENS = 2000
+
 sys.path.insert(0, str(LINT_DIR))
 from cronjob_parse import (  # noqa: E402
     TRIGGERABLE_LABEL,
+    cronjobs_from_text,
     iter_cronjobs,
     job_spec_of,
     script_text,
@@ -196,8 +215,8 @@ THE CRONJOB UNDER REVIEW
 {OUTPUT_INSTRUCTIONS}"""
 
 
-def run_qwen(prompt, timeout, raw_path):
-    """Run `oc run <prompt>`, capturing stdout to raw_path. Returns the text."""
+def run_oc(prompt, timeout, raw_path, model):
+    """Run `oc run <prompt>` (opencode→qwen), capturing stdout. macOS local dev."""
     env = dict(os.environ, OC_RUN_TIMEOUT=str(timeout))
     with open(raw_path, "w") as out:
         proc = subprocess.run(
@@ -207,6 +226,41 @@ def run_qwen(prompt, timeout, raw_path):
         )
     text = Path(raw_path).read_text(errors="replace")
     return text, proc.returncode
+
+
+def run_litellm(prompt, timeout, raw_path, model, base_url=None, key_env=LITELLM_KEY_ENV):
+    """POST a chat-completion to LiteLLM (Beelink). Pure text-gen, no tools."""
+    key = os.environ.get(key_env)
+    if not key:
+        return f"ERROR: ${key_env} not set (the LiteLLM virtual key)", 1
+    base = (base_url or os.environ.get("LITELLM_BASE_URL") or LITELLM_BASE_DEFAULT).rstrip("/")
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+    }).encode()
+    req = urllib.request.Request(
+        f"{base}/chat/completions", data=body, method="POST",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read())
+        text = payload["choices"][0]["message"]["content"]
+        rc = 0
+    except urllib.error.HTTPError as e:
+        text, rc = f"HTTP {e.code}: {e.read().decode(errors='replace')[:500]}", e.code
+    except Exception as e:  # noqa: BLE001 — surface any transport failure as a finding
+        text, rc = f"ERROR: {type(e).__name__}: {e}", 1
+    Path(raw_path).write_text(text)
+    return text, rc
+
+
+def run_model(prompt, timeout, raw_path, backend, model):
+    if backend == "litellm":
+        return run_litellm(prompt, timeout, raw_path, model)
+    return run_oc(prompt, timeout, raw_path, model)
 
 
 def parse_verdict(text):
@@ -230,7 +284,7 @@ def parse_verdict(text):
             "findings": data.get("findings") or [], "ok": True}
 
 
-def judge(doc, case_id, timeout, raw_dir, dry_run):
+def judge(doc, case_id, timeout, raw_dir, dry_run, backend="oc", model=MODEL_DEFAULT):
     prompt = build_prompt(doc)
     ref = manifest_facts(doc)["ref"]
     if dry_run:
@@ -238,10 +292,10 @@ def judge(doc, case_id, timeout, raw_dir, dry_run):
         return {"id": case_id or ref, "ref": ref, "verdict": "dry-run",
                 "criteria": [], "findings": []}
     raw_path = Path(raw_dir) / f"{(case_id or ref).replace('/', '_')}.raw.txt"
-    text, rc = run_qwen(prompt, timeout, raw_path)
+    text, rc = run_model(prompt, timeout, raw_path, backend, model)
     res = parse_verdict(text)
     res.update({"id": case_id or ref, "ref": ref,
-                "raw": str(raw_path), "oc_returncode": rc})
+                "raw": str(raw_path), "returncode": rc})
     return res
 
 
@@ -276,6 +330,198 @@ def aggregate_runs(results):
             "findings": [f for r in results for f in r.get("findings", [])][:6]}
 
 
+# ===== Framework: forge adapters (evaluator-agnostic) =====
+# Abstracts "what changed in this changeset" + "post the verdict" so an evaluator
+# runs against GitHub today and a self-hosted GitLab / a plain local checkout
+# later. These pieces (+ run_model/parse_verdict/aggregate_runs) are the reusable
+# engine destined for a shared lib once a second evaluator exists; kept in-file
+# while triggerable is the only evaluator. The judge core never imports a forge.
+
+REVIEW_MARKER = "<!-- triggerable-judge -->"
+
+
+class Forge:
+    def changed_files(self):
+        raise NotImplementedError
+
+    def get_file(self, path):
+        """Content of `path` at the changeset head, or None if absent/deleted."""
+        raise NotImplementedError
+
+    def post_review(self, body, block):
+        raise NotImplementedError
+
+
+class GitHubForge(Forge):
+    """GitHub PRs via the REST API + urllib — no `gh`/node, no checkout (file
+    content is fetched, not read from disk), so it works in the webhook receiver
+    as well as a runner. Token is either the Actions $GITHUB_TOKEN or a GitHub
+    App installation token passed in. repo = owner/name."""
+
+    API = "https://api.github.com"
+
+    def __init__(self, pr, repo=None, token=None, token_env="GITHUB_TOKEN", head_sha=None):
+        self.pr = int(pr)
+        self.repo = repo or os.environ.get("GITHUB_REPOSITORY")
+        if not self.repo:
+            raise SystemExit("GitHubForge needs repo (owner/name) or $GITHUB_REPOSITORY")
+        self.token = token or os.environ.get(token_env)
+        if not self.token:
+            raise SystemExit(f"GitHubForge needs a token or ${token_env}")
+        self.head_sha = head_sha  # pin file reads to the PR head; else default branch ref
+
+    def _req(self, method, path, body=None):
+        req = urllib.request.Request(
+            f"{self.API}{path}", method=method,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Authorization": f"Bearer {self.token}",
+                     "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read() or "null")
+
+    def changed_files(self):
+        files, page = [], 1
+        while True:
+            batch = self._req("GET", f"/repos/{self.repo}/pulls/{self.pr}/files?per_page=100&page={page}")
+            files += [f["filename"] for f in (batch or [])]
+            if len(batch or []) < 100:
+                return files
+            page += 1
+
+    def get_file(self, path):
+        import base64
+        ref = f"?ref={self.head_sha}" if self.head_sha else ""
+        try:
+            data = self._req("GET", f"/repos/{self.repo}/contents/{path}{ref}")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None  # deleted in the PR
+            raise
+        if not isinstance(data, dict) or data.get("encoding") != "base64":
+            return None
+        return base64.b64decode(data["content"]).decode("utf-8", "replace")
+
+    def post_review(self, body, block):
+        try:
+            self._req("POST", f"/repos/{self.repo}/issues/{self.pr}/comments",
+                      {"body": f"{REVIEW_MARKER}\n{body}"})
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: could not post PR comment: {e}", file=sys.stderr)
+
+    # --- Check Runs (used by the webhook receiver to gate the merge) ---
+    def create_check_run(self, head_sha, name="triggerable-judge"):
+        r = self._req("POST", f"/repos/{self.repo}/check-runs",
+                      {"name": name, "head_sha": head_sha, "status": "in_progress"})
+        return r["id"]
+
+    def complete_check_run(self, check_id, conclusion, title, summary):
+        # conclusion: success | failure | action_required | neutral
+        self._req("PATCH", f"/repos/{self.repo}/check-runs/{check_id}",
+                  {"status": "completed", "conclusion": conclusion,
+                   "output": {"title": title, "summary": summary}})
+
+
+class LocalGitForge(Forge):
+    """A plain local checkout — diff against a base ref, read from the worktree."""
+
+    def __init__(self, base):
+        self.base = base
+
+    def changed_files(self):
+        for spec in (f"{self.base}...HEAD", self.base):
+            out = subprocess.run(["git", "diff", "--name-only", spec],
+                                 capture_output=True, text=True)
+            if out.returncode == 0:
+                return [p for p in out.stdout.splitlines() if p.strip()]
+        raise SystemExit(f"git diff against {self.base} failed")
+
+    def get_file(self, path):
+        fp = REPO_ROOT / path
+        return fp.read_text() if fp.exists() else None
+
+    def post_review(self, body, block):
+        print(body)
+
+
+def select_triggerable_targets(forge):
+    """The triggerable evaluator's SELECTOR: changed CronJobs carrying the label.
+
+    Fetches content via the forge (works with or without a checkout). This is the
+    one evaluator-specific bit of the PR flow — a second evaluator swaps its own
+    selector + contract and reuses everything else.
+    """
+    targets = []
+    for p in forge.changed_files():
+        if not p.endswith((".yaml", ".yml")):
+            continue
+        content = forge.get_file(p)
+        if not content:
+            continue
+        for doc in cronjobs_from_text(content):
+            labels = (doc.get("metadata", {}) or {}).get("labels") or {}
+            if labels.get(TRIGGERABLE_LABEL) == "true":
+                targets.append((p, doc))
+    return targets
+
+
+def _render_section(path, res):
+    verdict = res["verdict"].upper()
+    crit = ", ".join(res.get("criteria") or []) or "—"
+    lines = [f"### `{res['ref']}` — **{verdict}**", f"*{path}* · violated: {crit}"]
+    for f in (res.get("findings") or [])[:5]:
+        lines.append(f"- {f}")
+    if res.get("runs"):
+        lines.append(f"\n<sub>votes: {' '.join(res['runs'])} · stable={res.get('stable')}</sub>")
+    return "\n".join(lines)
+
+
+def judge_targets(targets, reps, timeout, backend, model, raw_dir):
+    """Judge each (path, doc) target with multi-vote. Returns (results, any_block).
+
+    Reusable by both the CLI (review_changeset) and the webhook receiver.
+    Fail-safe: ONLY a clean pass clears — fail/flag/error all escalate, so a model
+    timeout or unparseable run can never silently wave a hazard through.
+    """
+    results, any_block = [], False
+    for path, doc in targets:
+        runs = []
+        for r in range(reps):
+            rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)
+            os.makedirs(rdir, exist_ok=True)
+            runs.append(judge(doc, None, timeout, rdir, False, backend=backend, model=model))
+        res = runs[0] if reps == 1 else {**aggregate_runs(runs),
+                                         "id": runs[0]["id"], "ref": runs[0]["ref"]}
+        res["path"] = path
+        res["block"] = res["verdict"] != "pass"
+        any_block = any_block or res["block"]
+        print(f"  {res['ref']:<34} -> {res['verdict']}", file=sys.stderr)
+        results.append(res)
+    return results, any_block
+
+
+def render_review(results, any_block):
+    head = ("## 🔒 Triggerable-Judge\n\n" + (
+        "🚫 A changed triggerable CronJob may violate the triggerable contract — "
+        "**human review required** before merge.\n\n" if any_block else
+        "✅ All changed triggerable CronJobs uphold the contract.\n\n"))
+    return head + "\n\n".join(_render_section(r["path"], r) for r in results)
+
+
+def review_changeset(forge, reps, timeout, backend, model, raw_dir):
+    """CLI reactive entrypoint: judge changed triggerable CronJobs, post a verdict.
+    Returns a process exit code — non-zero BLOCKS the merge (the CI check fails)."""
+    targets = select_triggerable_targets(forge)
+    if not targets:
+        print("no changed triggerable CronJobs in this changeset — nothing to review",
+              file=sys.stderr)
+        return 0
+    results, any_block = judge_targets(targets, reps, timeout, backend, model, raw_dir)
+    forge.post_review(render_review(results, any_block), any_block)
+    return 1 if any_block else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("manifests", nargs="*", help="CronJob manifest paths to judge")
@@ -285,21 +531,29 @@ def main():
                     help="restrict --eval to cases with this judge_value")
     ap.add_argument("--repeat", type=int, default=1,
                     help="judge each case N times; report stability + any-fail-wins aggregate")
-    ap.add_argument("--model", default="family", choices=["family", "work"],
-                    help="label recorded in output (set the real mode with aimode)")
-    ap.add_argument("--timeout", type=int, default=600, help="OC_RUN_TIMEOUT seconds")
+    ap.add_argument("--backend", choices=["oc", "litellm"], default="oc",
+                    help="oc = opencode/qwen (macOS local dev); litellm = Beelink HTTP (in-cluster)")
+    ap.add_argument("--model", default=MODEL_DEFAULT,
+                    help=f"model name for the litellm backend (default {MODEL_DEFAULT}); "
+                         "a recorded label for the oc backend")
+    ap.add_argument("--timeout", type=int, default=600, help="per-call timeout seconds")
     ap.add_argument("--out", help="write judge-output JSON here")
     ap.add_argument("--raw-dir", help="dir for raw qwen outputs (default: temp)")
     ap.add_argument("--score", action="store_true", help="run score.py on the output (eval mode)")
     ap.add_argument("--dry-run", action="store_true", help="print the prompt, don't call qwen")
-    ap.add_argument("--pr", type=int, help="(Phase 3, not implemented) judge a GitHub PR")
+    ap.add_argument("--pr", type=int, help="review a GitHub PR's changed triggerable CronJobs (reactive entrypoint)")
+    ap.add_argument("--local-diff", metavar="BASE",
+                    help="review changed triggerable CronJobs vs a local git base ref (no forge)")
     args = ap.parse_args()
-
-    if args.pr is not None:
-        sys.exit("--pr is Phase 3 (not implemented yet)")
 
     raw_dir = args.raw_dir or tempfile.mkdtemp(prefix="triggerable-judge-")
     os.makedirs(raw_dir, exist_ok=True)
+    reps = max(1, args.repeat)
+
+    # Reactive PR/MR review (the in-cluster runner calls this).
+    if args.pr is not None or args.local_diff:
+        forge = GitHubForge(args.pr) if args.pr is not None else LocalGitForge(args.local_diff)
+        return review_changeset(forge, reps, args.timeout, args.backend, args.model, raw_dir)
 
     cases = []  # list of (id_or_None, doc)
     if args.eval or args.id or args.filter:
@@ -310,16 +564,16 @@ def main():
     if not cases:
         sys.exit("nothing to judge — pass manifest paths, --eval, --id, or --filter")
 
-    reps = max(1, args.repeat)
-    print(f"judging {len(cases)} cronjob(s) x{reps}; model={args.model}; raw_dir={raw_dir}",
-          file=sys.stderr)
+    print(f"judging {len(cases)} cronjob(s) x{reps}; backend={args.backend} model={args.model}; "
+          f"raw_dir={raw_dir}", file=sys.stderr)
     results = []
     for cid, doc in cases:
         runs = []
         for r in range(reps):
             rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)
             os.makedirs(rdir, exist_ok=True)
-            runs.append(judge(doc, cid, args.timeout, rdir, args.dry_run))
+            runs.append(judge(doc, cid, args.timeout, rdir, args.dry_run,
+                              backend=args.backend, model=args.model))
         if args.dry_run:
             continue
         if reps == 1:
@@ -340,7 +594,8 @@ def main():
         print(f"\nstability: {stable}/{len(results)} cases identical across {reps} runs; "
               f"verdicts below are any-fail-wins aggregates", file=sys.stderr)
 
-    payload = {"meta": {"model": args.model, "raw_dir": raw_dir, "repeat": reps},
+    payload = {"meta": {"backend": args.backend, "model": args.model,
+                        "raw_dir": raw_dir, "repeat": reps},
                "results": results}
     if args.out:
         Path(args.out).write_text(json.dumps(payload, indent=2))

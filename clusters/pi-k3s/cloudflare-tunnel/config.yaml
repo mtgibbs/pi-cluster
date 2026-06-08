@@ -40,6 +40,15 @@ data:
       - hostname: ntfy.mtgibbs.dev
         service: http://ntfy.ntfy.svc.cluster.local:80
 
+      # review-hub - GitHub App webhook receiver (reactive PR evaluator).
+      # PATH-RESTRICTED to /webhook; everything else (e.g. /health) -> 404, so the
+      # internal health endpoint never leaks. HMAC-verified inside the service.
+      - hostname: review-hub.mtgibbs.dev
+        path: ^/webhook$
+        service: http://review-hub.review-hub.svc.cluster.local:8080
+      - hostname: review-hub.mtgibbs.dev
+        service: http_status:404
+
       # Personal site (uncomment when ready to migrate from Heroku)
       # - hostname: mtgibbs.xyz
       #   service: http://mtgibbs-site.mtgibbs-site.svc.cluster.local:3000

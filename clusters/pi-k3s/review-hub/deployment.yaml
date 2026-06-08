@@ -1,0 +1,102 @@
+# review-hub — reactive PR-evaluator webhook receiver.
+#
+# GitHub App POSTs pull_request webhooks (via Cloudflare Tunnel) -> this service
+# verifies the HMAC, mints a per-repo App token, runs the applicable evaluators
+# (judging changed triggerable CronJobs against the Beelink LiteLLM), and posts a
+# Check Run + comment. Reactive, multi-repo, multi-evaluator; no checkout, no
+# per-repo credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: review-hub
+  namespace: review-hub
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: review-hub
+  template:
+    metadata:
+      labels:
+        app: review-hub
+    spec:
+      # pi3-worker-2 has 1 GB RAM and is excluded from most workloads.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: review-hub
+          image: ghcr.io/mtgibbs/review-hub:0.1.0 # {"$imagepolicy": "flux-system:review-hub"}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: review-hub-secrets
+                  key: app-id
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: review-hub-secrets
+                  key: private-key
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: review-hub-secrets
+                  key: webhook-secret
+            - name: TRIGGERABLE_JUDGE_LITELLM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: review-hub-secrets
+                  key: litellm-key
+            - name: LITELLM_BASE_URL
+              value: "https://ai.lab.mtgibbs.dev/v1"
+            - name: JUDGE_MODEL
+              value: "hot-coder"
+            - name: JUDGE_REPEAT
+              value: "5"
+            - name: JUDGE_TIMEOUT
+              value: "240"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}

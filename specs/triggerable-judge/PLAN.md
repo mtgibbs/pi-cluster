@@ -177,14 +177,45 @@ v2 prompt changes (all in `scripts/triggerable-judge.py`):
   escalated both 12 and 15 despite the wobble. Criteria labels remain noisy (union across runs);
   the verdict is the reliable signal.
 
-### Phase 3 — PR integration
-- `--pr <n>`: fetch changed triggerable cronjobs from the PR, judge each, post a
-  structured review comment via `gh`; on fail → `gh pr review --request-changes` + label.
-- Decide: keep local (manual / poll) or move to the self-hosted runner.
+### Phase 3 — PR integration ✅ DONE (2026-06-08) — code built, awaiting deploy
+- `--pr <n>` / `--local-diff <base>`: select the changed triggerable CronJobs,
+  judge each (multi-vote), post a verdict comment, exit non-zero on any fail/flag
+  (the merge gate). `--local-diff` flow verified end-to-end structurally.
+- **Forge-agnostic** via a thin adapter (the user's "agnostic to GitHub vs local
+  GitLab" ask): `GitHubForge` (REST API + urllib — no `gh`/node, so a stock runner
+  needs only python3), `LocalGitForge` (git diff → stdout). `GitLabForge` is a future drop-in.
+- **LiteLLM HTTP backend** (`--backend litellm`): the judge calls the Beelink
+  directly (no `oc`/opencode — pure text-gen by construction). Verified reachable
+  (clean 401 with a bogus key). `--backend oc` stays the macOS local-dev path.
+- **Fail-safe block:** only a clean `pass` clears; fail/flag/error all escalate, so a
+  model timeout or unparseable run can never silently wave a hazard through.
 
-### Phase 4 (later) — self-hosted runner
-Register a runner on the Beelink so the judge runs in CI on PRs → the
-"my machine reviews my GitHub" end-state. Only if Phase 0–2 show the judge is trustworthy.
+### Phase 4 — reactive review-hub receiver 🔧 BUILT (2026-06-08), deploy-gated
+Two course-corrections from the user reshaped this (see RECEIVER.md, the durable doc):
+- **Not the Beelink → in-cluster** (calls the Beelink LiteLLM like local-llm-mcp).
+- **Not per-repo runners/PATs → one GitHub App** (installed all-repos, mints per-repo
+  tokens). Credentials scale with bot-roles, not repos. The runner scaffold was retired
+  (uncommitted) — the ARC/simple-runner path with it.
+- **Not GH Actions → a webhook receiver** (the forge-agnostic, multi-evaluator end-state;
+  reactive via GitHub webhook → Cloudflare Tunnel; no inbound creds beyond the App).
+
+Built + verified: `scripts/reviewhub/` (`github_app.py` JWT→token [App auth verified live —
+app id 3998878, sees all 45 repos], `evaluators.py` registry, `receiver.py` HMAC+dispatch
+[HMAC tested]) + `Dockerfile`/`VERSION` + `.github/workflows/build-review-hub.yml` (GHCR
+multi-arch) + `clusters/pi-k3s/review-hub/` (ns, ExternalSecret, Deployment, Service,
+image-automation, kustomization) + Flux Kustomization #29 + the `review-hub.mtgibbs.dev`
+path-locked Tunnel route. 1Password `review-hub` item ready (App creds + webhook secret +
+scoped LiteLLM key, all live). Deploy: commit/push → flip GHCR public → DNS → set App webhook
+URL → required check. Q8 A/B still deferred.
+
+### Framework (the user's "many evaluators / many bots" ask) — REALISED
+Identity: ONE GitHub App per bot-role, all-repos, per-repo tokens on demand — never a
+token-per-repo. Execution: one in-cluster receiver dispatches to an evaluator REGISTRY
+(`scripts/reviewhub/evaluators.py`: pi-cluster→triggerable; pi-cluster-mcp→evaluator #2 TBD).
+Forge adapter (`GitHubForge` API/no-checkout, `LocalGitForge`; GitLab/Gitea = add a forge +
+webhook parser). A new repo = zero new creds; a new evaluator = a registry entry. Reusable
+engine (backends/parse/aggregate/forge) still in `triggerable_judge.py` — extract to a shared
+lib when evaluator #2 lands.
 
 ## Definition of done (prototype)
 - Eval set ≥ ~10 cases; the scorer reports precision/recall + per-criterion accuracy.

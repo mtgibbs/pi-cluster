@@ -51,10 +51,23 @@ def writable_shared_volumes(job_spec):
     return out
 
 
+def cronjobs_from_text(text):
+    """Yield CronJob docs from a (possibly multi-doc) YAML string.
+
+    Used when the manifest comes from an API fetch (no checkout) rather than a
+    file on disk. Malformed YAML yields nothing rather than raising.
+    """
+    import yaml
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except yaml.YAMLError:
+        return
+    for doc in docs:
+        if isinstance(doc, dict) and doc.get("kind") == "CronJob":
+            yield doc
+
+
 def iter_cronjobs(path):
     """Yield CronJob docs from a (possibly multi-doc) YAML file."""
-    import yaml
     with open(path) as f:
-        for doc in yaml.safe_load_all(f):
-            if isinstance(doc, dict) and doc.get("kind") == "CronJob":
-                yield doc
+        yield from cronjobs_from_text(f.read())

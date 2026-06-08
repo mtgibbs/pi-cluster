@@ -1,0 +1,42 @@
+name: build-review-hub
+
+# Builds + pushes the review-hub receiver image to GHCR on change. Version comes
+# from scripts/reviewhub/VERSION (bump it to cut a release); Flux image-automation
+# then rolls the deployment. Multi-arch so it runs on the arm64 Pis.
+#
+# NOTE: after the first push, flip the GHCR package public (cluster pulls anon):
+#   gh api -X PATCH /user/packages/container/review-hub -f visibility=public
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/reviewhub/**'
+      - 'scripts/triggerable_judge.py'
+      - '.github/scripts/cronjob_parse.py'
+      - '.github/workflows/build-review-hub.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: echo "v=$(cat scripts/reviewhub/VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/reviewhub/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ghcr.io/mtgibbs/review-hub:${{ steps.ver.outputs.v }}

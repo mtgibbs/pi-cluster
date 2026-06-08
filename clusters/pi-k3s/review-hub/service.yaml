@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: review-hub
+  namespace: review-hub
+spec:
+  selector:
+    app: review-hub
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http

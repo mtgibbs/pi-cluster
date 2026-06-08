@@ -607,3 +607,25 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 29. review-hub - reactive PR-evaluator webhook receiver. A GitHub App POSTs
+# pull_request webhooks (via the Cloudflare Tunnel) -> this service judges changed
+# triggerable CronJobs against the Beelink LiteLLM and posts a Check Run. One App,
+# all repos, per-repo tokens. Needs the review-hub 1Password item + the GHCR image
+# (see specs/triggerable-judge/RECEIVER.md) before it goes green.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: review-hub
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/review-hub
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
