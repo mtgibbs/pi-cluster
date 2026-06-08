@@ -3,6 +3,11 @@ kind: CronJob
 metadata:
   name: renovate
   namespace: renovate
+  labels:
+    # Opt in to manual triggering via the MCP trigger_cronjob tool.
+    # Renovate is idempotent (re-runs re-evaluate and dedupe branches) and
+    # tolerates overlapping with a scheduled run.
+    homelab.mcp/triggerable: "true"
 spec:
   schedule: "0 6 * * 6"
   timeZone: America/Chicago
