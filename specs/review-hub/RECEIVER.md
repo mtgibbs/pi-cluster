@@ -72,7 +72,9 @@ logs with `kubectl logs -n review-hub deploy/review-hub`.
 
 A repo signs up by committing **`.review-hub.yml`** at its root — presence is the
 sign-up, absence means no review (opt-in, not opt-out). The bot's App is installed
-org-wide but only reviews repos that ship this file:
+org-wide but only reviews repos that ship this file. The opt-in is read from the
+repo's **default branch** (not the PR head) — so the subscription takes effect once
+the file is **merged to `main`**, and a PR can't opt itself out (or in) by editing it:
 
 ```yaml
 # .review-hub.yml

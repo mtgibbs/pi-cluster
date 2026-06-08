@@ -254,8 +254,10 @@ class Forge:
     def changed_files(self):
         raise NotImplementedError
 
-    def get_file(self, path):
-        """Content of `path` at the changeset head, or None if absent/deleted."""
+    def get_file(self, path, ref="__head__"):
+        """Content of `path`. ref="__head__" = the changeset head (the version being
+        judged); ref=None = the repo's DEFAULT branch (used for the opt-in, which a
+        PR must not be able to control). None if absent/deleted."""
         raise NotImplementedError
 
     def changed_patches(self):
@@ -310,14 +312,18 @@ class GitHubForge(Forge):
     def changed_patches(self):
         return [(f["filename"], f.get("patch")) for f in self._files_api()]
 
-    def get_file(self, path):
+    def get_file(self, path, ref="__head__"):
         import base64
-        ref = f"?ref={self.head_sha}" if self.head_sha else ""
+        # "__head__" -> the PR head (judge the PR's version); None/"" -> the repo's
+        # DEFAULT branch (the API omits ?ref) — used for the opt-in so a PR can't
+        # opt itself in/out by editing the file.
+        target = self.head_sha if ref == "__head__" else ref
+        refq = f"?ref={target}" if target else ""
         try:
-            data = self._req("GET", f"/repos/{self.repo}/contents/{path}{ref}")
+            data = self._req("GET", f"/repos/{self.repo}/contents/{path}{refq}")
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                return None  # deleted in the PR
+                return None  # absent on that ref
             raise
         if not isinstance(data, dict) or data.get("encoding") != "base64":
             return None
@@ -357,7 +363,7 @@ class LocalGitForge(Forge):
                 return [p for p in out.stdout.splitlines() if p.strip()]
         raise SystemExit(f"git diff against {self.base} failed")
 
-    def get_file(self, path):
+    def get_file(self, path, ref=None):  # local dev reads the working tree regardless of ref
         fp = REPO_ROOT / path
         return fp.read_text() if fp.exists() else None
 

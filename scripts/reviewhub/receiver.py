@@ -61,9 +61,11 @@ def verify_signature(sig, body):
 
 
 def read_optin(forge):
-    """The validators a repo opted into, from its .review-hub.yml. Empty = the
-    repo hasn't signed up, so we review nothing (opt-in, not opt-out)."""
-    raw = forge.get_file(OPTIN_FILE)
+    """The validators a repo opted into, from .review-hub.yml on its DEFAULT branch.
+    Read from the default branch (ref=None), NOT the PR head, so a PR can't opt
+    itself out (delete the file to skip review) or in — only the merged-to-main
+    subscription counts. Empty = the repo hasn't signed up, so we review nothing."""
+    raw = forge.get_file(OPTIN_FILE, ref=None)
     if not raw:
         return set()
     try:
