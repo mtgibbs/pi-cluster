@@ -1,0 +1,23 @@
+name: triggerable-lint
+
+# Audits CronJobs opted in to manual triggering (homelab.mcp/triggerable: "true")
+# against the deterministic slice of the triggerable contract. A blocking finding
+# fails the check so a human reviews before merge.
+on:
+  pull_request:
+    paths:
+      - 'clusters/**/*.yaml'
+      - '.github/scripts/triggerable_lint.py'
+      - '.github/workflows/triggerable-lint.yml'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet pyyaml
+      - name: Lint triggerable CronJobs
+        run: python3 .github/scripts/triggerable_lint.py
