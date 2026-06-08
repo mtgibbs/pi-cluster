@@ -68,12 +68,31 @@ check appears in_progress, then success (clean) or failure (fail/flag), with a
 verdict comment. Check delivery under *App → Advanced → Recent Deliveries*, and pod
 logs with `kubectl logs -n review-hub deploy/review-hub`.
 
-## Adding an evaluator (e.g. MCP tool-safety on pi-cluster-mcp)
+## Onboarding a repo (opt-in)
 
-1. Add an `Evaluator` subclass in `scripts/reviewhub/evaluators.py` — its
-   `applies(repo)`, selector, and contract.
-2. Register it in `REGISTRY`. Bump `VERSION`. Done — **no new App, runner, secret,
-   or service.** The App already covers pi-cluster-mcp; the webhook already arrives.
+A repo signs up by committing **`.review-hub.yml`** at its root — presence is the
+sign-up, absence means no review (opt-in, not opt-out). The bot's App is installed
+org-wide but only reviews repos that ship this file:
+
+```yaml
+# .review-hub.yml
+validators:
+  - gate-regression      # by name; must be a validator valid for this repo
+```
+
+Two-sided handshake in `validators_for(repo, files, opted_in)`: a validator runs iff
+(1) the repo opted into it here, (2) the validator is valid for this repo
+(`repos` empty = any), and (3) the changed files match its globs. **Onboarding a repo
+never touches review-hub code — one commit on the repo's side.**
+
+## Adding a validator (e.g. MCP tool-safety)
+
+1. Add a single-concern validator: a class in `scripts/reviewhub/validators/<name>.py`
+   (its `repos`/`globs` routing + `review()`) and its prompt+eval set under
+   `specs/validators/<name>/` (`contract.md` + `eval/`). Register it in
+   `validators/__init__.py` `REGISTRY`.
+2. Repos opt in by adding its name to their `.review-hub.yml`. Bump `VERSION`. Done —
+   **no new App, runner, secret, or service.**
 
 ## Notes
 

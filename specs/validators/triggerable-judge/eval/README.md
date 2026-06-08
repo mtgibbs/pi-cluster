@@ -58,13 +58,13 @@ Needs `pyyaml` (repo `.venv` has it):
 
 ```bash
 # lint baseline only + validate the eval set's own `lint:` labels
-.venv/bin/python specs/triggerable-judge/eval/score.py
+.venv/bin/python specs/validators/triggerable-judge/eval/score.py
 
 # fail if a `lint:` label in expected.yaml disagrees with the live lint
-.venv/bin/python specs/triggerable-judge/eval/score.py --check
+.venv/bin/python specs/validators/triggerable-judge/eval/score.py --check
 
 # grade an LLM-judge output (Phase 1+)
-.venv/bin/python specs/triggerable-judge/eval/score.py --judge out.json
+.venv/bin/python specs/validators/triggerable-judge/eval/score.py --judge out.json
 ```
 
 ### Current lint-baseline result

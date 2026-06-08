@@ -24,9 +24,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import evaluators  # noqa: E402
+import yaml  # noqa: E402
+
 import github_app  # noqa: E402
 import triggerable_judge as tj  # noqa: E402
+import validators  # noqa: E402
+
+OPTIN_FILE = ".review-hub.yml"
 
 APP_ID = os.environ.get("GITHUB_APP_ID")
 PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY")
@@ -45,29 +49,53 @@ def verify_signature(sig, body):
     return hmac.compare_digest("sha256=" + digest, sig)
 
 
+def read_optin(forge):
+    """The validators a repo opted into, from its .review-hub.yml. Empty = the
+    repo hasn't signed up, so we review nothing (opt-in, not opt-out)."""
+    raw = forge.get_file(OPTIN_FILE)
+    if not raw:
+        return set()
+    try:
+        data = yaml.safe_load(raw) or {}
+    except yaml.YAMLError:
+        return set()
+    return set(data.get("validators") or [])
+
+
 def handle_pull_request(payload):
-    """Background worker: token → evaluators → Check Run + comment. Never raises."""
+    """Background worker: token → roster of validators → a Check Run each. Never raises."""
     repo = payload["repository"]["full_name"]
     pr = payload["number"]
     head_sha = payload["pull_request"]["head"]["sha"]
     install_id = payload["installation"]["id"]
-    evals = evaluators.evaluators_for(repo)
-    if not evals:
-        print(f"no evaluators registered for {repo}", file=sys.stderr)
-        return
     try:
         token = github_app.installation_token(APP_ID, install_id, PRIVATE_KEY)
     except Exception as e:  # noqa: BLE001
         print(f"token mint failed for {repo}#{pr}: {e}", file=sys.stderr)
         return
 
-    for ev in evals:
-        forge = tj.GitHubForge(pr, repo=repo, token=token, head_sha=head_sha)
+    forge = tj.GitHubForge(pr, repo=repo, token=token, head_sha=head_sha)
+    try:
+        opted_in = read_optin(forge)
+        changed = forge.changed_files()
+    except Exception as e:  # noqa: BLE001
+        print(f"could not read {repo}#{pr}: {e}", file=sys.stderr)
+        return
+    if not opted_in:
+        print(f"{repo}#{pr}: no {OPTIN_FILE} — repo not opted in, skipping", file=sys.stderr)
+        return
+    roster = validators.validators_for(repo, changed, opted_in)
+    if not roster:
+        print(f"{repo}#{pr}: opted into {sorted(opted_in)} but none apply to these changes",
+              file=sys.stderr)
+        return
+
+    for v in roster:
         check_id = None
         try:
-            check_id = forge.create_check_run(head_sha, name=ev.check_name)
-            raw = tempfile.mkdtemp(prefix=f"{ev.name}-")
-            results, any_block, body = ev.review(forge, REPS, TIMEOUT, MODEL, raw)
+            check_id = forge.create_check_run(head_sha, name=v.name)
+            raw = tempfile.mkdtemp(prefix=f"{v.name}-")
+            results, any_block, body = v.review(forge, REPS, TIMEOUT, MODEL, raw)
             if body is None:
                 forge.complete_check_run(check_id, "neutral",
                                          "No applicable changes", "Nothing to review.")
@@ -76,15 +104,15 @@ def handle_pull_request(payload):
             forge.complete_check_run(
                 check_id,
                 "failure" if any_block else "success",
-                "Contract violation — human review required" if any_block else "All clear",
+                "Human review required" if any_block else "All clear",
                 body[:60000])
-            print(f"{repo}#{pr} {ev.name}: {'BLOCK' if any_block else 'pass'}", file=sys.stderr)
+            print(f"{repo}#{pr} {v.name}: {'BLOCK' if any_block else 'pass'}", file=sys.stderr)
         except Exception as e:  # noqa: BLE001 — fail-safe: a crash blocks, never silently passes
-            print(f"{ev.name} errored on {repo}#{pr}: {e}", file=sys.stderr)
+            print(f"{v.name} errored on {repo}#{pr}: {e}", file=sys.stderr)
             if check_id is not None:
                 try:
-                    forge.complete_check_run(check_id, "failure", "Judge error",
-                                             f"The evaluator crashed — a human must review.\n\n```\n{e}\n```")
+                    forge.complete_check_run(check_id, "failure", "Validator error",
+                                             f"The validator crashed — a human must review.\n\n```\n{e}\n```")
                 except Exception:  # noqa: BLE001
                     pass
 

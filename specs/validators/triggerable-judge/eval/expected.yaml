@@ -58,7 +58,7 @@ cases:
       that IS safe to trigger. Precision trap: distinguishes it from the --delete backups.
 
   - id: 04-flock-writer
-    source: specs/triggerable-judge/eval/synthetic/04-flock-writer-pass.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/04-flock-writer-pass.yaml
     verdict: pass
     criteria: []
     lint: pass
@@ -66,7 +66,7 @@ cases:
     why: Writable PVC but takes a flock and writes a date-named (truncating) file — concurrency-safe + idempotent.
 
   - id: 05-idempotent-upsert
-    source: specs/triggerable-judge/eval/synthetic/05-idempotent-upsert-pass.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/05-idempotent-upsert-pass.yaml
     verdict: pass
     criteria: []
     lint: pass
@@ -107,7 +107,7 @@ cases:
     why: rsync --delete, same shape as pvc-backup.
 
   - id: 10-orphan-sweep-delete
-    source: specs/triggerable-judge/eval/synthetic/10-orphan-sweep-delete-fail.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/10-orphan-sweep-delete-fail.yaml
     verdict: fail
     criteria: [time-insensitive, concurrency-tolerant, idempotent]
     lint: block
@@ -116,7 +116,7 @@ cases:
 
   # ---- FAIL, judge-only (recall: lint is blind, judge must catch) ----
   - id: 11-duplicate-insert-rollup
-    source: specs/triggerable-judge/eval/synthetic/11-duplicate-insert-rollup-fail.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/11-duplicate-insert-rollup-fail.yaml
     verdict: fail
     criteria: [idempotent]
     lint: pass
@@ -124,7 +124,7 @@ cases:
     why: Blind INSERT of one row per run — a second run double-counts the day. No DROP/TRUNCATE, no mount; lint blind.
 
   - id: 12-quota-burn-loop
-    source: specs/triggerable-judge/eval/synthetic/12-quota-burn-loop-fail.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/12-quota-burn-loop-fail.yaml
     verdict: fail
     criteria: [quota-safe]
     lint: pass
@@ -132,7 +132,7 @@ cases:
     why: Unthrottled per-item public-API loop; a manual trigger doubles call volume and exhausts the daily quota. Lint has no quota concept.
 
   - id: 13-external-counter-rmw
-    source: specs/triggerable-judge/eval/synthetic/13-external-counter-rmw-fail.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/13-external-counter-rmw-fail.yaml
     verdict: fail
     criteria: [concurrency-tolerant]
     lint: pass
@@ -140,7 +140,7 @@ cases:
     why: Non-atomic GET/compute/PUT on an external counter — overlapping runs lose updates. Shared state is external, not a volume; lint blind.
 
   - id: 14-stale-window-reprocess
-    source: specs/triggerable-judge/eval/synthetic/14-stale-window-reprocess-fail.yaml
+    source: specs/validators/triggerable-judge/eval/synthetic/14-stale-window-reprocess-fail.yaml
     verdict: fail
     criteria: [time-insensitive, idempotent]
     lint: pass

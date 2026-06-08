@@ -37,7 +37,7 @@ from pathlib import Path
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[4]  # …/specs/validators/triggerable-judge/eval/score.py
 EVAL_DIR = Path(__file__).resolve().parent
 EXPECTED = EVAL_DIR / "expected.yaml"
 LINT_DIR = REPO_ROOT / ".github" / "scripts"

@@ -1,0 +1,5 @@
+# review-hub opt-in — which eval gates the bot runs on this repo's PRs.
+# Presence of this file is the sign-up; absence means no review. The bot's
+# GitHub App is installed org-wide, but only reviews repos that ship this file.
+validators:
+  - triggerable-judge   # judges changed CronJobs claiming homelab.mcp/triggerable

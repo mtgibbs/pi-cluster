@@ -9,6 +9,8 @@ WORKDIR /app
 COPY .github/scripts/cronjob_parse.py .github/scripts/cronjob_parse.py
 COPY scripts/triggerable_judge.py scripts/triggerable_judge.py
 COPY scripts/reviewhub/ scripts/reviewhub/
+# Prompt templates (loaded at runtime) live next to each validator's eval set.
+COPY specs/validators/ specs/validators/
 
 ENV PORT=8080
 EXPOSE 8080
