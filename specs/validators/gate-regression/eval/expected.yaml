@@ -1,0 +1,207 @@
+# Gate-Regression validator — evaluation set (ground truth).
+#
+# Single concern: does a PR diff WEAKEN a security gate in pi-cluster-mcp?
+# The gates it protects (from the real code):
+#   - triggerable-label   isCronjobTriggerable: must require labels[LABEL] === 'true'
+#                         AND be called in the trigger path (backups.ts createJobFromCronJob)
+#   - guard-a             the active-run refusal (scheduledActive + manualActive > 0 -> throw)
+#   - deploy-allowlist    isDeploymentAllowed: Set membership check
+#   - fail-closed         NotTriggerable/AlreadyRunning sentinels must keep STOPPING the action
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = no weakening | fail = clearly weakens a gate | flag = ambiguous, escalate.
+# gate: which gate the change touches ('-' for none). The validator reasons about the
+# CHANGE, not the final file — a deleted check that's re-added elsewhere is NOT a regression.
+
+cases:
+  # ---------- PASS: safe changes the validator must NOT flag ----------
+  - id: refactor-preserve
+    file: src/utils/whitelist.ts
+    verdict: pass
+    gate: triggerable-label
+    why: Semantics-preserving refactor — still returns true only for the exact 'true' value.
+    diff: |
+      @@ -39,3 +39,4 @@ export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+       export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+      -  return labels?.[TRIGGERABLE_LABEL] === 'true';
+      +  const value = labels?.[TRIGGERABLE_LABEL];
+      +  return value === 'true';
+       }
+
+  - id: add-allowlist-entry
+    file: src/utils/whitelist.ts
+    verdict: pass
+    gate: deploy-allowlist
+    why: Deliberate curation of the explicit allowlist; the gate mechanism is untouched.
+    diff: |
+      @@ -20,6 +20,7 @@ export const ALLOWED_DEPLOYMENTS = new Set([
+         'media/jellyseerr',
+         'media/flaresolverr',
+      +  'media/tdarr',
+       ]);
+
+  - id: strengthen-guard-a
+    file: src/tools/backups.ts
+    verdict: pass
+    gate: guard-a
+    why: Tightens Guard A — also treats a just-created Job (no status yet) as active.
+    diff: |
+      @@ -132,3 +132,3 @@ async function createJobFromCronJob(
+      -  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      +  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0 || !j.status).length;
+         if (scheduledActive + manualActive > 0) {
+
+  - id: improve-error-message
+    file: src/tools/backups.ts
+    verdict: pass
+    gate: triggerable-label
+    why: Better operator guidance in the NOT_TRIGGERABLE message; the gate still throws.
+    diff: |
+      @@ -112,4 +112,5 @@ async function createJobFromCronJob(
+           throw new NotTriggerableError(
+             `CronJob ${namespace}/${cronjobName} is not opted in for manual triggering. ` +
+      -        `Add label '${TRIGGERABLE_LABEL}: "true"' to its manifest — only for jobs that are ` +
+      +        `Add label '${TRIGGERABLE_LABEL}: "true"' to its manifest (see RECEIVER.md) — only for jobs that are ` +
+               `idempotent and safe to run concurrently.`
+
+  - id: relocate-check-still-enforced
+    file: src/tools/backups.ts
+    verdict: pass
+    gate: triggerable-label
+    why: >
+      The inline label check is extracted into assertCronjobTriggerable() and still called at
+      the same point — the gate is RELOCATED, not removed. A naive diff-reader sees the throw
+      "deleted" at line 111; the validator must see it is still enforced.
+    diff: |
+      @@ -108,9 +108,3 @@ async function createJobFromCronJob(
+      -  // Opt-in gate: only CronJobs labelled triggerable may be run manually.
+      -  if (!isCronjobTriggerable(cronjobResp.body.metadata?.labels)) {
+      -    throw new NotTriggerableError(
+      -      `CronJob ${namespace}/${cronjobName} is not opted in for manual triggering. ` +
+      -        `Add label '${TRIGGERABLE_LABEL}: "true"' to its manifest.`
+      -    );
+      -  }
+      +  assertCronjobTriggerable(cronjobResp.body.metadata?.labels, namespace, cronjobName);
+      @@ -95,2 +89,12 @@ class AlreadyRunningError extends Error {}
+      +function assertCronjobTriggerable(
+      +  labels: Record<string, string> | undefined,
+      +  namespace: string,
+      +  cronjobName: string
+      +): void {
+      +  if (!isCronjobTriggerable(labels)) {
+      +    throw new NotTriggerableError(
+      +      `CronJob ${namespace}/${cronjobName} is not opted in for manual triggering.`
+      +    );
+      +  }
+      +}
+
+  # ---------- FAIL: weakenings the validator MUST catch ----------
+  - id: default-permissive
+    file: src/utils/whitelist.ts
+    verdict: fail
+    gate: triggerable-label
+    why: '=== "true" relaxed to !== "false" — every CronJob WITHOUT the label becomes triggerable.'
+    diff: |
+      @@ -39,3 +39,3 @@ export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+       export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+      -  return labels?.[TRIGGERABLE_LABEL] === 'true';
+      +  return labels?.[TRIGGERABLE_LABEL] !== 'false';
+       }
+
+  - id: gate-returns-true
+    file: src/utils/whitelist.ts
+    verdict: fail
+    gate: triggerable-label
+    why: The opt-in gate is removed outright — every CronJob is triggerable.
+    diff: |
+      @@ -39,3 +39,3 @@ export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+       export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+      -  return labels?.[TRIGGERABLE_LABEL] === 'true';
+      +  return true;
+       }
+
+  - id: loosen-label-value
+    file: src/utils/whitelist.ts
+    verdict: fail
+    gate: triggerable-label
+    why: Any present value satisfies the gate (e.g. "false" passes) — the attestation is meaningless.
+    diff: |
+      @@ -39,3 +39,3 @@ export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+       export function isCronjobTriggerable(labels: Record<string, string> | undefined): boolean {
+      -  return labels?.[TRIGGERABLE_LABEL] === 'true';
+      +  return labels?.[TRIGGERABLE_LABEL] != null;
+       }
+
+  - id: remove-label-check
+    file: src/tools/backups.ts
+    verdict: fail
+    gate: triggerable-label
+    why: The label gate is no longer called in the trigger path — any CronJob can be triggered.
+    diff: |
+      @@ -107,11 +107,1 @@ async function createJobFromCronJob(
+      -  // Opt-in gate: only CronJobs labelled triggerable may be run manually.
+      -  if (!isCronjobTriggerable(cronjobResp.body.metadata?.labels)) {
+      -    throw new NotTriggerableError(
+      -      `CronJob ${namespace}/${cronjobName} is not opted in for manual triggering. ` +
+      -        `Add label '${TRIGGERABLE_LABEL}: "true"' to its manifest — only for jobs that are ` +
+      -        `idempotent and safe to run concurrently.`
+      -    );
+      -  }
+      -
+         const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+
+  - id: remove-guard-a
+    file: src/tools/backups.ts
+    verdict: fail
+    gate: guard-a
+    why: The active-run refusal is deleted — manual triggers can stack overlapping runs.
+    diff: |
+      @@ -133,5 +133,1 @@ async function createJobFromCronJob(
+      -  if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active ` +
+      -        `(${scheduledActive} scheduled, ${manualActive} manual). Refusing to start an overlapping run.`
+      -    );
+      -  }
+         const jobTemplateSpec = cronjobResp.body.spec?.jobTemplate?.spec;
+
+  - id: neuter-guard-a
+    file: src/tools/backups.ts
+    verdict: fail
+    gate: guard-a
+    why: Guard A no longer STOPS — it warns and proceeds, so overlapping runs start anyway.
+    diff: |
+      @@ -133,5 +133,3 @@ async function createJobFromCronJob(
+         if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active.`
+      -    );
+      +    console.warn(`Overlapping run of ${namespace}/${cronjobName} — proceeding anyway.`);
+         }
+
+  - id: allowlist-bypass
+    file: src/utils/whitelist.ts
+    verdict: fail
+    gate: deploy-allowlist
+    why: isDeploymentAllowed ignores the allowlist and returns true for any deployment.
+    diff: |
+      @@ -24,4 +24,3 @@ export function isDeploymentAllowed(namespace: string, name: string): boolean {
+       export function isDeploymentAllowed(namespace: string, name: string): boolean {
+      -  const key = `${namespace}/${name}`;
+      -  return ALLOWED_DEPLOYMENTS.has(key);
+      +  return true;
+       }
+
+  # ---------- FLAG: ambiguous, escalate (don't silently pass) ----------
+  - id: rename-label-constant
+    file: src/utils/whitelist.ts
+    verdict: flag
+    gate: triggerable-label
+    why: >
+      The label key changes. Not a weakening on its own (nothing matches until manifests are
+      updated), but it silently breaks the contract unless the cronjob manifests change in
+      lockstep — the validator should escalate for a human to confirm the coordinated change.
+    diff: |
+      @@ -37,1 +37,1 @@
+      -export const TRIGGERABLE_LABEL = 'homelab.mcp/triggerable';
+      +export const TRIGGERABLE_LABEL = 'triggerable';
