@@ -59,8 +59,12 @@ SCORER = EVAL_DIR / "score.py"
 LITELLM_BASE_DEFAULT = "https://ai.lab.mtgibbs.dev/v1"
 LITELLM_KEY_ENV = "TRIGGERABLE_JUDGE_LITELLM_KEY"
 MODEL_DEFAULT = "hot-coder"
-TEMPERATURE = 0.4
-MAX_TOKENS = 2000
+TEMPERATURE = float(os.environ.get("LITELLM_TEMPERATURE", "0.4"))
+# Verdict + brief reasoning is small; 2000 is a generous default. Capped lower
+# via env for fast eval sweeps (a rambling model otherwise generates to the cap,
+# and a trickling response never trips urlopen's read timeout — see the gauntlet
+# hang). Production can set a tighter bound to cap worst-case per-call latency.
+MAX_TOKENS = int(os.environ.get("LITELLM_MAX_TOKENS", "2000"))
 
 sys.path.insert(0, str(LINT_DIR))
 from cronjob_parse import (  # noqa: E402

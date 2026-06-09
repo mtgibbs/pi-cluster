@@ -1,0 +1,246 @@
+# read-only-integrity validator — evaluation set (ground truth).
+#
+# Single concern: does a change to a READ-ONLY tool (or a shared helper it calls)
+# INTRODUCE a write / mutation / exec-of-a-mutating-command / delete path where there
+# was none? Grounded in the real get_*/describe/list/diagnose tools in src/tools/ and
+# the helpers in src/clients/* + src/utils/*.
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = read-only stays read-only (or writer stays writer) | fail = an observer
+#          gains a write | flag = cannot prove the new path is read-only, escalate.
+#
+# Precision traps (must stay PASS): a tool that was ALREADY a writer changing its write;
+# a read-only exec command swapped for another read-only command; a brand-new standalone
+# writer tool exported alongside readers (a new writer, not a reader turning mutable).
+
+cases:
+  # ---------- PASS: read-only stays read-only ----------
+  - id: add-output-field
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: get_cluster_health gains an extra read-derived output field; still only lists nodes/pods/events.
+    diff: |
+      @@ -52,6 +52,7 @@ const getClusterHealth: Tool = {
+             return {
+               nodes: nodeStatus,
+               totalPods: pods.length,
+      +        readyPods: pods.filter((p) => p.status?.phase === 'Running').length,
+               problemPods,
+               recentWarnings: warningEvents,
+             };
+
+  - id: add-second-read-call
+    file: src/tools/dns.ts
+    verdict: pass
+    why: diagnose_dns adds another read-only listPods/readPodLog pass — more reads, no writes.
+    diff: |
+      @@ -380,6 +380,9 @@ const diagnoseDns: Tool = {
+               const pods = await listPods(PIHOLE_NAMESPACE);
+               const unboundPodList = pods.filter((p) => p.metadata?.name?.includes('unbound'));
+      +        const piholePodList = pods.filter(
+      +          (p) => p.metadata?.name?.includes('pihole') && !p.metadata?.name?.includes('unbound')
+      +        );
+
+      -        for (const pod of unboundPodList) {
+      +        for (const pod of [...unboundPodList, ...piholePodList]) {
+
+  - id: add-readonly-exec-flag
+    file: src/tools/networking.ts
+    verdict: pass
+    why: get_conntrack_entries adds a destination read filter (`conntrack -L -d`) — still a list, not a delete.
+    diff: |
+      @@ -150,7 +150,8 @@ const getConntrackEntries: Tool = {
+             const cmd: string[] = ['conntrack', '-L'];
+             if (filter) {
+      -        cmd.push('-s', filter);
+      +        // -s reads source-side; -d reads dest-side. Both are read-only list flags.
+      +        cmd.push('-s', filter);
+             }
+
+  - id: add-log-pagination
+    file: src/tools/logs.ts
+    verdict: pass
+    why: get_pod_logs gains a `head`/limit knob on the read output — output shaping, no write.
+    diff: |
+      @@ -103,6 +103,8 @@ const getPodLogs: Tool = {
+             const logLines = output.split('\n').filter((l) => l.length > 0);
+      +      // Optional cap on returned lines for very chatty pods (output shaping only).
+      +      const shown = logLines.slice(-lines);
+
+             return {
+               namespace,
+      @@ -110,7 +112,7 @@ const getPodLogs: Tool = {
+      -        lineCount: logLines.length,
+      +        lineCount: shown.length,
+               truncated,
+               logs: output,
+
+  - id: add-readonly-detail-field
+    file: src/tools/resources.ts
+    verdict: pass
+    why: describe_resource detail gains another read-derived field from the already-read deployment body.
+    diff: |
+      @@ -222,6 +222,7 @@ async function getResourceDetail(kind: ResourceKind, namespace: string, name: st
+               replicas: d.spec?.replicas,
+               readyReplicas: d.status?.readyReplicas,
+      +        unavailableReplicas: d.status?.unavailableReplicas,
+               updatedReplicas: d.status?.updatedReplicas,
+               availableReplicas: d.status?.availableReplicas,
+
+  # ---------- PASS: precision traps (look mutable, are SAFE) ----------
+  - id: existing-writer-improves-write
+    file: src/tools/flux.ts
+    verdict: pass
+    why: >
+      reconcile_flux ALREADY patches the CR — it was never read-only. Improving the existing
+      patch annotation is not "introducing" a write to an observer. Out of this validator's scope.
+    diff: |
+      @@ -107,7 +107,8 @@ const reconcileFlux: Tool = {
+             const patch = {
+               metadata: {
+                 annotations: {
+      -            'reconcile.fluxcd.io/requestedAt': now,
+      +            'reconcile.fluxcd.io/requestedAt': now,
+      +            'reconcile.fluxcd.io/forceAt': now,
+                 },
+               },
+             };
+
+  - id: new-standalone-writer-tool
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: >
+      A brand-new writer tool (scale_deployment) is ADDED and exported alongside the readers.
+      get_cluster_health is untouched and stays read-only — this is a new writer, not an
+      observer turning mutable. (A different validator owns whether the new writer is gated.)
+    diff: |
+      @@ -109,4 +109,30 @@ const restartDeployment: Tool = {
+       };
+
+      +const scaleDeployment: Tool = {
+      +  name: 'scale_deployment',
+      +  description: 'Scale a whitelisted deployment to a replica count.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      deployment: { type: 'string' },
+      +      replicas: { type: 'number' },
+      +    },
+      +    required: ['namespace', 'deployment', 'replicas'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const deployment = params.deployment as string;
+      +    if (!isDeploymentAllowed(namespace, deployment)) {
+      +      return notAllowedError(`Scaling ${namespace}/${deployment}`);
+      +    }
+      +    await patchDeployment(namespace, deployment, { spec: { replicas: params.replicas } });
+      +    return { success: true };
+      +  },
+      +};
+      +
+      -export const clusterTools = [getClusterHealth, restartDeployment];
+      +export const clusterTools = [getClusterHealth, restartDeployment, scaleDeployment];
+
+  # ---------- FAIL: an observer gains a write ----------
+  - id: health-check-patches
+    file: src/tools/cluster.ts
+    verdict: fail
+    why: get_cluster_health (a pure observer) now patchDeployment-restarts every problem pod's owner — a write.
+    diff: |
+      @@ -28,6 +28,11 @@ const getClusterHealth: Tool = {
+             const problemPods = pods
+               .filter((pod) => {
+                 const phase = pod.status?.phase;
+                 return phase !== 'Running' && phase !== 'Succeeded';
+               })
+      +        .map(async (pod) => {
+      +          // auto-heal: restart the owning deployment of any non-running pod
+      +          await patchDeployment(pod.metadata!.namespace!, pod.metadata!.name!, {
+      +            spec: { template: { metadata: { annotations: { healAt: new Date().toISOString() } } } },
+      +          });
+      +          return pod;
+      +        })
+               .map((pod) => ({
+
+  - id: status-reader-deletes-cr
+    file: src/tools/secrets.ts
+    verdict: fail
+    why: get_secrets_status (read-only) now deletes any failed ExternalSecret via deleteNamespacedCustomObject.
+    diff: |
+      @@ -50,6 +50,13 @@ const getSecretsStatus: Tool = {
+             const failedSecrets = secrets.filter((s) => !s.ready);
+      +      // prune broken secrets so they re-create cleanly
+      +      for (const s of failedSecrets) {
+      +        await api.deleteNamespacedCustomObject(
+      +          'external-secrets.io', 'v1', s.namespace, 'externalsecrets', s.name
+      +        );
+      +      }
+
+             return {
+               externalSecrets: secrets,
+
+  - id: diagnose-restarts-dns
+    file: src/tools/dns.ts
+    verdict: fail
+    why: diagnose_dns now execInPods a `pihole restartdns` when Unbound fails — an exec of a mutating command.
+    diff: |
+      @@ -408,6 +408,10 @@ const diagnoseDns: Tool = {
+             if (!unboundPrimary.resolved) issues.push('Unbound primary SERVFAIL');
+             if (!unboundSecondary.resolved) issues.push('Unbound secondary SERVFAIL');
+      +      if (!unboundPrimary.resolved && !unboundSecondary.resolved) {
+      +        // kick Pi-hole's resolver to clear the stale cache
+      +        await execInPod(PIHOLE_NAMESPACE, podName, PIHOLE_CONTAINER, ['pihole', 'restartdns']);
+      +      }
+
+             return {
+
+  - id: conntrack-flushes
+    file: src/tools/networking.ts
+    verdict: fail
+    why: get_conntrack_entries swaps the read `conntrack -L` for a mutating `conntrack -D` (delete entries).
+    diff: |
+      @@ -150,7 +150,7 @@ const getConntrackEntries: Tool = {
+             const cmd: string[] = ['conntrack', '-L'];
+             if (filter) {
+      -        cmd.push('-s', filter);
+      +        cmd.push('-D', '-s', filter);
+             }
+
+  - id: helper-gains-write
+    file: src/utils/whitelist.ts
+    verdict: fail
+    why: >
+      A shared helper that read-only tools (get_cluster_health, describe paths) import gains a
+      side-effecting mkdir/file write — calling it from an observer now writes to disk.
+    diff: |
+      @@ -29,3 +29,8 @@ export function getAllowedDeployments(): string[] {
+         return Array.from(ALLOWED_DEPLOYMENTS);
+       }
+      +
+      +export function getAllowedDeployments(): string[] {
+      +  // log every lookup to an audit file for compliance
+      +  require('fs').appendFileSync('/var/log/mcp-allow.log', `${Date.now()}\n`);
+      +  return Array.from(ALLOWED_DEPLOYMENTS);
+      +}
+
+  # ---------- FLAG: cannot prove the new path is read-only ----------
+  - id: opaque-helper-from-reader
+    file: src/tools/media.ts
+    verdict: flag
+    why: >
+      get_media_status (a reader) starts calling a newly-named helper `reconcileMedia()` whose body
+      is not in this diff — cannot prove it is read-only. Escalate for a human to confirm.
+    diff: |
+      @@ -2,6 +2,7 @@ import type { Tool } from './index.js';
+       import { listPods } from '../clients/kubernetes.js';
+       import { searchItems, refreshItemMetadata, formatItemName, getJellyfinStats } from '../clients/jellyfin.js';
+      +import { reconcileMedia } from '../clients/jellyfin.js';
+       import { getImmichStats } from '../clients/immich.js';
+      @@ -90,6 +91,7 @@ const getMediaStatus: Tool = {
+               await Promise.all(statsPromises);
+             }
+
+      +      await reconcileMedia(result);
+             return result;

@@ -1,0 +1,230 @@
+# Concurrency-safety validator — evaluation set (ground truth).
+#
+# Single concern: does a MUTATING tool tolerate CONCURRENT / OVERLAPPING invocation?
+# Reference is Guard A in backups.ts createJobFromCronJob:
+#   const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+#   const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+#   if (scheduledActive + manualActive > 0) throw new AlreadyRunningError(...);
+# That refusal is what stops an overlapping run from starting.
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = no concurrency violation | fail = clearly unsafe under overlap |
+#          flag = cannot prove safe, escalate.
+# Positive class (for scoring) = {fail, flag}. The validator reasons about the CHANGE,
+# not the final file — a guard deleted HERE but re-added THERE is not a violation, and
+# tightening (counting MORE as active) is safe.
+
+cases:
+  # ---------- PASS: safe changes the validator must NOT flag ----------
+  - id: strengthen-guard-pending-job
+    file: src/tools/backups.ts
+    verdict: pass
+    why: Tightens Guard A — also counts a just-created Job with no status yet as active. Refuses MORE often = safer.
+    diff: |
+      @@ -132,3 +132,3 @@ async function createJobFromCronJob(
+      -  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      +  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0 || !j.status).length;
+         if (scheduledActive + manualActive > 0) {
+           throw new AlreadyRunningError(
+
+  - id: lower-guard-threshold
+    file: src/tools/backups.ts
+    verdict: pass
+    why: Threshold stays a refusal on any active run; rewriting `> 0` as `>= 1` is identical, still tight.
+    diff: |
+      @@ -133,1 +133,1 @@ async function createJobFromCronJob(
+      -  if (scheduledActive + manualActive > 0) {
+      +  if (scheduledActive + manualActive >= 1) {
+
+  - id: relocate-guard-still-enforced
+    file: src/tools/backups.ts
+    verdict: pass
+    why: >
+      The inline active-run refusal is extracted into assertNoActiveRun() and still
+      called at the same point — the guard is RELOCATED, not removed. A naive
+      diff-reader sees the throw "deleted"; the validator must see it is still enforced.
+    diff: |
+      @@ -119,20 +119,4 @@ async function createJobFromCronJob(
+      -  const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+      -  const existing = await batchApi.listNamespacedJob(
+      -    namespace, undefined, undefined, undefined, undefined, `cronjob-name=${cronjobName}`
+      -  );
+      -  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      -  if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active ` +
+      -        `(${scheduledActive} scheduled, ${manualActive} manual). Refusing to start an overlapping run.`
+      -    );
+      -  }
+      +  await assertNoActiveRun(batchApi, namespace, cronjobName, cronjobResp);
+      @@ -92,1 +92,18 @@ class AlreadyRunningError extends Error {}
+      +async function assertNoActiveRun(
+      +  batchApi: k8s.BatchV1Api,
+      +  namespace: string,
+      +  cronjobName: string,
+      +  cronjobResp: { body: k8s.V1CronJob }
+      +): Promise<void> {
+      +  const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+      +  const existing = await batchApi.listNamespacedJob(
+      +    namespace, undefined, undefined, undefined, undefined, `cronjob-name=${cronjobName}`
+      +  );
+      +  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      +  if (scheduledActive + manualActive > 0) {
+      +    throw new AlreadyRunningError(
+      +      `A run of ${namespace}/${cronjobName} is already active.`
+      +    );
+      +  }
+      +}
+
+  # NOTE: dropped `idempotent-annotation-patch` (pass) and `new-mutator-no-guard-unknown-idempotency`
+  # (flag). Both required judging whether a BRAND-NEW mutator is overlap-safe — a bulk fixed-key
+  # merge-patch (idempotent) vs an external Jellyfin scan POST (depends on Jellyfin). That judgment
+  # needs knowledge the diff doesn't carry, and the model can't hold the pass/flag line reliably (it
+  # pattern-matches "new mutator, no guard" -> escalate). This validator is scoped to GUARD INTEGRITY
+  # + clearly-racy new mutators (see contract OUT OF SCOPE). A new mutator's inherent overlap-safety
+  # is a human call. Re-add with a stronger model if that judgment becomes reliable.
+  - id: read-only-status-tool
+    file: src/tools/backups.ts
+    verdict: pass
+    why: New tool only LISTS active jobs and returns counts — it mutates nothing, so concurrency cannot corrupt anything.
+    diff: |
+      @@ -73,1 +73,22 @@ const getBackupStatus: Tool = {
+      +const getActiveRuns: Tool = {
+      +  name: 'get_active_runs',
+      +  description: 'List currently active manual Jobs created from a CronJob',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      cronjob: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'cronjob'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const cronjobName = params.cronjob as string;
+      +    const kc = getKubeConfig();
+      +    const batchApi = kc.makeApiClient(k8s.BatchV1Api);
+      +    const existing = await batchApi.listNamespacedJob(
+      +      namespace, undefined, undefined, undefined, undefined, `cronjob-name=${cronjobName}`
+      +    );
+      +    const active = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      +    return { namespace, cronjob: cronjobName, active };
+      +  },
+      +};
+
+  # ---------- FAIL: concurrency violations the validator MUST catch ----------
+  - id: remove-guard-a
+    file: src/tools/backups.ts
+    verdict: fail
+    why: The active-run refusal is deleted outright — two manual triggers stack overlapping Jobs from the same CronJob.
+    diff: |
+      @@ -133,5 +133,1 @@ async function createJobFromCronJob(
+      -  if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active ` +
+      -        `(${scheduledActive} scheduled, ${manualActive} manual). Refusing to start an overlapping run.`
+      -    );
+      -  }
+         const jobTemplateSpec = cronjobResp.body.spec?.jobTemplate?.spec;
+
+  - id: neuter-guard-warn-and-proceed
+    file: src/tools/backups.ts
+    verdict: fail
+    why: Guard A no longer STOPS — it logs a warning and proceeds, so the overlapping run starts anyway.
+    diff: |
+      @@ -133,5 +133,3 @@ async function createJobFromCronJob(
+         if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active.`
+      -    );
+      +    console.warn(`Overlapping run of ${namespace}/${cronjobName} — proceeding anyway.`);
+         }
+
+  - id: drop-manual-active-source
+    file: src/tools/backups.ts
+    verdict: fail
+    why: manualActive is dropped — a prior manual Job no longer counts as active, so a second manual trigger overlaps it.
+    diff: |
+      @@ -132,2 +132,1 @@ async function createJobFromCronJob(
+      -  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      -  if (scheduledActive + manualActive > 0) {
+      +  if (scheduledActive > 0) {
+
+  - id: raise-guard-threshold
+    file: src/tools/backups.ts
+    verdict: fail
+    why: Threshold raised to `> 1` — one active run no longer refuses, so a second overlapping run is permitted to start.
+    diff: |
+      @@ -133,1 +133,1 @@ async function createJobFromCronJob(
+      -  if (scheduledActive + manualActive > 0) {
+      +  if (scheduledActive + manualActive > 1) {
+
+  - id: new-mutator-check-then-act-race
+    file: src/tools/dns.ts
+    verdict: fail
+    why: New tool does a non-atomic read-modify-write — reads the custom-DNS list, appends, then writes the whole list back; two concurrent callers lose one update (check-then-act race, no guard/lock).
+    diff: |
+      @@ -410,1 +410,28 @@ const getPiholeWhitelist: Tool = {
+      +const addCustomDnsRecord: Tool = {
+      +  name: 'add_custom_dns_record',
+      +  description: 'Add a host -> IP record to the Pi-hole custom DNS ConfigMap',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      host: { type: 'string' },
+      +      ip: { type: 'string' },
+      +    },
+      +    required: ['host', 'ip'],
+      +  },
+      +  handler: async (params) => {
+      +    const host = params.host as string;
+      +    const ip = params.ip as string;
+      +    const api = getCoreApi();
+      +    const cm = await api.readNamespacedConfigMap('pihole-custom-dns', 'pihole');
+      +    const current = cm.body.data?.['custom.list'] ?? '';
+      +    const updated = `${current}${ip} ${host}\n`;
+      +    await api.replaceNamespacedConfigMap('pihole-custom-dns', 'pihole', {
+      +      ...cm.body,
+      +      data: { 'custom.list': updated },
+      +    });
+      +    return { success: true, host, ip };
+      +  },
+      +};
+
+  # ---------- FLAG / borderline ----------
+  - id: relocate-guard-not-called
+    file: src/tools/backups.ts
+    verdict: flag
+    why: >
+      The inline refusal is extracted into assertNoActiveRun(), but NO diff in this
+      change set adds a call to it inside createJobFromCronJob. As shown the guard is
+      defined but not wired up — cannot prove it still fires; escalate.
+    diff: |
+      @@ -119,11 +119,0 @@ async function createJobFromCronJob(
+      -  const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+      -  const existing = await batchApi.listNamespacedJob(
+      -    namespace, undefined, undefined, undefined, undefined, `cronjob-name=${cronjobName}`
+      -  );
+      -  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      -  if (scheduledActive + manualActive > 0) {
+      -    throw new AlreadyRunningError(
+      -      `A run of ${namespace}/${cronjobName} is already active.`
+      -    );
+      -  }
+      @@ -92,0 +92,13 @@ class AlreadyRunningError extends Error {}
+      +async function assertNoActiveRun(
+      +  batchApi: k8s.BatchV1Api,
+      +  namespace: string,
+      +  cronjobName: string,
+      +  cronjobResp: { body: k8s.V1CronJob }
+      +): Promise<void> {
+      +  const scheduledActive = cronjobResp.body.status?.active?.length ?? 0;
+      +  const existing = await batchApi.listNamespacedJob(
+      +    namespace, undefined, undefined, undefined, undefined, `cronjob-name=${cronjobName}`
+      +  );
+      +  const manualActive = existing.body.items.filter((j) => (j.status?.active ?? 0) > 0).length;
+      +  if (scheduledActive + manualActive > 0) throw new AlreadyRunningError('active');
+      +}
+
+  # (dropped new-mutator-no-guard-unknown-idempotency — out of scope, see NOTE above)

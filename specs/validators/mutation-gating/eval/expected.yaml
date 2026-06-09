@@ -1,0 +1,412 @@
+# Mutation-Gating validator — evaluation set (ground truth).
+#
+# Single concern: does a PR ADD a tool that MUTATES/TRIGGERS cluster state with NO gate
+# (no allowlist, no opt-in label, no scope restriction)? Wide-open mutation = the violation.
+#
+# The gate pattern it enforces (from the real code):
+#   - allowlist          restart_deployment -> isDeploymentAllowed(ns,name) + notAllowedError (ALLOWED_DEPLOYMENTS)
+#   - opt-in label       trigger_cronjob/createJobFromCronJob -> isCronjobTriggerable(labels) + NotTriggerableError
+#   - scope restriction   a closed enum / single fixed namespace so the mutation can't hit arbitrary targets
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = no new ungated mutating tool | fail = new wide-open mutation | flag = ambiguous, escalate.
+# The validator reasons about the CHANGE, not the final file. Read-only tools need NO gate (pass);
+# weakening an EXISTING gate is a DIFFERENT reviewer's concern (out of scope -> pass).
+
+cases:
+  # ---------- PASS: safe changes the validator must NOT flag ----------
+  - id: read-only-tool-broad-input
+    file: src/tools/resources.ts
+    verdict: pass
+    why: New tool only calls listNamespacedEvent (read). No state change, so no gate is needed even with arbitrary namespace.
+    diff: |
+      @@ -380,1 +380,30 @@
+      +const getResourceEvents: Tool = {
+      +  name: 'get_resource_events',
+      +  description: 'List recent Events in a namespace.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string', description: 'Kubernetes namespace' },
+      +    },
+      +    required: ['namespace'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    if (!DNS_1123_RE.test(namespace)) {
+      +      return validationError('Invalid namespace');
+      +    }
+      +    try {
+      +      const coreApi = getCoreApi();
+      +      const resp = await coreApi.listNamespacedEvent(namespace);
+      +      return { namespace, items: resp.body.items.map((e) => ({ reason: e.reason, message: e.message })) };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+      +  },
+      +};
+      @@ -381,1 +381,1 @@
+      -export const resourceTools = [describeResource];
+      +export const resourceTools = [describeResource, getResourceEvents];
+
+  - id: new-mutating-tool-allowlist-gated
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: New scale_deployment gates on isDeploymentAllowed + notAllowedError before patching — the allowlist pattern.
+    diff: |
+      @@ -109,1 +109,38 @@
+      +const scaleDeployment: Tool = {
+      +  name: 'scale_deployment',
+      +  description: `Scale a whitelisted deployment. Allowed: ${getAllowedDeployments().join(', ')}`,
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string', description: 'Kubernetes namespace' },
+      +      deployment: { type: 'string', description: 'Deployment name' },
+      +      replicas: { type: 'number', description: 'Desired replica count' },
+      +    },
+      +    required: ['namespace', 'deployment', 'replicas'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const deployment = params.deployment as string;
+      +    const replicas = params.replicas as number;
+      +    if (!isDeploymentAllowed(namespace, deployment)) {
+      +      return notAllowedError(
+      +        `Scaling ${namespace}/${deployment}. Allowed: ${getAllowedDeployments().join(', ')}`
+      +      );
+      +    }
+      +    try {
+      +      await patchDeployment(namespace, deployment, { spec: { replicas } });
+      +      return { success: true, message: `Scaled ${namespace}/${deployment} to ${replicas}` };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+      +  },
+      +};
+      @@ -111,1 +111,1 @@
+      -export const clusterTools = [getClusterHealth, restartDeployment];
+      +export const clusterTools = [getClusterHealth, restartDeployment, scaleDeployment];
+
+  - id: new-trigger-tool-label-gated
+    file: src/tools/backups.ts
+    verdict: pass
+    why: New suspend tool reuses the opt-in label gate (isCronjobTriggerable -> NotTriggerableError) before mutating — the label pattern.
+    diff: |
+      @@ -379,1 +379,28 @@
+      +const suspendCronjob: Tool = {
+      +  name: 'suspend_cronjob',
+      +  description: 'Suspend a triggerable CronJob.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string', description: 'CronJob namespace' },
+      +      cronjob: { type: 'string', description: 'CronJob name' },
+      +    },
+      +    required: ['namespace', 'cronjob'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const cronjobName = params.cronjob as string;
+      +    const invalid = validateJobNames(namespace, cronjobName);
+      +    if (invalid) return validationError(invalid);
+      +    try {
+      +      const kc = getKubeConfig();
+      +      const batchApi = kc.makeApiClient(k8s.BatchV1Api);
+      +      const resp = await batchApi.readNamespacedCronJob(cronjobName, namespace);
+      +      if (!isCronjobTriggerable(resp.body.metadata?.labels)) {
+      +        return notTriggerableError(`CronJob ${namespace}/${cronjobName} is not opted in.`);
+      +      }
+      +      await batchApi.patchNamespacedCronJob(cronjobName, namespace, { spec: { suspend: true } });
+      +      return { success: true, message: `Suspended ${namespace}/${cronjobName}` };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+      +  },
+      +};
+
+  - id: new-gate-helper-defined-and-wired
+    file: src/utils/whitelist.ts
+    verdict: pass
+    why: >
+      Cross-file change set. A new allowlist helper (isPodDeletionAllowed) is DEFINED in
+      whitelist.ts and CALLED by the new delete_pod handler in cluster.ts before it deletes.
+      The mutation is gated; the validator must trace the helper across both diffs.
+    diff: |
+      @@ -31,1 +31,11 @@
+      +export const POD_DELETE_NAMESPACES = new Set(['media', 'immich', 'jellyfin']);
+      +
+      +export function isPodDeletionAllowed(namespace: string): boolean {
+      +  return POD_DELETE_NAMESPACES.has(namespace);
+      +}
+      @@ -120,1 +120,24 @@ FILE: src/tools/cluster.ts
+      +const deletePod: Tool = {
+      +  name: 'delete_pod',
+      +  description: 'Delete a pod in an allowed namespace so its controller recreates it.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      pod: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'pod'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const pod = params.pod as string;
+      +    if (!isPodDeletionAllowed(namespace)) {
+      +      return notAllowedError(`Deleting pods in ${namespace}`);
+      +    }
+      +    await getCoreApi().deleteNamespacedPod(pod, namespace);
+      +    return { success: true, message: `Deleted ${namespace}/${pod}` };
+      +  },
+      +};
+
+  - id: refactor-existing-mutating-tool
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: Extracts the restart patch into a helper; the gate (isDeploymentAllowed) is untouched and still runs. No NEW ungated mutation.
+    diff: |
+      @@ -85,14 +85,2 @@ async function (restart handler)
+      -    try {
+      -      const patch = {
+      -        spec: { template: { metadata: { annotations: {
+      -          'kubectl.kubernetes.io/restartedAt': new Date().toISOString(),
+      -        } } } },
+      -      };
+      -      await patchDeployment(namespace, deployment, patch);
+      -      return { success: true, message: `Triggered rolling restart of ${namespace}/${deployment}` };
+      -    } catch (error) {
+      -      return k8sError(error);
+      -    }
+      +    return doRestart(namespace, deployment);
+      @@ -110,1 +98,14 @@
+      +async function doRestart(namespace: string, deployment: string) {
+      +  try {
+      +    const patch = { spec: { template: { metadata: { annotations: {
+      +      'kubectl.kubernetes.io/restartedAt': new Date().toISOString(),
+      +    } } } } };
+      +    await patchDeployment(namespace, deployment, patch);
+      +    return { success: true, message: `Triggered rolling restart of ${namespace}/${deployment}` };
+      +  } catch (error) {
+      +    return k8sError(error);
+      +  }
+      +}
+
+  # ---------- FAIL: wide-open mutations the validator MUST catch ----------
+  - id: ungated-delete-pod
+    file: src/tools/cluster.ts
+    verdict: fail
+    why: delete_pod calls deleteNamespacedPod on namespace+pod straight from params with no allowlist/label/scope check — any pod, any namespace.
+    diff: |
+      @@ -109,1 +109,24 @@
+      +const deletePod: Tool = {
+      +  name: 'delete_pod',
+      +  description: 'Delete a pod by name.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      pod: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'pod'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const pod = params.pod as string;
+      +    try {
+      +      await getCoreApi().deleteNamespacedPod(pod, namespace);
+      +      return { success: true, message: `Deleted ${namespace}/${pod}` };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+      +  },
+      +};
+      @@ -111,1 +135,1 @@
+      -export const clusterTools = [getClusterHealth, restartDeployment];
+      +export const clusterTools = [getClusterHealth, restartDeployment, deletePod];
+
+  - id: ungated-scale-deployment
+    file: src/tools/cluster.ts
+    verdict: fail
+    why: scale_deployment patches replicas on any namespace/deployment from params with no isDeploymentAllowed gate — restart_deployment has one, this does not.
+    diff: |
+      @@ -109,1 +109,30 @@
+      +const scaleDeployment: Tool = {
+      +  name: 'scale_deployment',
+      +  description: 'Scale any deployment to N replicas.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      deployment: { type: 'string' },
+      +      replicas: { type: 'number' },
+      +    },
+      +    required: ['namespace', 'deployment', 'replicas'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const deployment = params.deployment as string;
+      +    const replicas = params.replicas as number;
+      +    try {
+      +      await patchDeployment(namespace, deployment, { spec: { replicas } });
+      +      return { success: true, message: `Scaled ${namespace}/${deployment} to ${replicas}` };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+      +  },
+      +};
+
+  - id: ungated-trigger-any-cronjob
+    file: src/tools/backups.ts
+    verdict: fail
+    why: New run_cronjob creates a Job from any CronJob without calling isCronjobTriggerable — bypasses the opt-in label that trigger_cronjob requires.
+    diff: |
+      @@ -379,1 +379,22 @@
+      +const runCronjob: Tool = {
+      +  name: 'run_cronjob',
+      +  description: 'Run any CronJob immediately by creating a Job from its template.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      cronjob: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'cronjob'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const cronjobName = params.cronjob as string;
+      +    const kc = getKubeConfig();
+      +    const batchApi = kc.makeApiClient(k8s.BatchV1Api);
+      +    const resp = await batchApi.readNamespacedCronJob(cronjobName, namespace);
+      +    const job = { apiVersion: 'batch/v1', kind: 'Job', metadata: { name: `${cronjobName}-now`, namespace }, spec: resp.body.spec?.jobTemplate?.spec };
+      +    await batchApi.createNamespacedJob(namespace, job);
+      +    return { success: true, message: `Started ${namespace}/${cronjobName}` };
+      +  },
+      +};
+
+  - id: ungated-exec-shellout
+    file: src/tools/cluster.ts
+    verdict: fail
+    why: exec_in_pod shells kubectl exec with a caller-supplied command into any namespace/pod — arbitrary command execution, no gate at all.
+    diff: |
+      @@ -109,1 +109,20 @@
+      +const execInPod: Tool = {
+      +  name: 'exec_in_pod',
+      +  description: 'Run a command inside a pod.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      pod: { type: 'string' },
+      +      command: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'pod', 'command'],
+      +  },
+      +  handler: async (params) => {
+      +    const { namespace, pod, command } = params as { namespace: string; pod: string; command: string };
+      +    const { execSync } = await import('node:child_process');
+      +    const out = execSync(`kubectl -n ${namespace} exec ${pod} -- ${command}`).toString();
+      +    return { success: true, output: out };
+      +  },
+      +};
+
+  - id: read-tool-turned-mutating
+    file: src/tools/dns.ts
+    verdict: pass
+    why: >
+      A previously read-only tool gains a write — but "an existing observer gains a mutation" is
+      read-only-integrity's concern (it catches exactly this, e.g. status-reader-deletes-cr), not
+      mutation-gating's. This validator owns NEW mutating tools / ungated cluster mutations; a
+      reader→writer conversion routes to read-only-integrity. Out of scope here → pass.
+    diff: |
+      @@ -210,3 +210,9 @@ handler for get_pihole_whitelist
+         const list = await pihole.getWhitelist();
+      -  return { domains: list.map((d) => d.domain) };
+      +  const remove = params.remove as string | undefined;
+      +  if (remove) {
+      +    await pihole.deleteWhitelistEntry(remove);
+      +    return { success: true, removed: remove };
+      +  }
+      +  return { domains: list.map((d) => d.domain) };
+
+  # ---------- BORDERLINE / precision traps ----------
+  - id: widen-restart-scope-drop-allowlist
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: >
+      Deleting the isDeploymentAllowed check WEAKENS the deploy-allowlist gate — gate-regression's
+      concern (the deploy-allowlist is one of its four gates), not mutation-gating's. This validator
+      owns a NEW mutating tool shipping with no gate; an EXISTING gated tool losing its gate routes
+      to gate-regression. Out of scope here → pass.
+    diff: |
+      @@ -78,6 +78,1 @@ async (restart handler)
+      -    if (!isDeploymentAllowed(namespace, deployment)) {
+      -      return notAllowedError(
+      -        `Restarting ${namespace}/${deployment}. Allowed: ${getAllowedDeployments().join(', ')}`
+      -      );
+      -    }
+      -
+         try {
+
+  - id: validation-only-is-not-a-gate
+    file: src/tools/cluster.ts
+    verdict: fail
+    why: >
+      Precision trap — the new delete_deployment has a DNS-1123 regex check that LOOKS
+      like a guard, but format validation only constrains the string shape, not WHICH
+      resource. Any well-formed namespace/name is deleted. No allowlist/label/scope = ungated.
+    diff: |
+      @@ -109,1 +109,24 @@
+      +const deleteDeployment: Tool = {
+      +  name: 'delete_deployment',
+      +  description: 'Delete a deployment.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      namespace: { type: 'string' },
+      +      deployment: { type: 'string' },
+      +    },
+      +    required: ['namespace', 'deployment'],
+      +  },
+      +  handler: async (params) => {
+      +    const namespace = params.namespace as string;
+      +    const deployment = params.deployment as string;
+      +    if (!DNS_1123_RE.test(namespace) || !DNS_1123_RE.test(deployment)) {
+      +      return validationError('Invalid name. Must match DNS-1123 format.');
+      +    }
+      +    await getAppsApi().deleteNamespacedDeployment(deployment, namespace);
+      +    return { success: true, message: `Deleted ${namespace}/${deployment}` };
+      +  },
+      +};
+
+  - id: gate-helper-not-in-diff
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: >
+      The new cordon_node DOES call a gate helper (isNodeAllowed) before mutating — the correct
+      gated shape. Whether isNodeAllowed is actually defined is a compile/CI concern (a missing
+      helper is a TypeScript error caught before merge), not a security-review one. A new mutating
+      tool that calls an allowlist/gate helper is gated → pass.
+    diff: |
+      @@ -109,1 +109,18 @@
+      +const cordonNode: Tool = {
+      +  name: 'cordon_node',
+      +  description: 'Cordon a node so no new pods schedule on it.',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      node: { type: 'string' },
+      +    },
+      +    required: ['node'],
+      +  },
+      +  handler: async (params) => {
+      +    const node = params.node as string;
+      +    if (!isNodeAllowed(node)) {
+      +      return notAllowedError(`Cordoning ${node}`);
+      +    }
+      +    await patchNode(node, { spec: { unschedulable: true } });
+      +    return { success: true, message: `Cordoned ${node}` };
+      +  },
+      +};

@@ -1,0 +1,219 @@
+# Secret-Hygiene validator — evaluation set (ground truth).
+#
+# Single concern: does a PR diff make a pi-cluster-mcp tool LEAK a secret VALUE in its
+# OUTPUT? MCP tools return their result straight to the caller, so that result must never
+# carry plaintext secret material.
+#
+# The redaction pattern it upholds (from the real code):
+#   - sanitizeEnvVars (backups.ts/resources.ts): secretKeyRef env -> value 'secret (redacted)'
+#   - sanitizeEnvFrom (backups.ts/resources.ts): secretRef envFrom -> type 'secret (redacted)'
+#   - sanitizeVolume / volume map: a `secret` volume -> '(redacted)'
+#   - get_secrets_status (secrets.ts): ExternalSecret NAME/namespace/ready/message only
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = no leak | fail = clearly leaks a secret value | flag = ambiguous, escalate.
+# The validator reasons about the CHANGE, not the final file — a redaction deleted HERE
+# but re-added (still redacting) THERE is NOT a leak. NAME vs VALUE is the crux: returning
+# a secret's NAME/keys is SAFE; returning the bytes behind it is the leak.
+
+cases:
+  # ---------- PASS: safe changes the validator must NOT flag ----------
+  - id: refactor-preserve-redaction
+    file: src/utils/whitelist.ts
+    verdict: pass
+    why: Unrelated to output redaction; touches the allowlist Set, no secret value reaches output.
+    diff: |
+      @@ -19,6 +19,7 @@ export const ALLOWED_DEPLOYMENTS = new Set([
+         'media/jellyseerr',
+         'media/flaresolverr',
+      +  'media/tautulli',
+       ]);
+
+  - id: env-name-only
+    file: src/tools/resources.ts
+    verdict: pass
+    why: >
+      Adds env var NAMES to a summary — names are not values. The secretKeyRef branch in
+      sanitizeEnvVars still redacts the value; only the name surfaces.
+    diff: |
+      @@ -86,6 +86,7 @@ function summarizeDeployment(d: k8s.V1Deployment): Record<string, unknown> {
+           name: d.metadata?.name,
+           replicas: d.spec?.replicas ?? 0,
+           readyReplicas: d.status?.readyReplicas ?? 0,
+      +    envNames: d.spec?.template?.spec?.containers?.flatMap((c) => (c.env ?? []).map((e) => e.name)) ?? [],
+           images: d.spec?.template?.spec?.containers?.map((c) => c.image) ?? [],
+         };
+       }
+
+  - id: redact-more-fields
+    file: src/tools/resources.ts
+    verdict: pass
+    why: Tightens hygiene — also redacts a projected/csi secret-bearing volume. Hides MORE, never a leak.
+    diff: |
+      @@ -78,6 +78,7 @@ function sanitizeVolume(volume: k8s.V1Volume): Record<string, unknown> {
+         if (volume.secret) vol.secret = '(redacted)';
+         if (volume.emptyDir) vol.emptyDir = true;
+         if (volume.hostPath) vol.hostPath = volume.hostPath.path;
+      +  if (volume.csi) vol.csi = '(redacted)';
+         if (volume.projected) vol.projected = true;
+       }
+
+  - id: configmap-value-preview
+    file: src/tools/resources.ts
+    verdict: pass
+    why: >
+      Lengthens the ConfigMap value preview. ConfigMaps are non-secret by design here
+      (resources.ts already previews configMap data); only `secret` sources are sensitive.
+    diff: |
+      @@ -323,7 +323,7 @@ async function getResourceDetail(kind: ResourceKind, namespace: string, name: st
+           const dataPreview: Record<string, string> = {};
+           for (const [key, value] of Object.entries(cm.data ?? {})) {
+      -      dataPreview[key] = value.length > 200 ? `${value.substring(0, 200)}... (${value.length} chars)` : value;
+      +      dataPreview[key] = value.length > 500 ? `${value.substring(0, 500)}... (${value.length} chars)` : value;
+           }
+
+  - id: secrets-status-add-metadata
+    file: src/tools/secrets.ts
+    verdict: pass
+    why: >
+      get_secrets_status adds the synced resource version (metadata) to its output. No secret
+      material — names/status/version only, the established contract for this tool.
+    diff: |
+      @@ -45,6 +45,7 @@ const getSecretsStatus: Tool = {
+               ready: readyCondition?.status === 'True',
+               message: readyCondition?.message,
+               lastRefresh: es.status?.refreshTime,
+      +        syncedVersion: es.status?.syncedResourceVersion,
+             };
+           });
+
+  - id: relocate-redaction-still-hidden
+    file: src/tools/resources.ts
+    verdict: pass
+    why: >
+      The inline secretKeyRef redaction is extracted into redactSecretEnv() and still
+      produces 'secret (redacted)'. A naive diff-reader sees the redaction branch "deleted"
+      from sanitizeEnvVars; the validator must see the value is still hidden.
+    diff: |
+      @@ -11,9 +11,7 @@ function sanitizeEnvVars(envVars: k8s.V1EnvVar[] | undefined): Array<{ name: string; value: string }> {
+         if (!envVars) return [];
+         return envVars.map((env) => {
+      -    if (env.valueFrom?.secretKeyRef) {
+      -      return { name: env.name, value: 'secret (redacted)' };
+      -    }
+      -    return { name: env.name, value: env.value ?? '(from configMap/field ref)' };
+      +    return redactSecretEnv(env);
+         });
+       }
+      +
+      +function redactSecretEnv(env: k8s.V1EnvVar): { name: string; value: string } {
+      +  if (env.valueFrom?.secretKeyRef) {
+      +    return { name: env.name, value: 'secret (redacted)' };
+      +  }
+      +  return { name: env.name, value: env.value ?? '(from configMap/field ref)' };
+      +}
+
+  # ---------- FAIL: leaks the validator MUST catch ----------
+  - id: drop-secretkeyref-branch
+    file: src/tools/resources.ts
+    verdict: fail
+    why: The secretKeyRef redaction branch is removed — env.value (the resolved secret) is returned raw for every secret-backed var.
+    diff: |
+      @@ -11,9 +11,6 @@ function sanitizeEnvVars(envVars: k8s.V1EnvVar[] | undefined): Array<{ name: string; value: string }> {
+         if (!envVars) return [];
+         return envVars.map((env) => {
+      -    if (env.valueFrom?.secretKeyRef) {
+      -      return { name: env.name, value: 'secret (redacted)' };
+      -    }
+      -    return { name: env.name, value: env.value ?? '(from configMap/field ref)' };
+      +    return { name: env.name, value: env.value ?? '(unset)' };
+         });
+       }
+
+  - id: return-raw-env
+    file: src/tools/backups.ts
+    verdict: fail
+    why: The container's raw env array is returned instead of sanitizeEnvVars(c.env) — secretKeyRef values are no longer redacted.
+    diff: |
+      @@ -269,7 +269,7 @@ const getCronjobDetails: Tool = {
+             name: c.name,
+             image: c.image,
+             command: c.command,
+             args: c.args,
+      -      env: sanitizeEnvVars(c.env),
+      +      env: c.env,
+             envFrom: sanitizeEnvFrom(c.envFrom),
+
+  - id: decode-secret-data
+    file: src/tools/secrets.ts
+    verdict: fail
+    why: get_secrets_status now reads the backing Secret and base64-decodes its .data into the output — plaintext secret material leaks.
+    diff: |
+      @@ -40,6 +40,11 @@ const getSecretsStatus: Tool = {
+             const readyCondition = es.status?.conditions?.find((c) => c.type === 'Ready');
+      +      const secret = await coreApi.readNamespacedSecret(es.metadata.name, es.metadata.namespace);
+      +      const values: Record<string, string> = {};
+      +      for (const [k, v] of Object.entries(secret.body.data ?? {})) {
+      +        values[k] = Buffer.from(v, 'base64').toString('utf-8');
+      +      }
+             return {
+               name: es.metadata.name,
+               namespace: es.metadata.namespace,
+      +        values,
+               ready: readyCondition?.status === 'True',
+             };
+
+  - id: leak-secretref-contents
+    file: src/tools/resources.ts
+    verdict: fail
+    why: sanitizeEnvFrom now reads and inlines the referenced Secret's data instead of returning the name with a redacted type.
+    diff: |
+      @@ -21,9 +21,9 @@ function sanitizeEnvFrom(envFrom: k8s.V1EnvFromSource[] | undefined): Array<{ type: string; name: string }> {
+         if (!envFrom) return [];
+         return envFrom.map((source) => {
+           if (source.secretRef) {
+      -      return { type: 'secret (redacted)', name: source.secretRef.name ?? 'unknown' };
+      +      return { type: 'secret', name: source.secretRef.name ?? 'unknown', data: resolveSecretData(source.secretRef.name) };
+           }
+
+  # NOTE: dropped `redaction-sentinel-emits-value` — its premise was unsound.
+  # For a secretKeyRef env var, k8s makes `value` and `valueFrom` mutually
+  # exclusive, so `env.value` is always empty there; `env.value ?? 'secret
+  # (redacted)'` always falls back to redacted. It's a no-op, not a leak — the
+  # model split 2/3 correctly. The real secretKeyRef leak path (fetch + decode
+  # the Secret) is covered by `decode-secret-data`.
+  - id: leak-kubeconfig
+    file: src/tools/backups.ts
+    verdict: fail
+    why: get_backup_status now exports and returns the raw kubeconfig (cluster credentials / client cert) in its response.
+    diff: |
+      @@ -61,6 +61,7 @@ const getBackupStatus: Tool = {
+             return {
+               cronJobs: backupJobs,
+      +        kubeconfig: kc.exportConfig(),
+               summary: {
+                 total: backupJobs.length,
+                 suspended: backupJobs.filter((j: { suspended: boolean }) => j.suspended).length,
+
+  # ---------- FLAG: ambiguous, escalate (don't silently pass) ----------
+  - id: return-whole-container-spec
+    file: src/tools/resources.ts
+    verdict: flag
+    why: >
+      sanitizeContainerSpec is replaced with returning the raw container object. The env /
+      envFrom may carry secret values verbatim; this diff alone cannot prove they are
+      redacted, so escalate for a human.
+    diff: |
+      @@ -34,20 +34,3 @@ function sanitizeContainerSpec(container: k8s.V1Container): Record<string, unknown> {
+      -  return {
+      -    name: container.name,
+      -    image: container.image,
+      -    command: container.command,
+      -    args: container.args,
+      -    env: sanitizeEnvVars(container.env),
+      -    envFrom: sanitizeEnvFrom(container.envFrom),
+      -    resources: container.resources,
+      -    volumeMounts: container.volumeMounts,
+      -  };
+      +  return { ...container };
+       }

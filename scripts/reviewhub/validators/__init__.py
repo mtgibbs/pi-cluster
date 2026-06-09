@@ -16,6 +16,12 @@ sys.path.insert(0, str(_HERE.parents[1]))  # scripts/ (triggerable_judge)
 
 import triggerable_judge as tj  # noqa: E402
 from gate_regression import GateRegressionValidator  # noqa: E402
+from secret_hygiene import SecretHygieneValidator  # noqa: E402
+from input_validation import InputValidationValidator  # noqa: E402
+from mutation_gating import MutationGatingValidator  # noqa: E402
+from concurrency_safety import ConcurrencySafetyValidator  # noqa: E402
+from fail_closed import FailClosedValidator  # noqa: E402
+from read_only_integrity import ReadOnlyIntegrityValidator  # noqa: E402
 
 
 def _matches(files, globs):
@@ -44,7 +50,18 @@ class TriggerableValidator:
         return results, any_block, tj.render_review(results, any_block)
 
 
-REGISTRY = [TriggerableValidator(), GateRegressionValidator()]
+# pi-cluster: triggerable-judge. pi-cluster-mcp: the MCP tool-safety roster below
+# (each single-concern, each green at reps=5/majority on its own eval set).
+REGISTRY = [
+    TriggerableValidator(),
+    GateRegressionValidator(),
+    SecretHygieneValidator(),
+    InputValidationValidator(),
+    MutationGatingValidator(),
+    ConcurrencySafetyValidator(),
+    FailClosedValidator(),
+    ReadOnlyIntegrityValidator(),
+]
 
 
 def validators_for(repo, files, opted_in):

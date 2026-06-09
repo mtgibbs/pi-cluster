@@ -1,0 +1,233 @@
+# input-validation validator — evaluation set (ground truth).
+#
+# Single concern: does a changed/new tool pass a USER-SUPPLIED param into a dangerous
+# sink (k8s API / SSH / shell-string exec / outbound URL) WITHOUT validating it first?
+# Ground truth comes from the real pi-cluster-mcp code:
+#   - backups.ts        validateJobNames + DNS_1123_RE before readNamespacedCronJob/createNamespacedJob
+#   - resources.ts      DNS_1123_RE on namespace/name before read/list k8s calls
+#   - logs.ts           DNS_1123_RE on namespace before listNamespacedPod
+#   - networking.ts     validateNodeName + VALID_TABLES enum + CHAIN_RE + CONNTRACK_FILTER_RE
+#                       + new URL() scheme allowlist; execOnNode takes an ARGV ARRAY (not a shell)
+#   - dns.ts            domain regex + record-type allowlist before dig via execInPod
+#   - media.ts/synology.ts  touch_nas_path -> touchPath -> sanitizePath (strip metachars + reject "..")
+#                            + validatePath (allowed-prefix); touch "${safePath}" IS a shell string
+#   - node-validation.ts validateNodeName (allowlist against real cluster node names)
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = validated / not a sink / not user-controlled | fail = clear unvalidated sink
+#          or a removed/loosened check | flag = cannot prove safe, escalate.
+# The validator reasons about the CHANGE, not the final file — a check moved into a still-called
+# helper is NOT a regression, and an argv-array element is NOT a shell-injection sink.
+
+cases:
+  # ---------- PASS: safe changes the validator must NOT flag ----------
+  - id: new-tool-validates-namespace
+    file: src/tools/resources.ts
+    verdict: pass
+    why: New k8s read path, but namespace/name are checked against DNS_1123_RE before the API call.
+    diff: |
+      @@ -355,6 +355,12 @@ const describeResource: Tool = {
+         handler: async (params) => {
+           const kind = params.kind as string;
+           const namespace = params.namespace as string;
+      +    const name = params.name as string | undefined;
+      +
+      +    if (!DNS_1123_RE.test(namespace)) {
+      +      return validationError('Invalid namespace. Must match DNS-1123 format');
+      +    }
+      +    if (name && !DNS_1123_RE.test(name)) {
+      +      return validationError('Invalid resource name. Must match DNS-1123 format');
+      +    }
+             return await getResourceDetail(kind as ResourceKind, namespace, name);
+
+  - id: argv-element-target
+    file: src/tools/networking.ts
+    verdict: pass
+    why: >
+      `target` is passed as its OWN argv element to execOnNode (not a shell string), AND it is
+      already checked against IP/IPv6/HOSTNAME regexes — doubly safe, not an injection sink.
+    diff: |
+      @@ -332,4 +332,5 @@ const testPodConnectivity: Tool = {
+             const pingResult = await execOnNode(sourceNode, [
+      -        'ping', '-c', '3', '-W', '2', target,
+      +        'ping', '-c', '3', '-W', '2', '-i', '0.5', target,
+             ]);
+
+  - id: separator-is-constant
+    file: src/tools/networking.ts
+    verdict: pass
+    why: >
+      The value interpolated into the sh -c string is the hard-coded ---MCP_SEPARATOR--- constant,
+      not a user param; `node` reaching execOnNode is already gated by validateNodeName above.
+    diff: |
+      @@ -25,6 +25,7 @@ const getNodeNetworking: Tool = {
+             const separator = '---MCP_SEPARATOR---';
+             const result = await execOnNode(node, [
+               'sh', '-c',
+               [
+                 'ip -j link show',
+      +          `echo '${separator}'`,
+                 `echo '${separator}'`,
+                 'ip -j addr show',
+
+  - id: relocate-validation-helper
+    file: src/tools/backups.ts
+    verdict: flag
+    why: >
+      The inline DNS-1123 checks are extracted into validateJobNames(), whose body is NOT in this
+      diff — so the change set alone cannot confirm the helper still enforces DNS-1123 before the
+      sink (a helper named "validate…" could be a no-op). Flagging for human confirmation is the
+      correct fail-safe call; a PR that relocates validation into an off-diff helper SHOULD escalate,
+      not silently pass. (Contrast gate-regression's relocate case, where both files are in the diff.)
+    diff: |
+      @@ -176,10 +176,4 @@ const triggerCronjob: Tool = {
+         handler: async (params) => {
+           const namespace = params.namespace as string;
+           const cronjobName = params.cronjob as string;
+      -    if (!DNS_1123_RE.test(namespace)) {
+      -      return validationError('Invalid namespace');
+      -    }
+      -    if (!DNS_1123_RE.test(cronjobName)) {
+      -      return validationError('Invalid cronjob name');
+      -    }
+      +    const invalid = validateJobNames(namespace, cronjobName);
+      +    if (invalid) return validationError(invalid);
+
+  # NOTE: dropped `tighten-conntrack-filter`. Removing `:` and `/` from the conntrack
+  # allowlist IS security-tightening (admits fewer chars), but it also breaks legitimate
+  # IP:port / CIDR filtering — conflating a security verdict with a functionality one, which
+  # even a human reviewer would balk at. The model failed it 3/3 even with an explicit
+  # allowlist-tightening rule in the contract. "Tightening/clamping is safe" is covered
+  # cleanly by clamp-numeric-lines below; this contrived case only added noise.
+  - id: clamp-numeric-lines
+    file: src/tools/logs.ts
+    verdict: pass
+    why: A numeric `lines` param clamped with Math.min/Math.max — a number used to slice output is not a sink.
+    diff: |
+      @@ -44,1 +44,1 @@
+      -    const lines = Math.min(Math.max((params.lines as number) || 100, 1), 1000);
+      +    const lines = Math.min(Math.max((params.lines as number) || 100, 1), 2000);
+
+  # ---------- FAIL: unvalidated sinks the validator MUST catch ----------
+  - id: raw-namespace-to-k8s
+    file: src/tools/logs.ts
+    verdict: fail
+    why: The DNS-1123 namespace check is deleted — a raw `namespace` flows straight to listNamespacedPod.
+    diff: |
+      @@ -48,4 +48,1 @@ const getPodLogs: Tool = {
+           // Validate namespace
+      -    if (!DNS_1123_RE.test(namespace)) {
+      -      return validationError('Invalid namespace. Must match DNS-1123 format');
+      -    }
+      -
+             // Validate since format
+             let sinceSeconds: number | undefined;
+
+  - id: drop-node-validation
+    file: src/tools/networking.ts
+    verdict: fail
+    why: validateNodeName is removed — an arbitrary `node` reaches execOnNode (which selects/execs a pod).
+    diff: |
+      @@ -86,4 +86,1 @@ const getIptablesRules: Tool = {
+           const node = params.node as string;
+           const table = (params.table as string) || 'filter';
+      -
+      -    const nodeError = await validateNodeName(node);
+      -    if (nodeError) return validationError(nodeError);
+      +    // trust the caller's node value
+
+  - id: domain-into-shell-exec
+    file: src/tools/dns.ts
+    verdict: fail
+    why: >
+      The domain-format regex is removed and `domain` is interpolated into an `sh -c` dig string —
+      a `domain` of `$(reboot)` or `;rm -rf /` now executes in the Pi-hole pod.
+    diff: |
+      @@ -117,4 +117,1 @@ const testDnsQuery: Tool = {
+           // Validate domain (basic check)
+      -    if (!/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(domain)) {
+      -      return { error: true, code: 'INVALID_DOMAIN', message: 'Invalid domain format' };
+      -    }
+      @@ -134,3 +131,3 @@
+      -      const result = await execInPod(PIHOLE_NAMESPACE, piholePod.metadata.name, PIHOLE_CONTAINER,
+      -        ['dig', '+short', '+time=5', '+tries=2', queryType.toUpperCase(), domain]);
+      +      const result = await execInPod(PIHOLE_NAMESPACE, piholePod.metadata.name, PIHOLE_CONTAINER,
+      +        ['sh', '-c', `dig +short ${queryType.toUpperCase()} ${domain}`]);
+
+  - id: nas-path-skip-sanitize
+    file: src/clients/synology.ts
+    verdict: fail
+    why: >
+      touchPath stops calling sanitizePath/validatePath and interpolates the raw `path` into a
+      `touch "${path}"` shell string — a path of `x"; rm -rf /share #` injects, and `..` traverses.
+    diff: |
+      @@ -82,4 +82,2 @@ export async function touchPath(path: string): Promise<void> {
+      -  const safePath = sanitizePath(path);
+      -  validatePath(safePath);
+      -  await execCommand(`touch "${safePath}"`);
+      +  await execCommand(`touch "${path}"`);
+       }
+
+  - id: loosen-path-allow-traversal
+    file: src/clients/synology.ts
+    verdict: fail
+    why: sanitizePath no longer rejects "..", so an allowed-prefix path can traverse out of the share.
+    diff: |
+      @@ -48,8 +48,4 @@ function sanitizePath(path: string): string {
+         // Strip shell metacharacters
+         const sanitized = path.replace(/[;&|`$(){}!#]/g, '');
+      -
+      -  // Reject path traversal
+      -  if (sanitized.includes('..')) {
+      -    throw new Error('Path traversal not allowed');
+      -  }
+      -
+         return sanitized;
+       }
+
+  - id: new-url-no-scheme-check
+    file: src/tools/networking.ts
+    verdict: fail
+    why: >
+      A new tool parses `url` with new URL() but drops the http/https scheme allowlist, then curls
+      it on a node — `file:///etc/shadow` or `gopher://...` now reaches the outbound curl sink.
+    diff: |
+      @@ -203,7 +203,2 @@ const curlIngress: Tool = {
+           let parsedUrl: URL;
+           try {
+             parsedUrl = new URL(urlStr);
+           } catch {
+             return validationError('Invalid URL format');
+           }
+      -
+      -    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      -      return validationError('URL scheme must be http or https');
+      -    }
+
+  # ---------- FLAG: ambiguous, escalate (don't silently pass) ----------
+  - id: new-sink-validation-elsewhere
+    file: src/tools/cluster.ts
+    verdict: flag
+    why: >
+      A new exec tool feeds `params.command` into execOnNode with no visible check; whether a
+      validator exists is unprovable from this diff alone (no allowlist shown) — escalate.
+    diff: |
+      @@ -109,1 +109,18 @@
+      +const runNodeCommand: Tool = {
+      +  name: 'run_node_command',
+      +  description: 'Run a maintenance command on a cluster node',
+      +  inputSchema: {
+      +    type: 'object',
+      +    properties: {
+      +      node: { type: 'string' },
+      +      command: { type: 'string', description: 'shell command to run' },
+      +    },
+      +    required: ['node', 'command'],
+      +  },
+      +  handler: async (params) => {
+      +    const node = params.node as string;
+      +    const command = params.command as string;
+      +    const result = await execOnNode(node, ['sh', '-c', command]);
+      +    return { node, output: result.stdout };
+      +  },
+      +};
