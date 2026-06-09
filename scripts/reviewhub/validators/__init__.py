@@ -22,6 +22,7 @@ from mutation_gating import MutationGatingValidator  # noqa: E402
 from concurrency_safety import ConcurrencySafetyValidator  # noqa: E402
 from fail_closed import FailClosedValidator  # noqa: E402
 from read_only_integrity import ReadOnlyIntegrityValidator  # noqa: E402
+from no_false_green import NoFalseGreenValidator  # noqa: E402
 
 
 def _matches(files, globs):
@@ -62,6 +63,7 @@ REGISTRY = [
     ConcurrencySafetyValidator(),
     FailClosedValidator(),
     ReadOnlyIntegrityValidator(),
+    NoFalseGreenValidator(),
 ]
 
 

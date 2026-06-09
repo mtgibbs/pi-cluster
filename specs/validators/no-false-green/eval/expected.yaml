@@ -1,0 +1,246 @@
+# no-false-green validator — evaluation set (ground truth).
+#
+# Single concern: does a change let a STATUS / DIAGNOSTIC / READER tool report
+# success / healthy / ok / empty-but-fine when the underlying operation actually
+# FAILED, ERRORED, or was SKIPPED? Grounded in the real get_*/status/diagnose tools
+# in src/tools/ and the helpers in src/clients/* (pihole catch{return[]},
+# media.ts every([]) health booleans, the honest pihole getStatus counter-example).
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = failures surface honestly (or the change removes a false-green / does
+#          not touch a failure path) | fail = a failure can now read as green | flag =
+#          cannot prove the failure surfaces, escalate.
+#
+# Precision traps (must stay PASS): an honest error-returning catch; a log-and-RETHROW
+# catch (looks like a swallow, actually propagates); the FIX that REPLACES a swallow with
+# an error return; a genuine empty result on a successful fetch; output-shaping refactors.
+
+cases:
+  # ---------- PASS: failures surface honestly ----------
+  - id: honest-error-return
+    file: src/tools/secrets.ts
+    verdict: pass
+    why: get_secrets_status's new catch returns k8sError(error) — the failure reaches the caller as error:true, not a healthy/empty shape.
+    diff: |
+      @@ -38,9 +38,13 @@ const getSecretsStatus: Tool = {
+         handler: async () => {
+      +    try {
+             const secrets = await listExternalSecrets();
+             return {
+               externalSecrets: secrets,
+               total: secrets.length,
+             };
+      +    } catch (error) {
+      +      return k8sError(error);
+      +    }
+           },
+
+  - id: log-and-rethrow
+    file: src/clients/pihole.ts
+    verdict: pass
+    why: the new catch LOGS then rethrows — the failure still propagates to the caller, it is not swallowed into an empty result.
+    diff: |
+      @@ -337,11 +337,15 @@ export async function getRecentQueries(count = 100): Promise<string[][]> {
+      +  try {
+             const response = await piholeFetch<QueriesResponse>(`queries?length=${count}`);
+             return (response.queries || []).map((q) => [
+               String(q.time), q.type, q.domain, q.client, q.status,
+             ]);
+      +  } catch (e) {
+      +    console.error('[pihole] getRecentQueries failed', e);
+      +    throw e;
+      +  }
+         }
+
+  - id: remove-the-swallow-fix
+    file: src/clients/pihole.ts
+    verdict: pass
+    why: the FIX — replaces a swallowing `catch { return [] }` with an error-returning catch. Removing a false-green is the opposite of introducing one.
+    diff: |
+      @@ -319,11 +319,11 @@ export async function getWhitelist(): Promise<PiholeDomainEntry[]> {
+           try {
+             const response = await piholeFetch<DomainsResponse>('domains/allow');
+             return (response.domains || []).map((d) => ({ ...d }));
+      -    } catch {
+      -      return [];
+      -    }
+      +    } catch (e) {
+      +      throw new Error(`Pi-hole whitelist fetch failed: ${e instanceof Error ? e.message : e}`);
+      +    }
+         }
+
+  - id: guarded-every-health
+    file: src/tools/media.ts
+    verdict: pass
+    why: the health boolean is guarded — an empty pod list explicitly returns healthy:false with an error, so a vanished workload can no longer read as healthy.
+    diff: |
+      @@ -41,9 +41,16 @@ const getMediaStatus: Tool = {
+             const jellyfin = jellyfinPods.map(formatPod);
+      +      if (jellyfin.length === 0) {
+      +        return { jellyfin: { pods: [], healthy: false, error: 'no Jellyfin pods found' } };
+      +      }
+             const result: Record<string, unknown> = {
+               jellyfin: {
+                 pods: jellyfin,
+                 healthy: jellyfin.every((p) => p.ready),
+               },
+
+  - id: genuine-empty-on-success
+    file: src/tools/dns.ts
+    verdict: pass
+    why: get_pihole_queries returns an empty list only after a SUCCESSFUL fetch; the failure path is separate and surfaces error:true. Empty-on-success is honest.
+    diff: |
+      @@ -223,8 +223,12 @@ const getPiholeQueries: Tool = {
+           const count = Math.min(Math.max((params.count as number) || 100, 1), 500);
+      -    const queries = await getRecentQueries(count);
+      -    return { total: queries.length, queries };
+      +    try {
+      +      const queries = await getRecentQueries(count);
+      +      return { total: queries.length, queries };  // 0 here means genuinely no queries
+      +    } catch (error) {
+      +      return { error: true, message: `Pi-hole query log unavailable: ${String(error)}` };
+      +    }
+         }
+
+  - id: output-shaping-refactor
+    file: src/tools/logs.ts
+    verdict: pass
+    why: get_pod_logs adds a read-derived field and a line cap — pure output shaping; it does not touch any failure or empty path.
+    diff: |
+      @@ -98,9 +98,11 @@ const getPodLogs: Tool = {
+             const logLines = output.split('\n').filter((l) => l.length > 0);
+      +      const recent = logLines.slice(-lines);
+             return {
+               namespace, pod,
+      -        lineCount: logLines.length,
+      +        lineCount: recent.length,
+               truncated,
+      -        logs: output,
+      +        logs: recent.join('\n'),
+             };
+
+  - id: improve-honest-message
+    file: src/utils/errors.ts
+    verdict: pass
+    why: k8sError gains richer detail extraction — it was already an honest error path; a better message does not make any failure read as green.
+    diff: |
+      @@ -35,7 +35,9 @@ export function k8sError(error: unknown): { error: true; code: string; message:
+      -  const message = error instanceof Error ? error.message : String(error);
+      +  const body = (error as { response?: { body?: { message?: string } } })?.response?.body?.message;
+      +  const message = body || (error instanceof Error ? error.message : JSON.stringify(error));
+           return { error: true, code: 'K8S_ERROR', message };
+         }
+
+  # ---------- FAIL: a failure can now read as green ----------
+  - id: swallow-into-empty-array
+    file: src/clients/pihole.ts
+    verdict: fail
+    why: getMessages' new `catch { return [] }` makes an API/auth failure indistinguishable from "no diagnostic messages" — get_dns_status then reports no warnings on a broken Pi-hole.
+    diff: |
+      @@ -289,9 +289,13 @@ export async function getMessages(): Promise<PiholeMessage[]> {
+      +  try {
+             const response = await piholeFetch<MessagesResponse>('info/messages');
+             return (response.messages || []).map((msg) => ({ ...msg }));
+      +  } catch {
+      +    return [];
+      +  }
+         }
+
+  - id: every-on-empty-healthy
+    file: src/tools/dns.ts
+    verdict: fail
+    why: the new allHealthy boolean is `pods.every(p => p.ready)` with no empty guard — an empty pod list (label drift / vanished Pi-hole) is `true`, so a missing workload reports healthy.
+    diff: |
+      @@ -44,6 +44,11 @@ const getDnsStatus: Tool = {
+             const piholePods = pods.filter((p) => p.metadata?.name?.includes('pihole'));
+             const unboundPods = pods.filter((p) => p.metadata?.name?.includes('unbound'));
+      +      const summary = {
+      +        // green when every pod is ready — including when there are ZERO pods
+      +        allHealthy: piholePods.every((p) => p.ready) && unboundPods.every((p) => p.ready),
+      +      };
+             return {
+      +        summary,
+               pihole: { pods: piholePods },
+
+  - id: catch-returns-healthy
+    file: src/clients/pihole.ts
+    verdict: fail
+    why: getStatus's catch now returns status 'enabled' rather than status 'error' — a failed Pi-hole stats fetch reports the resolver as enabled/healthy.
+    diff: |
+      @@ -268,8 +268,8 @@ export async function getStatus(): Promise<{ status: string }> {
+           try {
+             const stats = await piholeFetch<StatsResponse>('stats/summary', false);
+             return { status: stats.queries ? 'enabled' : 'disabled' };
+      -    } catch {
+      -      return { status: 'error' };
+      +    } catch {
+      +      return { status: 'enabled' };
+           }
+         }
+
+  - id: suberror-ignored-still-ok
+    file: src/tools/dns.ts
+    verdict: fail
+    why: the stats fetch failure is caught into statsError, then DROPPED from the return while healthy:true is hard-coded — a caught failure vanishes and the tool reports healthy regardless.
+    diff: |
+      @@ -78,10 +78,12 @@ const getDnsStatus: Tool = {
+             let statsError: string | undefined;
+             try {
+               result.stats = await getSummary();
+             } catch (e) {
+               statsError = String(e);   // captured here...
+             }
+      -      return result;
+      +      // ...but never surfaced; report healthy regardless of the stats failure
+      +      return { ...result, healthy: true };
+           }
+
+  - id: silent-catch-empties-summary
+    file: src/tools/tailscale.ts
+    verdict: fail
+    why: the connector CR list is wrapped in a bare `catch {}` leaving connectors=[], then totalConnectors is reported as its length (0) with no error — "zero connectors" reads as fine, not "couldn't check".
+    diff: |
+      @@ -44,8 +44,13 @@ const getTailscaleStatus: Tool = {
+      -    const connectors = await listConnectors();
+      +    let connectors: Connector[] = [];
+      +    try {
+      +      connectors = await listConnectors();
+      +    } catch {
+      +      // tolerate missing CRD
+      +    }
+             return {
+               totalConnectors: connectors.length,
+               connectors,
+             };
+
+  # ---------- FLAG: cannot prove the failure surfaces ----------
+  - id: health-from-opaque-helper
+    file: src/tools/media.ts
+    verdict: flag
+    why: get_media_status now derives `healthy` from a newly-imported probeServices() whose body is not in this diff — cannot prove it surfaces failures rather than defaulting to true. Escalate.
+    diff: |
+      @@ -3,6 +3,7 @@ import { listPods } from '../clients/kubernetes.js';
+       import { getJellyfinStats } from '../clients/jellyfin.js';
+      +import { probeServices } from '../clients/jellyfin.js';
+      @@ -44,7 +45,7 @@ const getMediaStatus: Tool = {
+             const result: Record<string, unknown> = {
+      -        jellyfin: { pods: jellyfin, healthy: jellyfin.every((p) => p.ready) },
+      +        jellyfin: { pods: jellyfin, healthy: await probeServices('jellyfin') },
+             };
+
+  - id: stale-cache-fallback
+    file: src/clients/pihole.ts
+    verdict: flag
+    why: getSummary now serves a module-level lastGoodStats on fetch failure with no staleness signal — a caller cannot tell a live success from a stale one masking a current outage (cached success is not proof). Escalate.
+    diff: |
+      @@ -231,4 +231,11 @@ export async function getSummary(): Promise<PiholeStats> {
+      -  const stats = await piholeFetch<StatsResponse>('stats/summary', false);
+      -  return convertStatsToLegacy(stats);
+      +  try {
+      +    const stats = await piholeFetch<StatsResponse>('stats/summary', false);
+      +    lastGoodStats = convertStatsToLegacy(stats);
+      +    return lastGoodStats;
+      +  } catch {
+      +    return lastGoodStats;  // serve last-known-good on failure
+      +  }
+         }
