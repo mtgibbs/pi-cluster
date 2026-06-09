@@ -35,6 +35,7 @@ class TriggerableValidator:
     #      (empty set = any repo); `globs` = which changed files it watches.
     #      A repo OPTS IN by listing this validator's name in its .review-hub.yml.
     name = "triggerable-judge"
+    concern = "Does a triggerable CronJob deserve the homelab.mcp/triggerable label (idempotent + concurrency-safe)?"
     repos = {"mtgibbs/pi-cluster"}
     globs = ["clusters/*.yaml", "clusters/*.yml"]  # fnmatch: `*` spans `/`
     # -------------------------------------------------------------------------

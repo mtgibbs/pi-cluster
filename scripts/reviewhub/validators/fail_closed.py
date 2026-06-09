@@ -108,6 +108,7 @@ class FailClosedValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "fail-closed"
+    concern = "On a failed guard or caught error, does the code still refuse — or now proceed (fail open)?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/utils/errors.ts", "src/tools/backups.ts", "src/tools/*.ts"]
     # -------------------------------------------------------------------------

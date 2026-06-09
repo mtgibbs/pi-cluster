@@ -105,6 +105,7 @@ class MutationGatingValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "mutation-gating"
+    concern = "Does a new mutating tool ship with no gate (allowlist / label / scope check)?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/tools/*.ts", "src/utils/whitelist.ts", "src/utils/errors.ts"]
     # -------------------------------------------------------------------------

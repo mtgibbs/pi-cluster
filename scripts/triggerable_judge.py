@@ -275,6 +275,14 @@ class Forge:
     def post_review(self, body, block):
         raise NotImplementedError
 
+    def upsert_comment(self, body, marker):
+        """Create-or-update the one comment carrying `marker`. Default: just post."""
+        return self.post_review(body, False)
+
+    def post_inline_review(self, comments, commit_id=None, body="", event="COMMENT"):
+        """Anchor comments to diff lines. Default: no-op (only GitHub supports it)."""
+        return None
+
 
 class GitHubForge(Forge):
     """GitHub PRs via the REST API + urllib — no `gh`/node, no checkout (file
@@ -293,6 +301,7 @@ class GitHubForge(Forge):
         if not self.token:
             raise SystemExit(f"GitHubForge needs a token or ${token_env}")
         self.head_sha = head_sha  # pin file reads to the PR head; else default branch ref
+        self._files_cache = None  # PR file list — fetched once, shared across validators
 
     def _req(self, method, path, body=None):
         req = urllib.request.Request(
@@ -306,13 +315,20 @@ class GitHubForge(Forge):
             return json.loads(resp.read() or "null")
 
     def _files_api(self):
+        # Cached: several validators each ask for the changed files — fetch once.
+        # Warmed single-threaded before the receiver fans out, so the parallel
+        # validators all read the same list with no races and no redundant calls.
+        if self._files_cache is not None:
+            return self._files_cache
         out, page = [], 1
         while True:
             batch = self._req("GET", f"/repos/{self.repo}/pulls/{self.pr}/files?per_page=100&page={page}")
             out += (batch or [])
             if len(batch or []) < 100:
-                return out
+                break
             page += 1
+        self._files_cache = out
+        return out
 
     def changed_files(self):
         return [f["filename"] for f in self._files_api()]
@@ -344,6 +360,42 @@ class GitHubForge(Forge):
                       {"body": body})
         except Exception as e:  # noqa: BLE001
             print(f"warning: could not post PR comment: {e}", file=sys.stderr)
+
+    def upsert_comment(self, body, marker):
+        """Create-or-update the ONE comment carrying `marker` (a hidden HTML
+        comment). The review-hub report card edits in place across pushes — one
+        stable comment, never spam. Falls back silently; a comment is not a gate."""
+        try:
+            comments = self._req(
+                "GET", f"/repos/{self.repo}/issues/{self.pr}/comments?per_page=100") or []
+            existing = next((c for c in comments if marker in (c.get("body") or "")), None)
+            if existing:
+                self._req("PATCH", f"/repos/{self.repo}/issues/comments/{existing['id']}",
+                          {"body": body})
+            else:
+                self._req("POST", f"/repos/{self.repo}/issues/{self.pr}/comments",
+                          {"body": body})
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: could not upsert PR comment: {e}", file=sys.stderr)
+
+    def post_inline_review(self, comments, commit_id=None, body="", event="COMMENT"):
+        """Post ONE PR review that anchors inline comments to specific lines.
+        comments: [{path, line, side?='RIGHT', body}, …] — only lines that are part
+        of the PR diff are accepted by GitHub. event=COMMENT (the Check Runs are the
+        merge gate; inline comments are informational pointers, not a second block).
+        Ready for iteration 2 (evidence-line citation); unused until then."""
+        if not comments:
+            return
+        payload = {"event": event,
+                   "comments": [{"side": "RIGHT", **c} for c in comments]}
+        if body:
+            payload["body"] = body
+        if commit_id:
+            payload["commit_id"] = commit_id
+        try:
+            self._req("POST", f"/repos/{self.repo}/pulls/{self.pr}/reviews", payload)
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: could not post inline review: {e}", file=sys.stderr)
 
     # --- Check Runs (used by the webhook receiver to gate the merge) ---
     def create_check_run(self, head_sha, name="triggerable-judge"):

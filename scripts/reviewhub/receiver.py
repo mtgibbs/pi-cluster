@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -32,6 +33,7 @@ import yaml  # noqa: E402
 import github_app  # noqa: E402
 import triggerable_judge as tj  # noqa: E402
 import validators  # noqa: E402
+import reporting  # noqa: E402
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -50,6 +52,9 @@ REPS = int(os.environ.get("JUDGE_REPEAT", "5"))
 TIMEOUT = int(os.environ.get("JUDGE_TIMEOUT", "240"))
 MODEL = os.environ.get("JUDGE_MODEL", "hot-coder")
 PORT = int(os.environ.get("PORT", "8080"))
+CONCURRENCY = int(os.environ.get("VALIDATOR_CONCURRENCY", "4"))  # validators run in parallel
+_VFILE = Path(__file__).resolve().parent / "VERSION"
+VERSION = _VFILE.read_text().strip() if _VFILE.exists() else "?"
 PR_ACTIONS = {"opened", "synchronize", "reopened"}
 
 
@@ -76,8 +81,39 @@ def read_optin(forge):
     return set(data.get("validators") or [])
 
 
+def _run_one(forge, v, head_sha, tag):
+    """One validator, end to end, in its OWN thread: own Check Run (independent in the
+    pipeline view), own judging. Returns a normalized summary for the report card.
+    Never raises — a crash becomes a blocking check, never a silent pass."""
+    check_id = None
+    t0 = time.monotonic()
+    concern = getattr(v, "concern", "")
+    try:
+        check_id = forge.create_check_run(head_sha, name=v.name)
+        raw = tempfile.mkdtemp(prefix=f"{v.name}-")
+        results, any_block, body = v.review(forge, REPS, TIMEOUT, MODEL, raw)
+        s = reporting.summarize(v.name, concern, results, any_block, body)
+        conclusion = {"neutral": "neutral", "pass": "success", "block": "failure"}[s["state"]]
+        forge.complete_check_run(check_id, conclusion,
+                                 reporting.check_title(s), reporting.check_summary(s)[:60000])
+        log.info("%s: %s — %s [%.0fs]", tag, v.name, s["state"].upper(), time.monotonic() - t0)
+        return s
+    except Exception as e:  # noqa: BLE001 — fail-safe: a crash blocks, never silently passes
+        log.exception("%s: %s — crashed: %s", tag, v.name, e)
+        s = reporting.error_summary(v.name, concern, e)
+        if check_id is not None:
+            try:
+                forge.complete_check_run(check_id, "failure", reporting.check_title(s),
+                                         reporting.check_summary(s)[:60000])
+            except Exception:  # noqa: BLE001
+                pass
+        return s
+
+
 def handle_pull_request(payload):
-    """Background worker: token → roster of validators → a Check Run each. Never raises."""
+    """Background worker: token → roster → a Check Run each (in PARALLEL) → ONE report
+    card. Each validator's check stays independent (the merge gate + pipeline view);
+    the consolidated comment is the human-readable roster. Never raises."""
     repo = payload["repository"]["full_name"]
     pr = payload["number"]
     head_sha = payload["pull_request"]["head"]["sha"]
@@ -93,7 +129,7 @@ def handle_pull_request(payload):
     forge = tj.GitHubForge(pr, repo=repo, token=token, head_sha=head_sha)
     try:
         opted_in = read_optin(forge)
-        changed = forge.changed_files()
+        changed = forge.changed_files()  # warms the shared file-list cache for all validators
     except Exception as e:  # noqa: BLE001
         log.error("%s: could not read PR: %s", tag, e)
         return
@@ -102,42 +138,25 @@ def handle_pull_request(payload):
         log.info("%s: no %s — repo not opted in, skipping", tag, OPTIN_FILE)
         return
     roster = validators.validators_for(repo, changed, opted_in)
-    log.info("%s: opted into %s · %d changed file(s) · running %s",
-             tag, sorted(opted_in), len(changed), [v.name for v in roster] or "nothing")
+    log.info("%s: opted into %s · %d changed file(s) · running %s (concurrency=%d)",
+             tag, sorted(opted_in), len(changed), [v.name for v in roster] or "nothing", CONCURRENCY)
     if not roster:
         return
 
-    for v in roster:
-        check_id = None
-        t0 = time.monotonic()
-        try:
-            check_id = forge.create_check_run(head_sha, name=v.name)
-            log.info("%s: %s — check created, judging (reps=%d)…", tag, v.name, REPS)
-            raw = tempfile.mkdtemp(prefix=f"{v.name}-")
-            results, any_block, body = v.review(forge, REPS, TIMEOUT, MODEL, raw)
-            dt = time.monotonic() - t0
-            if body is None:
-                forge.complete_check_run(check_id, "neutral",
-                                         "No applicable changes", "Nothing to review.")
-                log.info("%s: %s — neutral, no applicable targets [%.0fs]", tag, v.name, dt)
-                continue
-            forge.post_review(body, any_block)
-            forge.complete_check_run(
-                check_id,
-                "failure" if any_block else "success",
-                "Human review required" if any_block else "All clear",
-                body[:60000])
-            verdicts = ", ".join(f"{r.get('ref') or r.get('path')}={r['verdict']}" for r in results)
-            log.info("%s: %s — %s [%.0fs]  %s", tag, v.name,
-                     "BLOCK" if any_block else "PASS", dt, verdicts)
-        except Exception as e:  # noqa: BLE001 — fail-safe: a crash blocks, never silently passes
-            log.exception("%s: %s — crashed, posting a blocking check: %s", tag, v.name, e)
-            if check_id is not None:
-                try:
-                    forge.complete_check_run(check_id, "failure", "Validator error",
-                                             f"The validator crashed — a human must review.\n\n```\n{e}\n```")
-                except Exception:  # noqa: BLE001
-                    pass
+    # Fan out: validators run concurrently, each completing its own Check Run as it
+    # finishes. The file list is already cached (warmed above), so no per-validator
+    # re-fetch and no write races on the forge.
+    with ThreadPoolExecutor(max_workers=min(CONCURRENCY, len(roster))) as ex:
+        summaries = list(ex.map(lambda v: _run_one(forge, v, head_sha, tag), roster))
+
+    # Barrier passed — post the ONE consolidated report card (edits in place).
+    try:
+        forge.upsert_comment(reporting.render_report(summaries, changed, VERSION),
+                             reporting.REPORT_MARKER)
+    except Exception as e:  # noqa: BLE001 — the checks are the gate; the comment is a courtesy
+        log.warning("%s: could not post report card: %s", tag, e)
+    blocked = [s["name"] for s in summaries if s["state"] in ("block", "error")]
+    log.info("%s: done — %d/%d need review %s", tag, len(blocked), len(summaries), blocked or "")
 
 
 class Handler(BaseHTTPRequestHandler):

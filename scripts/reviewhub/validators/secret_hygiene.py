@@ -108,6 +108,7 @@ class SecretHygieneValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "secret-hygiene"
+    concern = "Does a tool's output leak a secret value (env/secretRef redaction dropped, kubeconfig exported)?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/tools/*.ts", "src/utils/errors.ts"]
     # -------------------------------------------------------------------------

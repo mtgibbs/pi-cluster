@@ -105,6 +105,7 @@ class ReadOnlyIntegrityValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "read-only-integrity"
+    concern = "Does an existing read-only tool quietly gain a write (patch/delete/exec-mutate)?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/tools/*.ts", "src/clients/*.ts", "src/utils/*.ts"]
     # -------------------------------------------------------------------------

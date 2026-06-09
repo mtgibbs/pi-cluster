@@ -104,6 +104,7 @@ class InputValidationValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "input-validation"
+    concern = "Does a user-supplied param reach a sink (k8s API, exec, shell string, URL) without validation?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/tools/*.ts", "src/clients/synology.ts", "src/utils/node-validation.ts",
              "src/utils/debug-agent.ts"]

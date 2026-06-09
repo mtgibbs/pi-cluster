@@ -107,6 +107,7 @@ class GateRegressionValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "gate-regression"
+    concern = "Does a change weaken an existing security gate (triggerable label, Guard A, deploy allowlist, fail-closed)?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/utils/whitelist.ts", "src/utils/errors.ts", "src/tools/*.ts"]
     # -------------------------------------------------------------------------

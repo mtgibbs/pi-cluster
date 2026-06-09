@@ -107,6 +107,7 @@ class ConcurrencySafetyValidator:
 
     # ---- routing config: which repo + which files this validator runs on ----
     name = "concurrency-safety"
+    concern = "Is an active-run guard weakened/removed/unwired so two runs can overlap?"
     repos = {"mtgibbs/pi-cluster-mcp"}
     globs = ["src/tools/*.ts", "src/utils/whitelist.ts", "src/utils/errors.ts"]
     # -------------------------------------------------------------------------
