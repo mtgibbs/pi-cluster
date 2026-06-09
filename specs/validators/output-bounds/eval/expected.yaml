@@ -1,0 +1,223 @@
+# output-bounds validator — evaluation set (ground truth).
+#
+# Single concern: does a change let a tool return UNBOUNDED output — output whose size
+# scales with data volume (logs, exec/command stdout, query/queue/history records, search
+# results, large/cluster-wide resource enumerations) returned with no limit/cap/slice/page
+# size — that could blow the LLM caller's context? Grounded in the real readers in
+# src/tools/ + src/clients/ (logs.ts MAX_LOG_BYTES 50KB, dns.ts count clamp 1-500,
+# sonarr.ts limit clamp 1-50 + slice(0,25), networking get_node_networking full ip -j dump,
+# storage get_pvcs cluster-wide, backups get_job_logs pod fan-out).
+#
+# Each case is a unified diff (what the validator receives from the forge's patch).
+# verdict: pass = bounded / fixed-shape / small infra list / adds-or-tightens a bound |
+#          fail = output can now grow unbounded | flag = cannot prove bounded, escalate.
+#
+# Precision traps (must stay PASS): a .map over a SMALL fixed-cardinality infra list
+# (nodes); an ALREADY-clamped limit; the FIX that adds a clamp/slice/byte-cap; lowering a
+# ceiling; reshaping an already-bounded list. The size risk is data-volume output, not
+# enumerating a few infra objects.
+
+cases:
+  # ---------- PASS: output is bounded / fixed / a small infra list ----------
+  - id: add-limit-clamp-fix
+    file: src/tools/sonarr.ts
+    verdict: pass
+    why: the change ADDS a Math.min(Math.max(limit,1),50) clamp to a history reader — adding a bound is the fix, not a violation.
+    diff: |
+      @@ -56,7 +56,8 @@ const getSonarrHistory: Tool = {
+         handler: async (params) => {
+      -    const limit = (params.limit as number) || 20;
+      +    const raw = (params.limit as number) || 20;
+      +    const limit = Math.min(Math.max(raw, 1), 50);
+           const history = await getHistory(limit);
+           return { records: history.records };
+         }
+
+  - id: already-clamped-count
+    file: src/tools/dns.ts
+    verdict: pass
+    why: a new query-log reader clamps count to 1-500 before fetching — the output is bounded by the clamp.
+    diff: |
+      @@ -240,6 +240,14 @@ const getPiholeQueries: Tool = {
+      +const getPiholeBlocked: Tool = {
+      +  name: 'get_pihole_blocked',
+      +  inputSchema: { type: 'object', properties: { count: { type: 'number' } } },
+      +  handler: async (params) => {
+      +    const count = Math.min(Math.max((params.count as number) || 100, 1), 500);
+      +    const queries = await getRecentBlocked(count);
+      +    return { total: queries.length, queries };
+      +  },
+      +};
+
+  - id: fixed-shape-summary
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: a new reader returns a fixed-shape summary of counts/booleans — its size does not scale with data, so no bound is needed.
+    diff: |
+      @@ -60,6 +60,15 @@ const getClusterHealth: Tool = {
+      +const getNamespaceSummary: Tool = {
+      +  name: 'get_namespace_summary',
+      +  inputSchema: { type: 'object', properties: { namespace: { type: 'string' } }, required: ['namespace'] },
+      +  handler: async (params) => {
+      +    const pods = await listPods(params.namespace as string);
+      +    return {
+      +      total: pods.length,
+      +      ready: pods.filter((p) => p.status?.phase === 'Running').length,
+      +      healthy: pods.length > 0 && pods.every((p) => p.status?.phase === 'Running'),
+      +    };
+      +  },
+      +};
+
+  - id: small-infra-list-map
+    file: src/tools/cluster.ts
+    verdict: pass
+    why: get_cluster_health maps the cluster's NODES — a small, fixed-cardinality infra list (a handful of nodes), not data-volume output. Not in scope.
+    diff: |
+      @@ -10,7 +10,13 @@ const getClusterHealth: Tool = {
+             const nodes = await listNodes();
+      -      const nodeStatus = nodes.map((n) => n.metadata?.name);
+      +      const nodeStatus = nodes.map((n) => ({
+      +        name: n.metadata?.name,
+      +        ready: n.status?.conditions?.find((c) => c.type === 'Ready')?.status === 'True',
+      +        kubeletVersion: n.status?.nodeInfo?.kubeletVersion,
+      +        arch: n.status?.nodeInfo?.architecture,
+      +      }));
+             return { nodes: nodeStatus };
+           }
+
+  - id: lower-the-cap
+    file: src/tools/dns.ts
+    verdict: pass
+    why: the count ceiling is tightened from 500 to 200 — lowering a bound shrinks output, the opposite of a violation.
+    diff: |
+      @@ -224,1 +224,1 @@ const getPiholeQueries: Tool = {
+      -    const count = Math.min(Math.max((params.count as number) || 100, 1), 500);
+      +    const count = Math.min(Math.max((params.count as number) || 100, 1), 200);
+
+  - id: add-byte-cap-and-truncated
+    file: src/tools/logs.ts
+    verdict: pass
+    why: a log reader gains a MAX_LOG_BYTES cap + a truncated flag — adding a byte cap bounds previously-unbounded log output. The fix.
+    diff: |
+      @@ -95,8 +95,13 @@ const getPodLogs: Tool = {
+             const output = await readPodLog(namespace, pod, container, lines);
+      -      return { namespace, pod, logs: output };
+      +      const MAX_LOG_BYTES = 50_000;
+      +      const truncated = output.length > MAX_LOG_BYTES;
+      +      const logs = truncated ? output.slice(-MAX_LOG_BYTES) : output;
+      +      return { namespace, pod, logs, truncated };
+           }
+
+  - id: reshape-bounded-list
+    file: src/tools/sonarr.ts
+    verdict: pass
+    why: search_sonarr_episode sorts and renames fields on an already-sliced(0,25) list and adds a scalar count — reshaping bounded output, no size growth.
+    diff: |
+      @@ -105,9 +105,11 @@ const searchSonarrEpisode: Tool = {
+             const releases = await getReleases(episodeId);
+             const top = releases.slice(0, 25);
+      -      return { releases: top };
+      +      const ranked = top
+      +        .map((r) => ({ title: r.title, seeders: r.seeders, size: r.size, quality: r.quality?.quality?.name }))
+      +        .sort((a, b) => b.seeders - a.seeders);
+      +      return { count: ranked.length, releases: ranked };
+           }
+
+  # ---------- FAIL: output can now grow unbounded ----------
+  - id: unclamped-limit-param
+    file: src/tools/sabnzbd.ts
+    verdict: fail
+    why: a new history reader reads `limit` and passes it straight to .slice with no Math.min ceiling — a caller can request unbounded output.
+    diff: |
+      @@ -58,6 +58,15 @@ const getSabnzbdHistory: Tool = {
+      +const getSabnzbdFailed: Tool = {
+      +  name: 'get_sabnzbd_failed',
+      +  inputSchema: { type: 'object', properties: { limit: { type: 'number' } } },
+      +  handler: async (params) => {
+      +    const limit = (params.limit as number) || 50;
+      +    const history = await getHistory();
+      +    const failed = history.slots.filter((s) => s.status === 'Failed');
+      +    return { failed: failed.slice(0, limit) };   // limit never clamped
+      +  },
+      +};
+
+  - id: remove-slice-cap
+    file: src/tools/sonarr.ts
+    verdict: fail
+    why: the diff deletes the .slice(0, 25) on search results, so every release (can be hundreds) is returned uncapped.
+    diff: |
+      @@ -105,8 +105,8 @@ const searchSonarrEpisode: Tool = {
+             const releases = await getReleases(episodeId);
+      -      const top = releases.slice(0, 25);
+      -      return { releases: top };
+      +      return { releases };
+           }
+
+  - id: raise-cap-to-unbounded
+    file: src/tools/sonarr.ts
+    verdict: fail
+    why: the history limit clamp is removed — Math.min(Math.max(limit,1),50) becomes the raw limit, dropping the ceiling so output is unbounded.
+    diff: |
+      @@ -59,2 +59,2 @@ const getSonarrHistory: Tool = {
+      -    const limit = Math.min(Math.max((params.limit as number) || 20, 1), 50);
+      +    const limit = (params.limit as number) || 20;
+           const history = await getHistory(limit);
+
+  - id: log-reader-no-cap
+    file: src/tools/logs.ts
+    verdict: fail
+    why: a new get_node_journal returns the full journalctl stdout with no byte or line cap — node journals run to many MB and would blow the caller's context.
+    diff: |
+      @@ -110,6 +110,15 @@ const getPodLogs: Tool = {
+      +const getNodeJournal: Tool = {
+      +  name: 'get_node_journal',
+      +  inputSchema: { type: 'object', properties: { node: { type: 'string' }, unit: { type: 'string' } }, required: ['node'] },
+      +  handler: async (params) => {
+      +    const out = await execOnNode(params.node as string, ['journalctl', '-u', params.unit as string, '--no-pager']);
+      +    return { node: params.node, journal: out.stdout };   // full stdout, no cap
+      +  },
+      +};
+
+  - id: list-all-cluster-wide
+    file: src/tools/resources.ts
+    verdict: fail
+    why: a new tool lists ALL pods across ALL namespaces and maps every one with no limit or page size — output scales unbounded with cluster size.
+    diff: |
+      @@ -340,6 +340,16 @@ const describeResource: Tool = {
+      +const listAllPods: Tool = {
+      +  name: 'list_all_pods',
+      +  inputSchema: { type: 'object', properties: {} },
+      +  handler: async () => {
+      +    const pods = await listPodsAllNamespaces();
+      +    return {
+      +      pods: pods.map((p) => ({ namespace: p.metadata?.namespace, name: p.metadata?.name, phase: p.status?.phase, spec: p.spec })),
+      +    };
+      +  },
+      +};
+
+  # ---------- FLAG: cannot prove the output is bounded ----------
+  - id: opaque-helper-mapped
+    file: src/tools/media.ts
+    verdict: flag
+    why: get_media_status maps the result of a newly-added fetchAllAssets() helper whose return size is not visible in this diff, with no cap — cannot prove it is bounded. Escalate.
+    diff: |
+      @@ -3,6 +3,7 @@ import { listPods } from '../clients/kubernetes.js';
+       import { getImmichStats } from '../clients/immich.js';
+      +import { fetchAllAssets } from '../clients/immich.js';
+      @@ -58,6 +59,8 @@ const getMediaStatus: Tool = {
+             const result: Record<string, unknown> = { jellyfin, immich };
+      +      const assets = await fetchAllAssets();
+      +      result.assets = assets.map((a) => ({ id: a.id, path: a.originalPath, type: a.type }));
+             return result;
+           }
+
+  - id: unclamped-limit-to-external-api
+    file: src/clients/bazarr.ts
+    verdict: flag
+    why: a raw caller-supplied limit is interpolated into the Bazarr ?length= query with no local clamp — cannot confirm the API caps server-side, so the returned page may be unbounded. Escalate.
+    diff: |
+      @@ -78,4 +78,5 @@ export async function getSubtitleHistory(limit = 50): Promise<SubtitleHistoryItem[]> {
+      -  const response = await bazarrFetch<{ data: SubtitleHistoryItem[] }>(`/history/series?length=50`);
+      +  const response = await bazarrFetch<{ data: SubtitleHistoryItem[] }>(`/history/series?length=${limit}`);
+         const movieHistory = await bazarrFetch<{ data: SubtitleHistoryItem[] }>(`/history/movies?length=${limit}`);
+         return [...response.data, ...movieHistory.data];
