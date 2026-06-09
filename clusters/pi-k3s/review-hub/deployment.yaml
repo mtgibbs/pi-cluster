@@ -39,7 +39,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: review-hub
-          image: ghcr.io/mtgibbs/review-hub:0.2.0 # {"$imagepolicy": "flux-system:review-hub"}
+          image: ghcr.io/mtgibbs/review-hub:0.3.0 # {"$imagepolicy": "flux-system:review-hub"}
           ports:
             - containerPort: 8080
               name: http
