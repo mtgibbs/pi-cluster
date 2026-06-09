@@ -1,0 +1,32 @@
+# DEMO for review-hub — NOT meant to merge. A CronJob that opts into manual
+# triggering but is NOT idempotent: each run blindly INSERTs a row, so a manual
+# trigger on top of the scheduled run double-counts the day. The deterministic
+# lint passes it (nothing destructive); the triggerable-judge should catch the
+# idempotency violation.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: demo-download-rollup
+  namespace: media
+  labels:
+    homelab.mcp/triggerable: "true"
+spec:
+  schedule: "0 7 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: rollup
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  COUNT=$(curl -sf "http://sabnzbd.media.svc.cluster.local/api?mode=history&output=json" | jq '.history.slots | length')
+                  psql -h stats-postgresql.media.svc.cluster.local -U stats -d stats -c \
+                    "INSERT INTO daily_downloads (day, completed) VALUES (current_date, ${COUNT});"
