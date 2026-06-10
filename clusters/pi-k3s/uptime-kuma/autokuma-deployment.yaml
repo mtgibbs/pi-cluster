@@ -22,7 +22,7 @@ spec:
         # restart the pod — the monitor files live in an emptyDir populated only at
         # startup. (TODO: switch to a direct ConfigMap mount + AUTOKUMA__ENV__ webhook
         # templating so AutoKuma's file-watcher auto-reloads without this dance.)
-        mtgibbs.dev/monitors-revision: "2"
+        mtgibbs.dev/monitors-revision: "3"
     spec:
       initContainers:
         - name: envsubst

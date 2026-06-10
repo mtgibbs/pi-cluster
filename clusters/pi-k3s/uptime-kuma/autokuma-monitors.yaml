@@ -394,7 +394,7 @@ data:
       "name": "review-hub (webhook edge)",
       "url": "https://review-hub.mtgibbs.dev/webhook",
       "method": "POST",
-      "body": "uptime-kuma-heartbeat",
+      "body": "{}",
       "accepted_statuscodes": ["401"],
       "notification_name_list": ["discord"],
       "interval": 120,
