@@ -24,9 +24,17 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 ## Uptime Kuma
 - **URL**: `https://status.lab.mtgibbs.dev`
-- **AutoKuma**: Manages monitors via `ConfigMap/autokuma-monitors`.
-- **Storage**: 100Mi PVC for `sled` database (Critical: prevents duplicate monitors on restart).
-- **Credentials**: Synced from 1Password (`uptime-kuma` item).
+- **AutoKuma**: Manages monitors-as-code via `ConfigMap/autokuma-monitors`. **v2.0.0**, matched to Uptime Kuma **v2** (`louislam/uptime-kuma:2`). The plain AutoKuma image tag targets Kuma v2; `uptime-kuma-v1-*` tags exist for v1. AutoKuma `0.7.0` predated Kuma-v2 and was silently broken.
+- **Storage**: PVC for Kuma's `sled` DB + AutoKuma's `/data` tracking DB (v1.0.0+ tracks managed entities in a DB, not Kuma labels).
+- **Credentials**: Synced from 1Password (`uptime-kuma` item), incl. `discord-webhook-url`.
+
+### AutoKuma v2 gotchas (learned the hard way 2026-06-10 — see recap)
+- **Notifications are code too.** A notification is its own entity file, e.g. `discord.json` (file stem = autokuma id `discord`): `{"type":"notification","active":true,"config":{"type":"discord","discordWebhookUrl":"${DISCORD_WEBHOOK_URL}",...}}`. **AutoKuma does NOT honor `isDefault`** — every monitor must opt in explicitly with `"notification_name_list": ["discord"]`.
+- **No `__notification_` filename prefix** — it makes AutoKuma 2.0.0 silently skip the file. Use a plain name.
+- **`ON_DELETE=keep`, not `delete`.** With `delete`, the v2 migration + notification attach triggered a destructive **delete-then-recreate flap** every sync. `keep` halts it (trade: a ConfigMap-removed monitor won't auto-prune). Don't flip back without understanding the flap.
+- **ConfigMap edits need a pod roll.** Monitors live in an emptyDir an initContainer populates (it `envsubst`s `${DISCORD_WEBHOOK_URL}`) at startup — edits don't apply until restart. Bump the `mtgibbs.dev/monitors-revision` pod-template annotation to force it. *(TODO: direct ConfigMap mount + `AUTOKUMA__ENV__` webhook templating → file-watcher auto-reload, no roll.)*
+- **HTTP POST probes: body must be valid JSON** (e.g. `"body": "{}"`) — Kuma JSON-validates it before sending, else the monitor false-fails.
+- **Major-version migration:** v2 refuses to start while old AutoKuma-labelled monitors exist — start once with `AUTOKUMA__MIGRATE=true` to adopt them, then remove it. A from-scratch rebuild doesn't need it.
 
 ## Homepage Dashboard
 - **URL**: `https://home.lab.mtgibbs.dev`
