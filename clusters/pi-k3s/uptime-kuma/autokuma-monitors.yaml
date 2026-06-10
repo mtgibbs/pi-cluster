@@ -4,15 +4,17 @@ metadata:
   name: autokuma-monitors
   namespace: uptime-kuma
 data:
-  # Discord notification - uses AutoKuma notification format
-  # Uses __notification_ prefix for AutoKuma notification management
-  __notification_discord.json: |
+  # Discord notification (AutoKuma v2 notification entity). The file stem is the
+  # autokuma id "discord"; monitors opt in via "notification_name_list": ["discord"].
+  # AutoKuma does NOT honor isDefault (per its docs), so each monitor must list the
+  # id explicitly to alert. ${DISCORD_WEBHOOK_URL} is injected by the initContainer.
+  # (The old "__notification_" prefix made AutoKuma 2.0.0 skip this file silently.)
+  discord.json: |
     {
       "type": "notification",
       "name": "Discord Alerts",
       "active": true,
       "isDefault": true,
-      "applyExisting": true,
       "config": {
         "type": "discord",
         "discordWebhookUrl": "${DISCORD_WEBHOOK_URL}",
@@ -343,6 +345,7 @@ data:
       "type": "http",
       "name": "review-hub (receiver)",
       "url": "http://review-hub.review-hub.svc.cluster.local:8080/health",
+      "notification_name_list": ["discord"],
       "interval": 60,
       "retryInterval": 30,
       "maxretries": 3
@@ -359,6 +362,7 @@ data:
       "method": "POST",
       "body": "uptime-kuma-heartbeat",
       "accepted_statuscodes": ["401"],
+      "notification_name_list": ["discord"],
       "interval": 120,
       "retryInterval": 60,
       "maxretries": 3
