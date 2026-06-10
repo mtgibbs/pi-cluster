@@ -76,6 +76,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
 | **Family Board (dashboard UI)** | **self-contained subtree** `clusters/pi-k3s/family-board/` (own `CLAUDE.md` + `.claude/skills/family-board-ui` + `.claude/agents/board-designer`; slated to spin off) | `cluster-ops` (deploy/verify) |
+| **review-hub (PR-review gates)** | `docs/adr/008-review-hub-framework-seam.md` (framework/instance seam; `scripts/reviewhub/` + `specs/validators/`; slated to spin off when a second consumer exists) | `cluster-ops` (deploy/verify) |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)
