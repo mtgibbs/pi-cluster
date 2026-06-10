@@ -127,36 +127,66 @@ def handle_pull_request(payload):
         return
 
     forge = tj.GitHubForge(pr, repo=repo, token=token, head_sha=head_sha)
+
+    # Opt-in is the per-repo "I use review-hub" signal — and the repos that opt in are
+    # the same ones that require the `review-hub` rollup in branch protection. Read it
+    # first: a repo that hasn't opted in gets nothing posted (it won't require the check).
     try:
         opted_in = read_optin(forge)
-        changed = forge.changed_files()  # warms the shared file-list cache for all validators
     except Exception as e:  # noqa: BLE001
-        log.error("%s: could not read PR: %s", tag, e)
+        log.error("%s: could not read opt-in: %s", tag, e)
         return
-
     if not opted_in:
         log.info("%s: no %s — repo not opted in, skipping", tag, OPTIN_FILE)
         return
-    roster = validators.validators_for(repo, changed, opted_in)
-    log.info("%s: opted into %s · %d changed file(s) · running %s (concurrency=%d)",
-             tag, sorted(opted_in), len(changed), [v.name for v in roster] or "nothing", CONCURRENCY)
-    if not roster:
-        return
 
-    # Fan out: validators run concurrently, each completing its own Check Run as it
-    # finishes. The file list is already cached (warmed above), so no per-validator
-    # re-fetch and no write races on the forge.
-    with ThreadPoolExecutor(max_workers=min(CONCURRENCY, len(roster))) as ex:
-        summaries = list(ex.map(lambda v: _run_one(forge, v, head_sha, tag), roster))
-
-    # Barrier passed — post the ONE consolidated report card (edits in place).
+    # The repo may require the always-on rollup, so open it NOW and conclude it on
+    # EVERY path below — empty roster, crash, all of them. Opening first means a
+    # mid-run failure leaves a visible in_progress check, never an absent one (which
+    # would either wedge a required check or, if not required, silently pass).
+    rollup_id = None
     try:
-        forge.upsert_comment(reporting.render_report(summaries, changed, VERSION),
-                             reporting.REPORT_MARKER)
-    except Exception as e:  # noqa: BLE001 — the checks are the gate; the comment is a courtesy
-        log.warning("%s: could not post report card: %s", tag, e)
-    blocked = [s["name"] for s in summaries if s["state"] in ("block", "error")]
-    log.info("%s: done — %d/%d need review %s", tag, len(blocked), len(summaries), blocked or "")
+        rollup_id = forge.create_check_run(head_sha, name=reporting.ROLLUP_CHECK)
+    except Exception as e:  # noqa: BLE001
+        log.warning("%s: could not open %s rollup check: %s", tag, reporting.ROLLUP_CHECK, e)
+
+    summaries = []
+    try:
+        changed = forge.changed_files()  # warms the shared file-list cache for all validators
+        roster = validators.validators_for(repo, changed, opted_in)
+        log.info("%s: opted into %s · %d changed file(s) · running %s (concurrency=%d)",
+                 tag, sorted(opted_in), len(changed), [v.name for v in roster] or "nothing", CONCURRENCY)
+
+        if roster:
+            # Fan out: validators run concurrently, each completing its own Check Run
+            # as it finishes. The file list is already cached (warmed above), so no
+            # per-validator re-fetch and no write races on the forge.
+            with ThreadPoolExecutor(max_workers=min(CONCURRENCY, len(roster))) as ex:
+                summaries = list(ex.map(lambda v: _run_one(forge, v, head_sha, tag), roster))
+            # Post the ONE consolidated report card (edits in place).
+            try:
+                forge.upsert_comment(reporting.render_report(summaries, changed, VERSION),
+                                     reporting.REPORT_MARKER)
+            except Exception as e:  # noqa: BLE001 — the checks are the gate; the comment is a courtesy
+                log.warning("%s: could not post report card: %s", tag, e)
+
+        # Always conclude the rollup — an empty roster is `success` (no applicable gates).
+        r = reporting.rollup(summaries)
+        if rollup_id is not None:
+            forge.complete_check_run(rollup_id, r["conclusion"], r["title"], r["summary"][:60000])
+        blocked = [s["name"] for s in summaries if s["state"] in ("block", "error")]
+        log.info("%s: done — rollup %s · %d/%d need review %s",
+                 tag, r["conclusion"].upper(), len(blocked), len(summaries), blocked or "")
+    except Exception as e:  # noqa: BLE001 — fail-safe: the required rollup blocks, never vanishes
+        log.exception("%s: review crashed: %s", tag, e)
+        if rollup_id is not None:
+            try:
+                forge.complete_check_run(
+                    rollup_id, "failure", "review-hub errored",
+                    "review-hub crashed before it could finish — review this change "
+                    f"manually.\n\n`{str(e)[:500]}`")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -204,8 +234,8 @@ def main():
                               ("GITHUB_WEBHOOK_SECRET", WEBHOOK_SECRET)) if not v]
     if missing:
         sys.exit(f"missing required env: {', '.join(missing)}")
-    log.info("review-hub receiver listening on :%d · validators=%s · reps=%d model=%s",
-             PORT, [v.name for v in validators.REGISTRY], REPS, MODEL)
+    log.info("review-hub receiver listening on :%d · rollup=%s · validators=%s · reps=%d model=%s",
+             PORT, reporting.ROLLUP_CHECK, [v.name for v in validators.REGISTRY], REPS, MODEL)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 
