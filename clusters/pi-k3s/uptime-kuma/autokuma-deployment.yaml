@@ -16,6 +16,13 @@ spec:
     metadata:
       labels:
         app: autokuma
+      annotations:
+        # Bump to force a pod roll so the initContainer re-copies the updated
+        # autokuma-monitors ConfigMap into /monitors. ConfigMap edits alone don't
+        # restart the pod — the monitor files live in an emptyDir populated only at
+        # startup. (TODO: switch to a direct ConfigMap mount + AUTOKUMA__ENV__ webhook
+        # templating so AutoKuma's file-watcher auto-reloads without this dance.)
+        mtgibbs.dev/monitors-revision: "2"
     spec:
       initContainers:
         - name: envsubst

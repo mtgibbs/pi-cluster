@@ -24,6 +24,7 @@ data:
   # Each file is a separate monitor - filename (without .json) becomes the monitor ID
   pihole-dns.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "port",
       "name": "Pi-hole DNS",
       "hostname": "192.168.1.55",
@@ -34,6 +35,7 @@ data:
     }
   pihole-admin.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Pi-hole Admin",
       "url": "https://pihole.lab.mtgibbs.dev/admin/",
@@ -43,6 +45,7 @@ data:
     }
   grafana.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Grafana",
       "url": "https://grafana.lab.mtgibbs.dev/api/health",
@@ -52,6 +55,7 @@ data:
     }
   prometheus.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Prometheus",
       "url": "http://kube-prometheus-kube-prome-prometheus.monitoring.svc:9090/-/healthy",
@@ -61,6 +65,7 @@ data:
     }
   unbound-dns.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "port",
       "name": "Unbound DNS",
       "hostname": "unbound.pihole.svc.cluster.local",
@@ -71,6 +76,7 @@ data:
     }
   k3s-api.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "port",
       "name": "K3s API",
       "hostname": "192.168.1.55",
@@ -81,6 +87,7 @@ data:
     }
   uptime-kuma.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Uptime Kuma",
       "url": "https://status.lab.mtgibbs.dev/",
@@ -90,6 +97,7 @@ data:
     }
   homepage.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Homepage",
       "url": "https://home.lab.mtgibbs.dev/",
@@ -99,6 +107,7 @@ data:
     }
   unifi.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Unifi Controller",
       "url": "https://unifi.lab.mtgibbs.dev/",
@@ -108,6 +117,7 @@ data:
     }
   synology.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Synology NAS",
       "url": "https://nas.lab.mtgibbs.dev/",
@@ -117,6 +127,7 @@ data:
     }
   jellyfin.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Jellyfin",
       "url": "https://jellyfin.lab.mtgibbs.dev/health",
@@ -126,6 +137,7 @@ data:
     }
   immich.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Immich",
       "url": "https://immich.lab.mtgibbs.dev/api/server/ping",
@@ -135,6 +147,7 @@ data:
     }
   personal-site-cluster.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Personal Site (Cluster)",
       "url": "https://site.lab.mtgibbs.dev/",
@@ -144,6 +157,7 @@ data:
     }
   personal-site-heroku.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Personal Site (Heroku)",
       "url": "https://mtgibbs.xyz/",
@@ -153,6 +167,7 @@ data:
     }
   tailscale-exit-node.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "dns",
       "name": "Tailscale Exit Node",
       "hostname": "ts-pi-cluster-exit-j2trp-0.ts-pi-cluster-exit-j2trp.tailscale.svc.cluster.local",
@@ -164,6 +179,7 @@ data:
     }
   loki.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Loki",
       "url": "http://loki.log-aggregation.svc.cluster.local:3100/ready",
@@ -173,6 +189,7 @@ data:
     }
   log-drain.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Log Drain (Heroku)",
       "url": "https://logs.mtgibbs.dev/",
@@ -184,6 +201,7 @@ data:
     }
   vector.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "port",
       "name": "Vector",
       "hostname": "vector.log-aggregation.svc.cluster.local",
@@ -194,6 +212,7 @@ data:
     }
   n8n.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "n8n",
       "url": "https://n8n.lab.mtgibbs.dev/healthz",
@@ -203,6 +222,7 @@ data:
     }
   n8n-webhooks.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "n8n Webhooks (External)",
       "url": "https://n8n.mtgibbs.dev/healthz",
@@ -212,6 +232,7 @@ data:
     }
   jellyseerr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Jellyseerr",
       "url": "https://requests.lab.mtgibbs.dev/api/v1/status",
@@ -221,6 +242,7 @@ data:
     }
   sonarr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Sonarr",
       "url": "https://sonarr.lab.mtgibbs.dev/ping",
@@ -230,6 +252,7 @@ data:
     }
   radarr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Radarr",
       "url": "https://radarr.lab.mtgibbs.dev/ping",
@@ -239,6 +262,7 @@ data:
     }
   lidarr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Lidarr",
       "url": "https://lidarr.lab.mtgibbs.dev/ping",
@@ -248,6 +272,7 @@ data:
     }
   bazarr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Bazarr",
       "url": "https://bazarr.lab.mtgibbs.dev/",
@@ -257,6 +282,7 @@ data:
     }
   prowlarr.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Prowlarr",
       "url": "https://prowlarr.lab.mtgibbs.dev/ping",
@@ -266,6 +292,7 @@ data:
     }
   sabnzbd.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "SABnzbd",
       "url": "https://sabnzbd.lab.mtgibbs.dev/",
@@ -275,6 +302,7 @@ data:
     }
   qbittorrent.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "qBittorrent",
       "url": "https://qbit.lab.mtgibbs.dev/",
@@ -284,6 +312,7 @@ data:
     }
   calibre-web.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Calibre-Web",
       "url": "https://calibre.lab.mtgibbs.dev/",
@@ -293,6 +322,7 @@ data:
     }
   lazylibrarian.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "LazyLibrarian",
       "url": "https://lazylibrarian.lab.mtgibbs.dev/",
@@ -302,6 +332,7 @@ data:
     }
   kiwix.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "Kiwix",
       "url": "https://kiwix.lab.mtgibbs.dev/",
@@ -311,6 +342,7 @@ data:
     }
   ai-litellm.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "AI - LiteLLM API",
       "url": "https://ai.lab.mtgibbs.dev/health/liveliness",
@@ -320,6 +352,7 @@ data:
     }
   ai-chat-webui.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "AI - Adults Chat (Open WebUI)",
       "url": "https://chat.lab.mtgibbs.dev/health",
@@ -329,6 +362,7 @@ data:
     }
   ai-dewey.json: |
     {
+      "notification_name_list": ["discord"],
       "type": "http",
       "name": "AI - Dewey (kids)",
       "url": "https://dewey.lab.mtgibbs.dev/health",
