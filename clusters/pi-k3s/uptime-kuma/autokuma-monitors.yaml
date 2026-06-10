@@ -334,3 +334,32 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  # review-hub (PR-review gates) — anti-gate-rot liveness. The gates fail CLOSED:
+  # if the receiver is unreachable, its required `review-hub` check is never posted
+  # and every pi-cluster-mcp PR wedges. These two monitors surface that BEFORE you
+  # discover it via a stuck PR. Discord alert is inherited (default notification).
+  review-hub-receiver.json: |
+    {
+      "type": "http",
+      "name": "review-hub (receiver)",
+      "url": "http://review-hub.review-hub.svc.cluster.local:8080/health",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
+  # Edge probe: an UNSIGNED POST to the public webhook. The receiver rejects it 401
+  # ("bad signature") — and a 401 uniquely proves the whole GitHub delivery path is
+  # live (tunnel + route + process + HMAC), because the tunnel catch-all returns 404,
+  # never 401. Lower frequency bounds the bad-signature log line it emits per probe.
+  review-hub-edge.json: |
+    {
+      "type": "http",
+      "name": "review-hub (webhook edge)",
+      "url": "https://review-hub.mtgibbs.dev/webhook",
+      "method": "POST",
+      "body": "uptime-kuma-heartbeat",
+      "accepted_statuscodes": ["401"],
+      "interval": 120,
+      "retryInterval": 60,
+      "maxretries": 3
+    }
