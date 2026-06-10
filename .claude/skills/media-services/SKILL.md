@@ -88,6 +88,54 @@ curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
 
 **Tradeoff:** new media now appears after the 4 AM scan, not within 15 min. The proper fix to keep fast discovery *without* the choke is on-import scan triggers from Sonarr/Radarr (host `jellyfin.jellyfin.svc.cluster.local:8096`, `/Library/Media/Updated` with `Updated` type to force a path scan) — once wired, the periodic scan can be dropped. Also enable "Automatically refresh metadata from the internet" in Jellyfin library settings.
 
+### Media Segment Scan — ALSO must be off-hours (same seek-contention trap)
+
+The **Library** scan is not the only seek-heavy scheduled task. The **Media Segment Scan** (`Key: TaskExtractMediaSegments`, `Id: f861734dd71b37f9482b52a820e39013`) — which analyzes files for intro/credit-skip markers — does the *same* random-read thrash across all media and triggers the *same* mid-stream drops on the RAID5.
+
+- **2026-06-09:** found shipping on a **12-hour `IntervalTrigger`** (`IntervalTicks: 432000000000`), which roamed into prime-time evening and starved an active stream (Jellyfin's own `/health` endpoint timed out — `[ERR] A task was canceled. URL GET /health` — and the readiness/liveness probes failed while the 8m38s segment scan ran). Moved to **daily 5 AM** (staggered 1h after the 4 AM library scan so the two seek-heavy scans don't fight each other; nobody streams at 5 AM either).
+
+```bash
+JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
+# Daily 5:00 AM. TimeOfDayTicks = 18000s * 1e7. NOT an IntervalTrigger — it roams into prime time.
+curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
+  "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/f861734dd71b37f9482b52a820e39013/Triggers" \
+  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":180000000000}]'
+```
+
+> **Diagnostic tell:** `get_media_status` reports `healthy: true` (pod Ready, 0 restarts) while `get_cluster_health` shows `Readiness/Liveness probe failed ... GET /health: context deadline exceeded`. That contradiction = Jellyfin alive but I/O-starved, not crashed. Check `get_pod_logs` for a long-running `... Scan Completed after N minute(s)` overlapping the `/health` cancellations. **General rule: any scheduled task that does broad random reads must be pinned to an off-hours `DailyTrigger`, never an `IntervalTrigger`.**
+
+#### Measured proof it's disk-wait, not CPU/memory (2026-06-10)
+
+The "pure seek latency" claim above is no longer folklore — it's measured. Replaying a `02:16–02:30 UTC` segment-scan window in Prometheus (node `pi-k3s` = `192.168.1.55:9100`), four signals side by side:
+
+```
+Time(UTC)  iowait   user+sys-CPU   load1     jellyfin-mem
+           (0–1)    (0–1)          (4 cores) (limit 2560MB)
+02:10      0.001    0.056          0.41      550 MB   ← idle baseline
+02:16      0.221    0.054          10.7      550 MB   ← scan starts
+02:22      0.223    0.051          36.1      574 MB
+02:28      0.224    0.057          53.8      600 MB
+02:30      0.227    0.056          59.6      707 MB   ← scan peak
+02:40      0.001    0.055          1.12      660 MB   ← scan done
+```
+
+- **iowait `0.6% → 23%` (~38×)** while **user+system CPU stays flat at ~5%** → the CPU is *waiting on the QNAP*, not computing. Rules out "service slog / CPU-bound."
+- **load1 `0.7 → 59.6` (~85×)** with CPU at 5% = the textbook **I/O-bound fingerprint** (load counts `D`-state threads blocked on NFS reads, ~59 of them queued behind the scan's random reads — the stream's sequential read is just one more in that line).
+- **memory peaks `707 MB` vs the `2560 MB` limit, 0 OOMKills, 0 restarts** → memory starvation is *not* a factor; don't chase it.
+
+**Replay query** (Grafana proxies PromQL; creds at `op://pi-cluster/grafana` user `admin`, datasource uid `prometheus`):
+```bash
+PW=$(op read 'op://pi-cluster/grafana/password')
+BASE="https://grafana.lab.mtgibbs.dev/api/datasources/proxy/uid/prometheus/api/v1"
+# iowait fraction on pi-k3s (avg across cores = 0–1). Swap mode= for user|system to see CPU stays flat.
+curl -s -u "admin:$PW" --data-urlencode \
+  'query=avg(rate(node_cpu_seconds_total{instance="192.168.1.55:9100",mode="iowait"}[2m]))' \
+  --data-urlencode start=<epoch> --data-urlencode end=<epoch> --data-urlencode step=120 \
+  "$BASE/query_range"
+```
+
+> **Open thread (diagnose later):** a *second* iowait spike with the same flat-CPU/high-load signature appears at `01:38–01:44 UTC` — some other broad-random-read job lands there too; identify it so it doesn't ambush a stream. QNAP-side per-disk queue depth / NFS op latency needs the `qnap-ro` MCP (was timing out 2026-06-10).
+
 ## Jellyfin: Media Not Appearing After Download
 
 **Root Cause A** (new title): NFS inotify — see above. The daily 4 AM scan picks it up (or trigger a manual scan / on-import Sonarr-Radarr scan — see scan-schedule note above).
