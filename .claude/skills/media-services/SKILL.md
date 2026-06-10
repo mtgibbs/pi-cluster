@@ -70,36 +70,37 @@ Jellyfin's `LibraryMonitor` uses Linux `inotify` to watch for new files. **inoti
 
 The Sonarr/Radarr Emby/Jellyfin notifications ARE configured and working (host: `jellyfin.jellyfin.svc.cluster.local`, port: 8096, API keys valid, HTTP 200 on test). However, these send **targeted updates** (`/emby/Library/Series/Updated`, `/emby/Library/Movies/Updated`) which only refresh metadata for **existing** items in Jellyfin's database. They cannot discover **new** titles on NFS. Keep the notifications (they help with metadata refresh) but they do not solve discovery.
 
-### Library Scan Schedule — daily 4 AM (NOT a short interval; see history)
+### Library Scan Schedule — daily 2 AM (NOT a short interval; see history)
 
 Jellyfin's "Scan Media Library" task (key `RefreshLibrary`, id `7738148ffcd07979c7ceb148e06b3aed`) is the only way to discover *new* titles on NFS (inotify can't). Set the trigger via the Jellyfin API:
 
 ```bash
 JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
-# Daily 4:00 AM. TimeOfDayTicks = 14400s * 1e7. DO NOT use a short IntervalTrigger — see below.
+# Daily 2:00 AM. TimeOfDayTicks = 7200s * 1e7. DO NOT use a short IntervalTrigger — see below.
 curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
   "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/7738148ffcd07979c7ceb148e06b3aed/Triggers" \
-  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":144000000000}]'
+  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":72000000000}]'
 ```
 
 **History / why NOT a 15-minute interval:**
 - 2026-02-11: set to a **15-min interval** (`IntervalTicks: 9000000000`) so new downloads appeared fast (inotify is dead over NFS).
 - 2026-05-29: changed to **daily 4 AM** after the 15-min scan was traced to **hard streaming drops mid-movie**. A scan does thousands of *random* metadata reads across 1,100+ files; a movie is one *sequential* read; on the QNAP's 3-disk spinning RAID5 the two **contend for disk seeks** and thrash the heads → a scan that's normally ~11s balloons to **10+ minutes** AND the stream starves and dies. It does **not** show as CPU / network / NAS-CPU load — it's pure seek latency, so don't chase those. Off-hours scheduling removes the collision entirely.
+- 2026-06-10: moved **4 AM → 2 AM** in the full media-stack re-stagger (it's only ~11s, so it leads the night and frees the old 4 AM slot). See **Master Schedule** below.
 
-**Tradeoff:** new media now appears after the 4 AM scan, not within 15 min. The proper fix to keep fast discovery *without* the choke is on-import scan triggers from Sonarr/Radarr (host `jellyfin.jellyfin.svc.cluster.local:8096`, `/Library/Media/Updated` with `Updated` type to force a path scan) — once wired, the periodic scan can be dropped. Also enable "Automatically refresh metadata from the internet" in Jellyfin library settings.
+**Tradeoff:** new media now appears after the 2 AM scan, not within 15 min. The proper fix to keep fast discovery *without* the choke is on-import scan triggers from Sonarr/Radarr (host `jellyfin.jellyfin.svc.cluster.local:8096`, `/Library/Media/Updated` with `Updated` type to force a path scan) — once wired, the periodic scan can be dropped. Also enable "Automatically refresh metadata from the internet" in Jellyfin library settings.
 
 ### Media Segment Scan — ALSO must be off-hours (same seek-contention trap)
 
 The **Library** scan is not the only seek-heavy scheduled task. The **Media Segment Scan** (`Key: TaskExtractMediaSegments`, `Id: f861734dd71b37f9482b52a820e39013`) — which analyzes files for intro/credit-skip markers — does the *same* random-read thrash across all media and triggers the *same* mid-stream drops on the RAID5.
 
-- **2026-06-09:** found shipping on a **12-hour `IntervalTrigger`** (`IntervalTicks: 432000000000`), which roamed into prime-time evening and starved an active stream (Jellyfin's own `/health` endpoint timed out — `[ERR] A task was canceled. URL GET /health` — and the readiness/liveness probes failed while the 8m38s segment scan ran). Moved to **daily 5 AM** (staggered 1h after the 4 AM library scan so the two seek-heavy scans don't fight each other; nobody streams at 5 AM either).
+- **2026-06-09:** found shipping on a **12-hour `IntervalTrigger`** (`IntervalTicks: 432000000000`), which roamed into prime-time evening and starved an active stream (Jellyfin's own `/health` endpoint timed out — `[ERR] A task was canceled. URL GET /health` — and the readiness/liveness probes failed while the 8m38s segment scan ran). Moved off the interval to a `DailyTrigger`; **currently 04:00** as part of the 2026-06-10 contention re-stagger (see **Master Schedule** below for the full, deconflicted picture).
 
 ```bash
 JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
-# Daily 5:00 AM. TimeOfDayTicks = 18000s * 1e7. NOT an IntervalTrigger — it roams into prime time.
+# Daily 4:00 AM. TimeOfDayTicks = 14400s * 1e7. NOT an IntervalTrigger — it roams into prime time.
 curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
   "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/f861734dd71b37f9482b52a820e39013/Triggers" \
-  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":180000000000}]'
+  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":144000000000}]'
 ```
 
 > **Diagnostic tell:** `get_media_status` reports `healthy: true` (pod Ready, 0 restarts) while `get_cluster_health` shows `Readiness/Liveness probe failed ... GET /health: context deadline exceeded`. That contradiction = Jellyfin alive but I/O-starved, not crashed. Check `get_pod_logs` for a long-running `... Scan Completed after N minute(s)` overlapping the `/health` cancellations. **General rule: any scheduled task that does broad random reads must be pinned to an off-hours `DailyTrigger`, never an `IntervalTrigger`.**
@@ -136,9 +137,54 @@ curl -s -u "admin:$PW" --data-urlencode \
 
 > **Open thread (diagnose later):** a *second* iowait spike with the same flat-CPU/high-load signature appears at `01:38–01:44 UTC` — some other broad-random-read job lands there too; identify it so it doesn't ambush a stream. QNAP-side per-disk queue depth / NFS op latency needs the `qnap-ro` MCP (was timing out 2026-06-10).
 
+## QNAP NFS Disk-Contention — Master Schedule (whole media stack)
+
+The QNAP is a **3-disk spinning RAID5 over NFS**. Random-read jobs (library / subtitle / trickplay / chapter scans) thrash disk seeks and starve sequential streams — see the measured proof above. **Governing rule: only one heavy NFS job starts at a time, never inside the Sunday backup window, never during streaming peak.** Every scheduler below runs `America/New_York`, so all times are local (EDT).
+
+### Windows
+- **Streaming peak — NO heavy jobs:** weekdays 17:00–02:00, **weekends all day** (household pattern, confirmed 2026-06-10).
+- **Backup window — weekly, leave alone:** **Sunday 02:00–03:34**, the `backup-jobs` CronJob cascade (`pvc`→`postgres`→`worker2`→`media`→`git-mirror`→`unifi`) writing configs to `/share/cluster/backups`. Keep media scans out of it.
+- **Dormant maintenance band:** weekday pre-dawn **02:00–06:30** (quiet even on weekend pre-dawn).
+
+### Current staggered schedule (set 2026-06-10)
+| Time (EDT) | Job | Service | Task id / settings key |
+|---|---|---|---|
+| 02:00 daily | Scan Media Library | Jellyfin | `7738148ffcd07979c7ceb148e06b3aed` |
+| 04:00 daily | Media Segment Scan | Jellyfin | `f861734dd71b37f9482b52a820e39013` |
+| 04:30 daily | Audio Normalization | Jellyfin | `ec2f221fd8e7706b3d3afd2c4591b4d7` |
+| 05:00 daily | Extract Chapter Images | Jellyfin | `4e6637c832ed644d1af3370a2506e80a` |
+| 06:00 daily | Generate Trickplay Images | Jellyfin | `64f5f44cd30dc273cb9890205473bbcc` |
+| Tue 03:00 | Index All Movies Subtitles | Bazarr | `radarr.full_update` |
+| Thu 03:00 | Index All Episodes Subtitles | Bazarr | `sonarr.full_update` |
+
+Set any Jellyfin task time (`TimeOfDayTicks` = seconds-past-midnight × 1e7 → 02:00=`72000000000`, 04:00=`144000000000`, 04:30=`162000000000`, 05:00=`180000000000`, 06:00=`216000000000`):
+```bash
+JF_KEY=$(op read 'op://pi-cluster/JellyFin/api-key')
+curl -X POST -H "X-Emby-Token: $JF_KEY" -H "Content-Type: application/json" \
+  "https://jellyfin.lab.mtgibbs.dev/ScheduledTasks/<TASK_ID>/Triggers" \
+  -d '[{"Type":"DailyTrigger","TimeOfDayTicks":<TICKS>}]'
+```
+
+Bazarr full-library subtitle indexes — `radarr`=movies, `sonarr`=episodes; daily→weekly (`_day`: 0=Mon … 6=Sun):
+```bash
+BZ=$(op read 'op://pi-cluster/mcp-homelab/bazarr-api-key')
+curl -X POST -H "X-Api-Key: $BZ" "https://bazarr.lab.mtgibbs.dev/api/system/settings" \
+  --data-urlencode "settings-radarr-full_update=Weekly" --data-urlencode "settings-radarr-full_update_day=1" --data-urlencode "settings-radarr-full_update_hour=3" \
+  --data-urlencode "settings-sonarr-full_update=Weekly" --data-urlencode "settings-sonarr-full_update_day=3" --data-urlencode "settings-sonarr-full_update_hour=3"
+```
+
+### Lower-load / not-movable NFS touchers (know they exist)
+- **Bazarr** "Search for Missing Movies/Series Subtitles" (every 6h, roams) + "Upgrade Previously Downloaded" (12h) — moderate, mostly network; left as-is.
+- **Sonarr/Radarr** daily maintenance (Refresh Movie/Series, Housekeeping, Clean Recycle Bin) clusters **~00:00–00:40** — times are **app-fixed (not API-settable)**; metadata-only, low load, lives in the late-peak edge.
+- **Jellyfin** light `Every24h` cleanups (Clean Cache/Log/Transcode, Update Plugins, Refresh Guide, Download missing subs/lyrics) still anchor to **pod-start (~22:15)** — complete in ~0s, harmless. Pin to a `DailyTrigger` if they ever grow teeth.
+- **Immich** photo jobs hit `/cluster/photos` on the **same spindles** — upload-driven + a light nightly job, ML disabled. Low overnight load; verify its nightly time if the photo library grows.
+
+### History
+- **2026-06-10:** full media-stack re-stagger. Four collisions found, three fixed (the fourth is app-fixed): (1) **04:00 daily triple-book** — Jellyfin library scan + *both* Bazarr full indexes; (2) **Sunday 02:00–03:34** backups overlapping Jellyfin Chapter Images@02 + Trickplay@03; (3) **Audio Normalization at ~22:15 peak** (roaming `Every24h`); (4) `*arr` midnight metadata cluster (app-fixed, left in place). Backups untouched.
+
 ## Jellyfin: Media Not Appearing After Download
 
-**Root Cause A** (new title): NFS inotify — see above. The daily 4 AM scan picks it up (or trigger a manual scan / on-import Sonarr-Radarr scan — see scan-schedule note above).
+**Root Cause A** (new title): NFS inotify — see above. The daily 2 AM scan picks it up (or trigger a manual scan / on-import Sonarr-Radarr scan — see scan-schedule note above).
 
 **Root Cause B** (title visible but wrong/missing metadata): Item exists in database with incomplete metadata (`NULL DateLastRefreshed`). Jellyfin won't display items with failed/interrupted metadata fetches.
 
