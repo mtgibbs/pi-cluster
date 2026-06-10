@@ -65,8 +65,12 @@ spec:
               value: "/monitors"
             - name: AUTOKUMA__TAG_NAME
               value: "AutoKuma"
+            # KEEP, not delete. After the v2 migration + notification attach, AutoKuma
+            # 2.0.0 flapped (delete-then-recreate every sync). "keep" makes the delete
+            # half non-destructive so the churn can't tear monitors down. Acceptable
+            # trade: a monitor removed from the ConfigMap won't auto-prune from Kuma.
             - name: AUTOKUMA__ON_DELETE
-              value: "delete"
+              value: "keep"
             - name: AUTOKUMA__DOCKER__ENABLED
               value: "false"
             - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
