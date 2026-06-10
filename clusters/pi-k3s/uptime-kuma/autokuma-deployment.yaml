@@ -54,23 +54,12 @@ spec:
                 secretKeyRef:
                   name: uptime-kuma-secret
                   key: password
-            # ONE-TIME (in-place 0.7.0 -> 2.0.0 upgrade): v2 tracks monitors in a
-            # persistent DB instead of Kuma labels and refuses to start while old
-            # AutoKuma-labelled monitors exist, until it adopts them once. Removed in
-            # the commit right after the first clean v2 sync. A from-scratch rebuild
-            # has no labelled monitors, so it never needs this.
-            - name: AUTOKUMA__MIGRATE
-              value: "true"
             - name: AUTOKUMA__STATIC_MONITORS
               value: "/monitors"
             - name: AUTOKUMA__TAG_NAME
               value: "AutoKuma"
-            # Migration guard: "keep" while upgrading to v2. A monitor JSON that fails
-            # to parse on v2 is skipped, and with ON_DELETE=delete the grace period
-            # could then remove a live monitor. Restored to "delete" once v2 sync is
-            # verified clean.
             - name: AUTOKUMA__ON_DELETE
-              value: "keep"
+              value: "delete"
             - name: AUTOKUMA__DOCKER__ENABLED
               value: "false"
             - name: AUTOKUMA__FILES__FOLLOW_SYMLINKS
