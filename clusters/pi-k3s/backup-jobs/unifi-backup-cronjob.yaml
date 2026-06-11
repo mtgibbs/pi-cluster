@@ -26,15 +26,17 @@ spec:
                   apk add --no-cache curl jq openssh-client
 
                   BACKUP_DATE=$(date +%Y-%m-%d)
-                  CONTROLLER="https://192.168.1.30:8443"
+                  # UDM Pro Max (built-in controller) — cutover 2026-04-19, CK Gen1 retired.
+                  # UniFi OS: auth at /api/auth/login, Network app proxied under /proxy/network/.
+                  CONTROLLER="https://192.168.1.1"
                   SITE="default"
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
                   NAS_PATH="/share/cluster/backups/${BACKUP_DATE}/unifi"
                   SSH_KEY="/ssh/id_ed25519"
-                  COOKIE_JAR="/tmp/unifi_cookies"
+                  HDR="/tmp/unifi_hdr"
 
-                  echo "=== UniFi Config Backup ==="
+                  echo "=== UniFi Config Backup (UDM Pro Max) ==="
                   echo "Date: ${BACKUP_DATE}"
                   echo "Controller: ${CONTROLLER}"
                   echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}"
@@ -44,47 +46,58 @@ spec:
                   cp ${SSH_KEY} /tmp/id_ed25519
                   chmod 600 /tmp/id_ed25519
 
-                  # Authenticate with UniFi controller (classic API for CK Gen1)
-                  echo "--- Authenticating with UniFi controller ---"
-                  HTTP_CODE=$(curl -sk -o /tmp/auth_response -w "%{http_code}" \
-                    -X POST "${CONTROLLER}/api/login" \
+                  # --- 1. Authenticate (UniFi OS /api/auth/login) ---
+                  # Capture the TOKEN session cookie + CSRF token from response headers.
+                  # NOTE: the TOKEN cookie carries the CHIPS "partitioned" attribute, which
+                  # some curl builds will not replay from a cookie jar — so we extract it and
+                  # send it back explicitly via the Cookie header (robust across curl versions).
+                  # Requires a UniFi *Network admin* account; a login-only account 403s here.
+                  echo "--- Authenticating with UDM controller ---"
+                  HTTP_CODE=$(curl -sk -o /tmp/login_resp -D "${HDR}" -w "%{http_code}" \
+                    -X POST "${CONTROLLER}/api/auth/login" \
                     -H "Content-Type: application/json" \
-                    -c "${COOKIE_JAR}" \
+                    -H "Origin: ${CONTROLLER}" -H "Referer: ${CONTROLLER}/" \
                     -d "{\"username\":\"${UNIFI_USERNAME}\",\"password\":\"${UNIFI_PASSWORD}\"}")
 
                   if [ "${HTTP_CODE}" != "200" ]; then
                     echo "ERROR: Authentication failed (HTTP ${HTTP_CODE})"
-                    cat /tmp/auth_response
+                    cat /tmp/login_resp
+                    exit 1
+                  fi
+
+                  TOKEN=$(grep -i '^set-cookie: *TOKEN=' "${HDR}" | sed -E 's/^[Ss]et-[Cc]ookie: *TOKEN=([^;]+).*/\1/' | head -1)
+                  CSRF=$(grep -i '^x-csrf-token:' "${HDR}" | awk '{print $2}' | tr -d '\r')
+                  if [ -z "${TOKEN}" ]; then
+                    echo "ERROR: no TOKEN cookie returned from login"
                     exit 1
                   fi
                   echo "Authentication successful"
 
-                  # List auto-backups and find the latest one
-                  # NOTE: CK Gen1 on 6.1.71 cannot generate on-demand backups (cmd:backup hangs).
-                  # Instead we download the most recent auto-backup (monthly, configured on controller).
-                  echo "--- Finding latest auto-backup ---"
-                  BACKUP_LIST=$(curl -sk --max-time 15 \
-                    -X POST "${CONTROLLER}/api/s/${SITE}/cmd/backup" \
+                  # --- 2. Generate on-demand backup ---
+                  # The UDM (unlike CK Gen1 on 6.1.71) generates on-demand backups fine.
+                  echo "--- Generating backup ---"
+                  RESP=$(curl -sk --max-time 90 \
+                    -H "Cookie: TOKEN=${TOKEN}" \
+                    -H "X-CSRF-Token: ${CSRF}" \
+                    -H "Origin: ${CONTROLLER}" -H "Referer: ${CONTROLLER}/" \
+                    -X POST "${CONTROLLER}/proxy/network/api/s/${SITE}/cmd/backup" \
                     -H "Content-Type: application/json" \
-                    -b "${COOKIE_JAR}" \
-                    -d '{"cmd":"list-backups"}')
+                    -d '{"cmd":"backup","days":-1}')
 
-                  LATEST_FILE=$(echo "${BACKUP_LIST}" | jq -r '.data | sort_by(.time) | last | .filename // empty')
-
-                  if [ -z "${LATEST_FILE}" ]; then
-                    echo "ERROR: No auto-backups found on controller"
-                    echo "${BACKUP_LIST}"
+                  DL_URL=$(echo "${RESP}" | jq -r '.data[0].url // empty')
+                  if [ -z "${DL_URL}" ]; then
+                    echo "ERROR: backup command returned no download URL"
+                    echo "${RESP}"
                     exit 1
                   fi
+                  echo "Backup generated: ${DL_URL}"
 
-                  LATEST_DATE=$(echo "${BACKUP_LIST}" | jq -r '.data | sort_by(.time) | last | .datetime')
-                  echo "Latest auto-backup: ${LATEST_FILE} (${LATEST_DATE})"
-
-                  # Download the backup file
+                  # --- 3. Download the .unf ---
                   echo "--- Downloading backup ---"
-                  curl -sk --max-time 60 -o /tmp/unifi-backup.unf \
-                    -b "${COOKIE_JAR}" \
-                    "${CONTROLLER}/dl/autobackup/${LATEST_FILE}"
+                  curl -sk --max-time 120 -o /tmp/unifi-backup.unf \
+                    -H "Cookie: TOKEN=${TOKEN}" \
+                    -H "Origin: ${CONTROLLER}" -H "Referer: ${CONTROLLER}/" \
+                    "${CONTROLLER}/proxy/network/${DL_URL#/}"
 
                   BACKUP_SIZE=$(wc -c < /tmp/unifi-backup.unf)
                   echo "Downloaded backup: ${BACKUP_SIZE} bytes"
@@ -94,7 +107,7 @@ spec:
                     exit 1
                   fi
 
-                  # Copy to NAS via SSH
+                  # --- 4. Copy to NAS via SSH ---
                   echo "--- Copying to NAS ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}"
@@ -105,7 +118,13 @@ spec:
 
                   echo "Backup copied to NAS"
 
-                  # Cleanup old UniFi backups (keep last 4 weekly)
+                  # --- 5. Release the controller session ---
+                  curl -sk -o /dev/null \
+                    -H "Cookie: TOKEN=${TOKEN}" -H "X-CSRF-Token: ${CSRF}" \
+                    -H "Origin: ${CONTROLLER}" -H "Referer: ${CONTROLLER}/" \
+                    -X POST "${CONTROLLER}/api/auth/logout" || true
+
+                  # --- 6. Cleanup old UniFi backups (keep last 4 weekly) ---
                   echo "--- Cleaning up old UniFi backups ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
@@ -116,7 +135,7 @@ spec:
                   echo "File: unifi-backup-${BACKUP_DATE}.unf (${BACKUP_SIZE} bytes)"
 
                   # Cleanup temp files
-                  rm -f /tmp/id_ed25519 /tmp/unifi-backup.unf ${COOKIE_JAR} /tmp/auth_response
+                  rm -f /tmp/id_ed25519 /tmp/unifi-backup.unf /tmp/login_resp "${HDR}"
               env:
                 - name: UNIFI_USERNAME
                   valueFrom:
