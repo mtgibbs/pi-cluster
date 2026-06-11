@@ -5,48 +5,81 @@ metadata:
   namespace: homepage
 data:
   settings.yaml: |
-    title: Pi-K3s Home Lab
+    title: USCSS PI-K3S
     description: Raspberry Pi Kubernetes Cluster
     theme: dark
-    color: slate
+    color: green
     headerStyle: clean
+    statusStyle: dot
+    iconStyle: theme
+    hideVersion: true
+    useEqualHeights: true
+    fullWidth: true
     layout:
-      DNS:
-        style: row
-        columns: 3
-      Cluster:
+      COMMAND:
         style: row
         columns: 4
-      Beelink:
+        icon: mdi-monitor-dashboard
+      COMMS:
         style: row
-        columns: 1
-      Network:
-        style: row
-        columns: 2
-      Monitoring:
-        style: row
-        columns: 3
-      AI:
-        style: row
-        columns: 3
-      Media:
+        columns: 4
+        icon: mdi-antenna
+      AI CORE:
         style: row
         columns: 5
-      Downloads:
+        icon: mdi-brain
+      REC DECK:
+        style: row
+        columns: 3
+        icon: mdi-popcorn
+      ACQUISITION:
         style: row
         columns: 4
-      Logs:
+        icon: mdi-download-network
+      CARGO BAY:
         style: row
-        columns: 2
-      Automation:
-        style: row
-        columns: 2
-      Web:
-        style: row
-        columns: 4
+        columns: 6
+        icon: mdi-package-variant-closed
 
   services.yaml: |
-    - DNS:
+    - COMMAND:
+        - Grafana:
+            icon: grafana.png
+            href: https://grafana.lab.mtgibbs.dev
+            description: Dashboards & Metrics
+            siteMonitor: https://grafana.lab.mtgibbs.dev
+        - Uptime Kuma:
+            icon: uptime-kuma.png
+            href: https://status.lab.mtgibbs.dev
+            description: Status Page
+            widget:
+              type: uptimekuma
+              url: http://uptime-kuma.uptime-kuma.svc.cluster.local:3001
+              slug: home
+        - Prometheus:
+            icon: prometheus.png
+            description: Metrics Collection
+            widget:
+              type: prometheus
+              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
+              fields: ["targets_up", "targets_down", "targets_total"]
+        - Loki:
+            icon: mdi-database-search
+            href: https://grafana.lab.mtgibbs.dev/explore?orgId=1&left=%7B%22datasource%22:%22Loki%22%7D
+            description: Log Storage
+            widget:
+              type: customapi
+              url: http://loki.log-aggregation.svc.cluster.local:3100/loki/api/v1/index/stats
+              refreshInterval: 60000
+              mappings:
+                - field: streams
+                  label: Streams
+                  format: number
+                - field: chunks
+                  label: Chunks
+                  format: number
+
+    - COMMS:
         - Pi-hole (pi-k3s):
             icon: pi-hole.png
             href: https://pihole.lab.mtgibbs.dev
@@ -56,7 +89,7 @@ data:
               url: http://pihole-web.pihole.svc.cluster.local
               version: 6
               key: "{{HOMEPAGE_VAR_PIHOLE_API_KEY}}"
-              fields: ["queries", "blocked", "blocked_percent", "gravity"]
+              fields: ["queries", "blocked", "gravity"]
         - Pi-hole (pi5-worker-1):
             icon: pi-hole.png
             href: http://192.168.1.56/admin
@@ -66,33 +99,27 @@ data:
               url: http://192.168.1.56
               version: 6
               key: "{{HOMEPAGE_VAR_PIHOLE_SECONDARY_API_KEY}}"
-              fields: ["queries", "blocked", "blocked_percent", "gravity"]
-        - Unbound:
-            icon: mdi-dns
-            description: Recursive DNS Resolver
-
-    - Cluster:
-        - pi-k3s:
-            icon: raspberry-pi.png
-            description: Master Node (Pi 5)
+              fields: ["queries", "blocked", "gravity"]
+        - Unifi Controller:
+            icon: unifi.png
+            href: https://unifi.lab.mtgibbs.dev
+            description: Network Management
             widget:
-              type: customapi
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=node_uname_info{nodename="pi-k3s"}
-              mappings:
-                - field: status
-                  label: Status
-                  format: text
-        - pi5-worker-1:
-            icon: raspberry-pi.png
-            description: Worker Node (Pi 5)
-        - pi5-worker-2:
-            icon: raspberry-pi.png
-            description: Worker Node (Pi 5)
-        - pi3-worker-2:
-            icon: raspberry-pi.png
-            description: Worker Node (Pi 3)
+              type: unifi
+              url: https://192.168.1.30:8443
+              username: "{{HOMEPAGE_VAR_UNIFI_USER}}"
+              password: "{{HOMEPAGE_VAR_UNIFI_PASS}}"
+              fields: ["wlan_users", "lan_devices", "wan"]
+        - Tailscale:
+            icon: tailscale.png
+            href: https://login.tailscale.com/admin/machines
+            description: VPN & Remote Access
+            widget:
+              type: tailscale
+              deviceid: "{{HOMEPAGE_VAR_TAILSCALE_DEVICE_ID}}"
+              key: "{{HOMEPAGE_VAR_TAILSCALE_API_KEY}}"
 
-    - Beelink:
+    - AI CORE:
         - Beelink GTR9 Pro:
             icon: mdi-chip
             href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load
@@ -134,50 +161,6 @@ data:
                 - field: mode
                   label: Mode
                   format: text
-
-    - Network:
-        - Unifi Controller:
-            icon: unifi.png
-            href: https://unifi.lab.mtgibbs.dev
-            description: Network Management
-            widget:
-              type: unifi
-              url: https://192.168.1.30:8443
-              username: "{{HOMEPAGE_VAR_UNIFI_USER}}"
-              password: "{{HOMEPAGE_VAR_UNIFI_PASS}}"
-              fields: ["wlan_users", "lan_devices", "wan"]
-        - Tailscale:
-            icon: tailscale.png
-            href: https://login.tailscale.com/admin/machines
-            description: VPN & Remote Access
-            widget:
-              type: tailscale
-              deviceid: "{{HOMEPAGE_VAR_TAILSCALE_DEVICE_ID}}"
-              key: "{{HOMEPAGE_VAR_TAILSCALE_API_KEY}}"
-
-    - Monitoring:
-        - Grafana:
-            icon: grafana.png
-            href: https://grafana.lab.mtgibbs.dev
-            description: Dashboards & Metrics
-            siteMonitor: https://grafana.lab.mtgibbs.dev
-        - Uptime Kuma:
-            icon: uptime-kuma.png
-            href: https://status.lab.mtgibbs.dev
-            description: Status Page
-            widget:
-              type: uptimekuma
-              url: http://uptime-kuma.uptime-kuma.svc.cluster.local:3001
-              slug: home
-        - Prometheus:
-            icon: prometheus.png
-            description: Metrics Collection
-            widget:
-              type: prometheus
-              url: http://kube-prometheus-kube-prome-prometheus.monitoring.svc.cluster.local:9090
-              fields: ["targets_up", "targets_down", "targets_total"]
-
-    - AI:
         - Dewey (kids):
             icon: mdi-account-child
             href: https://dewey.lab.mtgibbs.dev
@@ -194,7 +177,7 @@ data:
             description: OpenAI-compatible inference API
             siteMonitor: https://ai.lab.mtgibbs.dev/health/liveliness
 
-    - Media:
+    - REC DECK:
         - Jellyfin:
             icon: jellyfin.png
             href: https://jellyfin.lab.mtgibbs.dev
@@ -205,6 +188,7 @@ data:
               key: "{{HOMEPAGE_VAR_JELLYFIN_API_KEY}}"
               enableBlocks: true
               enableNowPlaying: true
+              showEpisodeNumber: true
         - Immich:
             icon: immich.png
             href: https://immich.lab.mtgibbs.dev
@@ -215,33 +199,13 @@ data:
               key: "{{HOMEPAGE_VAR_IMMICH_API_KEY}}"
               version: 2
               fields: ["photos", "videos", "storage"]
-        - Calibre-Web:
-            icon: calibre-web.png
-            href: https://calibre.lab.mtgibbs.dev
-            description: eBook Library
-            siteMonitor: https://calibre.lab.mtgibbs.dev
-        - LazyLibrarian:
-            icon: lazylibrarian.png
-            href: https://lazylibrarian.lab.mtgibbs.dev
-            description: eBook Search & Management
-            siteMonitor: https://lazylibrarian.lab.mtgibbs.dev
-        - Kiwix:
-            icon: mdi-bookshelf
-            href: https://kiwix.lab.mtgibbs.dev
-            description: Offline Wikipedia & Reference
-            siteMonitor: https://kiwix.lab.mtgibbs.dev
-        - Synology NAS:
-            icon: synology.png
-            href: https://nas.lab.mtgibbs.dev
-            description: Storage
-            siteMonitor: https://nas.lab.mtgibbs.dev
-
-    - Downloads:
         - Jellyseerr:
             icon: jellyseerr.png
             href: https://requests.lab.mtgibbs.dev
             description: Media Requests
             siteMonitor: https://requests.lab.mtgibbs.dev
+
+    - ACQUISITION:
         - Sonarr:
             icon: sonarr.png
             href: https://sonarr.lab.mtgibbs.dev
@@ -258,11 +222,6 @@ data:
               type: radarr
               url: http://radarr.media.svc.cluster.local:7878
               key: "{{HOMEPAGE_VAR_RADARR_API_KEY}}"
-        - Lidarr:
-            icon: lidarr.png
-            href: https://lidarr.lab.mtgibbs.dev
-            description: Music
-            siteMonitor: https://lidarr.lab.mtgibbs.dev
         - Bazarr:
             icon: bazarr.png
             href: https://bazarr.lab.mtgibbs.dev
@@ -279,6 +238,33 @@ data:
               type: sabnzbd
               url: http://sabnzbd.media.svc.cluster.local:8080
               key: "{{HOMEPAGE_VAR_SABNZBD_API_KEY}}"
+
+    - CARGO BAY:
+        - Calibre-Web:
+            icon: calibre-web.png
+            href: https://calibre.lab.mtgibbs.dev
+            description: eBook Library
+            siteMonitor: https://calibre.lab.mtgibbs.dev
+        - LazyLibrarian:
+            icon: lazylibrarian.png
+            href: https://lazylibrarian.lab.mtgibbs.dev
+            description: eBook Search & Management
+            siteMonitor: https://lazylibrarian.lab.mtgibbs.dev
+        - Kiwix:
+            icon: mdi-bookshelf
+            href: https://kiwix.lab.mtgibbs.dev
+            description: Offline Wikipedia & Reference
+            siteMonitor: https://kiwix.lab.mtgibbs.dev
+        - QNAP NAS:
+            icon: qnap.png
+            href: https://qnap.lab.mtgibbs.dev
+            description: Storage
+            siteMonitor: https://qnap.lab.mtgibbs.dev
+        - Lidarr:
+            icon: lidarr.png
+            href: https://lidarr.lab.mtgibbs.dev
+            description: Music
+            siteMonitor: https://lidarr.lab.mtgibbs.dev
         - qBittorrent:
             icon: qbittorrent.png
             href: https://qbit.lab.mtgibbs.dev
@@ -289,37 +275,16 @@ data:
             href: https://prowlarr.lab.mtgibbs.dev
             description: Indexer Manager
             siteMonitor: https://prowlarr.lab.mtgibbs.dev
-
-    - Logs:
-        - Loki:
-            icon: mdi-database-search
-            href: https://grafana.lab.mtgibbs.dev/explore?orgId=1&left=%7B%22datasource%22:%22Loki%22%7D
-            description: Log Storage
-            widget:
-              type: customapi
-              url: http://loki.log-aggregation.svc.cluster.local:3100/loki/api/v1/index/stats
-              refreshInterval: 60000
-              mappings:
-                - field: streams
-                  label: Streams
-                  format: number
-                - field: chunks
-                  label: Chunks
-                  format: number
-        - Log Drain:
-            icon: mdi-cloud-download
-            href: https://logs.mtgibbs.dev
-            description: Heroku Logs
-            siteMonitor: https://logs.mtgibbs.dev
-
-    - Automation:
         - n8n:
             icon: n8n.png
             href: https://n8n.lab.mtgibbs.dev
             description: Workflow Automation
             siteMonitor: https://n8n.lab.mtgibbs.dev
-
-    - Web:
+        - Log Drain:
+            icon: mdi-cloud-download
+            href: https://logs.mtgibbs.dev
+            description: Heroku Logs
+            siteMonitor: https://logs.mtgibbs.dev
         - Personal Site (Cluster):
             icon: mdi-web
             href: https://site.lab.mtgibbs.dev
@@ -392,3 +357,168 @@ data:
 
   kubernetes.yaml: |
     mode: cluster
+
+  # NOSTROMO terminal theme — specs/homepage-retro-theme/spec.md §7
+  # Structure: tokens → fonts → base → texture → header → cards → status → bookmarks → hover
+  custom.css: |
+    @import url('https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&display=swap');
+
+    :root {
+      --crt-bg: #050806;            /* near-black, green-tinted */
+      --crt-surface: rgba(10, 18, 12, 0.82);   /* card surface */
+      --crt-border: #1d3a26;        /* card/section borders */
+      --phosphor: #33ff66;          /* P1 green — headings, values, status-up */
+      --phosphor-body: #9be8af;     /* body text */
+      --phosphor-dim: #4d8a5e;      /* descriptions, secondary */
+      --amber: #ffb000;             /* P3 amber — warnings/degraded ONLY */
+      --hal-red: #ff2a1f;           /* down/error ONLY */
+      --neon-cyan: #00e5ff;         /* Blade Runner accent — hover states ONLY */
+      --glow-green: 0 0 8px rgba(51, 255, 102, 0.45);
+      --glow-red: 0 0 10px rgba(255, 42, 31, 0.55);
+      --scanline: rgba(0, 0, 0, 0.16);
+      --vignette: rgba(0, 0, 0, 0.5);
+    }
+
+    /* ── fonts + base ─────────────────────────────────────────────── */
+    html, body, #page_container {
+      background: var(--crt-bg) !important;
+    }
+    body {
+      font-family: "Share Tech Mono", ui-monospace, monospace !important;
+      color: var(--phosphor-body);
+    }
+    ::selection {
+      background: var(--phosphor);
+      color: var(--crt-bg);
+    }
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-track { background: var(--crt-bg); }
+    ::-webkit-scrollbar-thumb {
+      background: var(--crt-border);
+      border: 1px solid var(--phosphor-dim);
+    }
+
+    /* ── CRT texture: scanlines + vignette (no motion) ────────────── */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          var(--scanline) 0px,
+          var(--scanline) 1px,
+          transparent 1px,
+          transparent 3px
+        ),
+        radial-gradient(
+          ellipse at center,
+          transparent 60%,
+          var(--vignette) 100%
+        );
+    }
+
+    /* ── header / info widgets ────────────────────────────────────── */
+    #information-widgets {
+      border-bottom: 1px solid var(--crt-border);
+      color: var(--phosphor-body);
+    }
+    #information-widgets .widget-container,
+    #information-widgets .widget-inner-text {
+      font-family: "Share Tech Mono", ui-monospace, monospace !important;
+    }
+    .information-widget-label { color: var(--phosphor-dim) !important; }
+    #information-widgets input {
+      background: var(--crt-surface) !important;
+      border: 1px solid var(--crt-border) !important;
+      border-radius: 2px !important;
+      color: var(--phosphor-body) !important;
+      font-family: "Share Tech Mono", ui-monospace, monospace !important;
+    }
+    #information-widgets input:focus {
+      border-color: var(--phosphor) !important;
+      outline: none;
+    }
+
+    /* ── deck (group) headers — MU-TH-UR section dividers ─────────── */
+    .service-group-name {
+      font-family: "Michroma", "Eurostile", sans-serif !important;
+      color: var(--phosphor) !important;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      font-size: 0.9rem !important;
+      text-shadow: var(--glow-green);
+      border-bottom: 1px solid var(--crt-border);
+      padding-bottom: 0.35rem;
+      width: 100%;
+    }
+    .service-group-name::before {
+      content: "// ";
+      color: var(--phosphor-dim);
+      text-shadow: none;
+    }
+    .service-group-icon { color: var(--phosphor) !important; }
+
+    /* ── service cards — sharp-cornered terminal panels ───────────── */
+    .service-card {
+      background: var(--crt-surface) !important;
+      border: 1px solid var(--crt-border) !important;
+      border-radius: 2px !important;
+      box-shadow: none !important;
+      transition: border-color 120ms ease;
+    }
+    .service-card:hover {
+      border-color: var(--neon-cyan) !important;
+    }
+    .service-name {
+      color: var(--phosphor) !important;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-family: "Share Tech Mono", ui-monospace, monospace !important;
+    }
+    .service-description { color: var(--phosphor-dim) !important; }
+    .service-block {
+      font-family: "Share Tech Mono", ui-monospace, monospace !important;
+      color: var(--phosphor-body) !important;
+    }
+
+    /* ── status indicators — HAL semantics ────────────────────────── */
+    /* Sanctioned exception (spec §7): state-bearing color utilities,
+       scoped inside stable status wrappers only. */
+    /* STATUS:DOWN */
+    .site-monitor-status [class*="bg-rose"],
+    .ping-status [class*="bg-rose"],
+    .k8s-status [class*="bg-rose"],
+    .site-monitor-status [class*="bg-red"],
+    .ping-status [class*="bg-red"],
+    .k8s-status [class*="bg-red"] {
+      background-color: var(--hal-red) !important;
+      box-shadow: var(--glow-red);
+    }
+    /* STATUS:WARN */
+    .site-monitor-status [class*="bg-yellow"],
+    .ping-status [class*="bg-yellow"],
+    .k8s-status [class*="bg-yellow"],
+    .site-monitor-status [class*="bg-orange"],
+    .ping-status [class*="bg-orange"],
+    .k8s-status [class*="bg-orange"] {
+      background-color: var(--amber) !important;
+    }
+    /* STATUS:UP */
+    .site-monitor-status [class*="bg-emerald"],
+    .ping-status [class*="bg-emerald"],
+    .k8s-status [class*="bg-emerald"],
+    .site-monitor-status [class*="bg-green"],
+    .ping-status [class*="bg-green"],
+    .k8s-status [class*="bg-green"] {
+      background-color: var(--phosphor) !important;
+      box-shadow: var(--glow-green);
+    }
+
+    /* ── bookmarks ────────────────────────────────────────────────── */
+    .bookmark-group .bookmark-text,
+    .bookmark-name { color: var(--phosphor-body) !important; }
+    .bookmark-description { color: var(--phosphor-dim) !important; }
+    .bookmark:hover .bookmark-name { color: var(--neon-cyan) !important; }

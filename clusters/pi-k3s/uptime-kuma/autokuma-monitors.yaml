@@ -115,12 +115,15 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  # Key kept as synology.json — the file stem IS the autokuma id; renaming would
+  # delete+create (and ON_DELETE=keep would orphan the old monitor). Repointed to
+  # QNAP 2026-06-11: Synology (.60) retired, nas.lab backend was 502.
   synology.json: |
     {
       "notification_name_list": ["discord"],
       "type": "http",
-      "name": "Synology NAS",
-      "url": "https://nas.lab.mtgibbs.dev/",
+      "name": "QNAP NAS",
+      "url": "https://qnap.lab.mtgibbs.dev/",
       "interval": 60,
       "retryInterval": 30,
       "maxretries": 3
