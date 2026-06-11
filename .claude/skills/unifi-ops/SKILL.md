@@ -52,15 +52,31 @@ go-unifi-mcp runs in **lazy mode** — tools are loaded on demand via three meta
 ## Backup Strategy
 - Automated weekly backup CronJob: `unifi-backup` in `backup-jobs` namespace
 - Schedule: Sundays 3:30 AM (after PVC backup at 2:00 AM)
-- **Downloads the latest auto-backup** from the controller (does NOT generate on-demand)
-  - CK Gen1 on 6.1.71 hangs indefinitely on `cmd:backup` (on-demand generation)
-  - Uses `cmd:list-backups` to find the newest auto-backup, then downloads from `/dl/autobackup/`
-  - Controller auto-backups run monthly (`0 0 1 * *`, 30-day retention)
-- `.unf` files stored on NAS at `/volume1/cluster/backups/{date}/unifi/`
-- Keeps last 4 backups
-- Uses `scp -O` (legacy protocol) — Synology rejects SFTP-based scp
-- Critical for eventual CK Gen1 hardware migration
+- Manifest: `clusters/pi-k3s/backup-jobs/unifi-backup-cronjob.yaml`
+- **Ported to UDM Pro Max 2026-06-11** (was hardcoded to CK Gen1 `192.168.1.30:8443`
+  and silently failed every Sunday from the 2026-04-19 cutover until then).
+- **Flow (UniFi OS):**
+  - Auth: `POST https://192.168.1.1/api/auth/login` → grab the `TOKEN` session
+    cookie *and* the `x-csrf-token` response header
+  - **Generates on-demand** backup (the UDM can; CK Gen1 6.1.71 couldn't):
+    `POST /proxy/network/api/s/default/cmd/backup {"cmd":"backup","days":-1}`,
+    then downloads the `.data[0].url` from `/proxy/network/dl/backup/<ver>.unf`
+  - `.unf` stored on NAS at `/share/cluster/backups/{date}/unifi/` (QNAP), keep last 4
+  - Uses `scp -O` (legacy protocol)
+- **Gotchas (all bit us during the port — see commit `cbbc730`):**
+  - **Needs a Network *admin* account.** A login-only UniFi account authenticates
+    (HTTP 200) but `403 Forbidden`s on every `/proxy/network/` call. The stored
+    `unifi` account must have full Network admin rights.
+  - **CHIPS cookie:** the `TOKEN` cookie has the `partitioned` attribute, which some
+    curl builds won't replay from a jar — extract it and send it back via an explicit
+    `Cookie:` header (this is what the manifest does).
+  - **24h secret lag:** after changing the creds in 1Password, the `unifi-credentials`
+    ExternalSecret (`refreshInterval: 24h`) won't resync until forced. Run
+    `refresh_secret(backup-jobs, unifi-credentials)` or the pod keeps using old creds.
 
 ## Credentials
 - **MCP server**: Inherits `UNIFI_USERNAME` and `UNIFI_PASSWORD` from shell (set by `mcp-auth`)
 - **Backup CronJob**: ExternalSecret `unifi-credentials` pulling from 1Password `unifi/username` and `unifi/password`
+- **Both use the same `unifi` 1Password item** — it must hold a **Network admin** account
+  (not a login-only one), or the backup job 403s. go-unifi-mcp reads its creds at startup,
+  so restart it after rotating the account.
