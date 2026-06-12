@@ -37,8 +37,19 @@ root cause.
   app-passwords were never 2FA-gated. Generated a dedicated app-password on the secondary via its
   API (`GET /api/auth/app` → `PATCH webserver.api.app_pwhash`), stored it at
   `op://pi-cluster/pihole/secondary-api-key`, pointed the secondary widget there. ✅ Fixed.
-- **Loki** — false alarm (transient during a pod roll; healthy).
+- **Loki** — *(initially misread as a false alarm)* the `customapi` hit
+  `/loki/api/v1/index/stats` with **no LogQL query**, so Loki 400'd (`parse error:
+  unexpected $end`). Silent in homepage's logs (a 400 isn't a connection error), loud on
+  Loki's side. Fixed by adding `query={source="heroku"}` (the Vector log-drain label; Loki
+  defaults the window to 1h). ✅
+- **Log Drain** (`logs.mtgibbs.dev`) — false-red dot: it's a **POST-only** Heroku log-drain,
+  so a GET health probe returns 405. Dropped the `siteMonitor` → plain link. ✅
 - **LazyLibrarian** — cosmetic `http→https` siteMonitor redirect (dot only). Left as-is.
+
+> Diagnostic note: homepage's pod logs only record *connection-level* widget failures
+> (ECONNREFUSED, redirect errors). An upstream **4xx** (Loki 400, Log Drain 405) renders the
+> card's error state but logs nothing — so "not in the homepage logs" ≠ "healthy." Check the
+> upstream's own logs (Loki did record the 400).
 
 ### 4. Docs
 - `docs/flux-gitops.md`: **reconcile the git source before the Kustomization** — a Kustomization
