@@ -283,7 +283,8 @@ data:
             icon: mdi-cloud-download
             href: https://logs.mtgibbs.dev
             description: Heroku Logs
-            siteMonitor: https://logs.mtgibbs.dev
+            # No siteMonitor: it's a POST-only log-drain endpoint, so any GET health
+            # probe returns 405 → a false-red dot. Plain link instead.
         - Personal Site (Cluster):
             icon: mdi-web
             href: https://site.lab.mtgibbs.dev
