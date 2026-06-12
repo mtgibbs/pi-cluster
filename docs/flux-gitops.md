@@ -24,6 +24,28 @@ Kustomizations are applied in order via `dependsOn`:
 17. tailscale-config        → Connector + ProxyClass CRDs (needs tailscale operator running)
 ```
 
+## Deploying changes — reconcile the SOURCE first (gotcha)
+
+A Kustomization reconcile applies against whatever revision the **GitRepository source**
+currently holds. Pushing a commit does **not** instantly update the source — Flux polls it on
+an interval. So if you push and immediately reconcile only the Kustomization, Flux re-applies
+the **old** revision (silently — the Kustomization still goes `Ready`).
+
+**Always reconcile the source before the Kustomization:**
+```bash
+flux reconcile source git flux-system        # fetch the new commit FIRST
+flux reconcile kustomization homepage         # then apply it
+```
+The `/deploy` slash command does this in order. The `mcp__homelab__reconcile_flux` tool only
+pokes **Kustomizations**, not the git source — when deploying via MCP, force the source with
+the `flux` CLI first (or wait for the next poll), or you'll deploy a stale revision. Confirm by
+checking the applied revision matches your commit (`get_flux_status` → `Applied revision`).
+
+> For ConfigMap-mounted apps (homepage, autokuma) there's a *second* step: the new ConfigMap
+> doesn't reach the pod until it restarts (an initContainer copies it at startup). After the
+> Kustomization applies, `restart_deployment` the workload. Verify the served artifact actually
+> changed (e.g. byte size of `/api/config/custom.css`), not just that the pod is Ready.
+
 ## Kustomize Best Practices
 
 ### Namespace Transformer (IMPORTANT)

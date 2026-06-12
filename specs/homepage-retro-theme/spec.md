@@ -338,6 +338,19 @@ green on first splice.
 > explicit edit list + named contrast warning = nothing left to guess. The tools-off text
 > path also avoided the malformed-tool-call stall entirely.
 
+**Round 2 (2026-06-12)** — taste re-grade after first live look: "off the green → muted teal,
+darkened orange for errors, snap icons into badges rendered through the terminal pane." Applied
+spec-first (tokens + new icon-badge norm + AC9b, then `verify.sh`, then CSS): phosphor→teal
+(`#54bcab`), HAL-red→darkened-orange (`#c2521e`, teal's complement), amber muted to gold, hover
+accent→bright teal; `color: green`→`teal` so native mdi tint follows. Icons: `.service-icon`
+badge + a grayscale→sepia→hue-rotate(120deg) filter monochroming raster logos toward teal.
+
+> Two process lessons folded back: (1) **deploy gotcha** — reconciled the Kustomization against
+> a *stale git source* and silently re-applied the old revision; fix = reconcile `source git`
+> first (now in `docs/flux-gitops.md`). (2) **verify the served artifact** — caught it because
+> served `custom.css` was 5721B (old) vs 6908B (new), not just "pod Ready". Byte-size check
+> earned its place.
+
 ## Two-way sync rule
 
 Logic change → spec first, then config. Refactor → config, then sync fact back here.
