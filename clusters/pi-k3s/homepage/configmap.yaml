@@ -367,17 +367,18 @@ data:
       --crt-bg: #04100f;            /* near-black, teal-tinted */
       --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
       --crt-border: #18403a;        /* card/section/badge borders */
-      --phosphor: #54bcab;          /* muted teal — headings, values, status-up */
-      --phosphor-body: #93cabf;     /* body text */
+      --phosphor: #3e9285;          /* muted teal — headings, values, status-up (toned down) */
+      --phosphor-body: #86ab9f;     /* body text */
       --phosphor-dim: #4a8278;      /* descriptions, secondary */
       --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
       --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
-      --accent: #6fe7d3;            /* Blade Runner accent — hover states ONLY (bright teal) */
-      --glow-teal: 0 0 8px rgba(84, 188, 171, 0.40);
-      --glow-error: 0 0 10px rgba(194, 82, 30, 0.50);
-      --pane-glow: inset 0 0 10px rgba(84, 188, 171, 0.12);  /* icon-badge inner glass */
-      --scanline: rgba(0, 0, 0, 0.14);
-      --vignette: rgba(0, 0, 0, 0.5);
+      --error-bg: rgba(194, 82, 30, 0.14);   /* widget API-error banner tint */
+      --accent: #5fb8a8;            /* Blade Runner accent — hover states ONLY */
+      --glow-teal: 0 0 6px rgba(62, 146, 133, 0.22);
+      --glow-error: 0 0 9px rgba(194, 82, 30, 0.45);
+      --pane-glow: inset 0 0 10px rgba(62, 146, 133, 0.10);  /* icon-badge inner glass */
+      --scanline: rgba(0, 0, 0, 0.16);
+      --vignette: rgba(0, 0, 0, 0.55);
     }
 
     /* ── fonts + base ─────────────────────────────────────────────── */
@@ -512,6 +513,23 @@ data:
     .service-card:hover .service-icon svg {
       filter: grayscale(1) sepia(1) hue-rotate(120deg) saturate(2.2)
               brightness(1.08) opacity(1) !important;
+    }
+
+    /* ── widget API-error block → themed, not stock rose ──────────── */
+    /* WIDGET:ERROR — homepage renders failed widgets as bg-rose/text-rose;
+       recolor to the darkened-orange error palette. Scoped to .service-card so
+       it can't touch anything outside a card. Status dots (below) come after at
+       equal specificity → they win for the dot. */
+    .service-card [class*="bg-rose"],
+    .service-card [class*="bg-red"] {
+      background-color: var(--error-bg) !important;
+    }
+    .service-card [class*="text-rose"],
+    .service-card [class*="text-red"],
+    .service-card [class*="border-rose"],
+    .service-card [class*="border-red"] {
+      color: var(--error-orange) !important;
+      border-color: var(--error-orange) !important;
     }
 
     /* ── status indicators — teal/amber/orange semantics ──────────── */

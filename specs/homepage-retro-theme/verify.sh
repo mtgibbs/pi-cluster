@@ -62,10 +62,12 @@ MIN="$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).map { |g| g.values.first.len
 [ "$MIN" -ge 3 ] && ok "min-tiles:$MIN" || no "a group has only $MIN tiles"
 
 # AC6. :root token block, literal values; no hex outside :root
-for tok in '--crt-bg: #04100f' '--phosphor: #54bcab' '--phosphor-body: #93cabf' \
-           '--phosphor-dim: #4a8278' '--amber: #d9a020' '--error-orange: #c2521e' \
-           '--accent: #6fe7d3' '--crt-border: #18403a'; do
-  grep -qF -- "$tok" "$CSS" && ok "token ${tok%%:*}" || no "missing token: $tok"
+# Presence, not exact value: taste tweaks change the hex; the discipline is
+# "every token is defined in :root AND no hex leaks outside it" (not a fixed palette).
+for tok in crt-bg crt-surface crt-border phosphor phosphor-body phosphor-dim \
+           amber error-orange error-bg accent glow-teal glow-error pane-glow \
+           scanline vignette; do
+  grep -qE "^[[:space:]]*--$tok:" "$CSS" && ok "token --$tok" || no "missing token: --$tok"
 done
 ROOT_END="$(awk '/^:root/{f=1} f&&/^\}/{print NR; exit}' "$CSS")"
 if [ -n "${ROOT_END:-}" ]; then
@@ -90,6 +92,11 @@ grep -q 'STATUS:DOWN' "$CSS" && grep -A10 'STATUS:DOWN' "$CSS" | grep -q 'var(--
   && ok "status-down-rule" || no "status-down-rule (/* STATUS:DOWN */ + var(--error-orange))"
 grep -q 'STATUS:WARN' "$CSS" && grep -A10 'STATUS:WARN' "$CSS" | grep -q 'var(--amber)' \
   && ok "status-warn-rule" || no "status-warn-rule (/* STATUS:WARN */ + var(--amber))"
+
+# AC9c. widget API-error block themed (not stock rose)
+grep -q 'WIDGET:ERROR' "$CSS" && grep -A18 'WIDGET:ERROR' "$CSS" | grep -q 'var(--error-bg)' \
+  && grep -A18 'WIDGET:ERROR' "$CSS" | grep -q 'var(--error-orange)' \
+  && ok "widget-error-rule" || no "widget-error-rule (/* WIDGET:ERROR */ + error-bg/error-orange)"
 
 # AC9b. icon badge "through the terminal pane"
 grep -q 'ICON:PANE' "$CSS" && grep -q 'var(--pane-glow)' "$CSS" \

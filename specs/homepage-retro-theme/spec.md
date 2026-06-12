@@ -133,19 +133,24 @@ better and keeps the qwen regroup trivial).
   --crt-bg: #04100f;            /* near-black, teal-tinted */
   --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
   --crt-border: #18403a;        /* card/section/badge borders */
-  --phosphor: #54bcab;          /* muted teal — headings, values, status-up */
-  --phosphor-body: #93cabf;     /* body text */
+  --phosphor: #3e9285;          /* muted teal — headings, values, status-up (toned down R3) */
+  --phosphor-body: #86ab9f;     /* body text */
   --phosphor-dim: #4a8278;      /* descriptions, secondary */
   --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
   --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
-  --accent: #6fe7d3;            /* Blade Runner accent — hover states ONLY (bright teal) */
-  --glow-teal: 0 0 8px rgba(84, 188, 171, 0.40);
-  --glow-error: 0 0 10px rgba(194, 82, 30, 0.50);
-  --pane-glow: inset 0 0 10px rgba(84, 188, 171, 0.12);  /* icon-badge inner glass */
-  --scanline: rgba(0, 0, 0, 0.14);     /* CRT texture */
-  --vignette: rgba(0, 0, 0, 0.5);
+  --error-bg: rgba(194, 82, 30, 0.14);   /* widget API-error banner tint */
+  --accent: #5fb8a8;            /* Blade Runner accent — hover states ONLY */
+  --glow-teal: 0 0 6px rgba(62, 146, 133, 0.22);
+  --glow-error: 0 0 9px rgba(194, 82, 30, 0.45);
+  --pane-glow: inset 0 0 10px rgba(62, 146, 133, 0.10);  /* icon-badge inner glass */
+  --scanline: rgba(0, 0, 0, 0.16);     /* CRT texture */
+  --vignette: rgba(0, 0, 0, 0.55);
 }
 ```
+
+> Hex values above are the *current* taste setting, not invariants — the gate asserts each
+> token is **present** in `:root` (and no hex leaks outside it), not a fixed palette, so tone
+> tweaks don't fight `verify.sh`.
 
 - **Color values (hex/rgba) live ONLY in `:root`** — every rule references `var(--token)`.
 - **Fonts:** group headers + page title `"Michroma", "Eurostile", sans-serif` (the 2001/Alien
@@ -220,6 +225,10 @@ better and keeps the qwen regroup trivial).
    shall use `var(--amber)` (`/* STATUS:WARN */`).
 9b. **Ubiquitous** — `custom.css` shall style `.service-icon` as a badge (`var(--pane-glow)`)
    and apply a monochroming `filter:` to `.service-icon img` (rule marked `/* ICON:PANE */`).
+9c. **State-driven** — while a service *widget* fails to fetch, homepage renders a
+   `bg-rose`/`text-rose` error block; `custom.css` shall recolor it to `var(--error-bg)` +
+   `var(--error-orange)` (rule marked `/* WIDGET:ERROR */`), scoped to `.service-card`. This is
+   distinct from the status *dot* (AC9) — a widget can be down (orange dot) AND error (banner).
 10. **Event-driven** — when `kubectl kustomize` builds `homepage`, `external-services`, and
     `uptime-kuma`, all shall succeed.
 11. **Ubiquitous** — the ConfigMap shall contain no secret values (placeholders only).
