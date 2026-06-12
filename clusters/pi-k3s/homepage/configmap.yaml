@@ -69,7 +69,11 @@ data:
             description: Log Storage
             widget:
               type: customapi
-              url: http://loki.log-aggregation.svc.cluster.local:3100/loki/api/v1/index/stats
+              # /index/stats REQUIRES a LogQL query matcher — without it Loki 400s
+              # ("parse error: unexpected $end"). {source="heroku"} = all Vector-shipped
+              # logs (see log-aggregation/vector-configmap.yaml labels). Loki defaults the
+              # time window to the last hour. URL-encoded: {source="heroku"}.
+              url: http://loki.log-aggregation.svc.cluster.local:3100/loki/api/v1/index/stats?query=%7Bsource%3D%22heroku%22%7D
               refreshInterval: 60000
               mappings:
                 - field: streams
