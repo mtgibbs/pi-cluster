@@ -77,6 +77,11 @@ serve-expired-reply-ttl: 30  # Mark served-expired responses with 30s TTL
 ```yaml
 tcp-upstream: yes  # Use TCP if UDP fails (more reliable but slower)
 ```
+> **Correction (2026-06-12):** this description is wrong, and the setting was
+> **removed** on 2026-06-12. `tcp-upstream: yes` does *not* "use TCP if UDP fails" —
+> it forces **all** upstream recursion over TCP, always (UDP→TCP fallback is
+> automatic without it). It caused recurring concurrent-query saturation +
+> premature TCP drops on both Pi-holes. See `.claude/skills/dns-ops/SKILL.md`.
 
 **4. Buffer Size Increases**
 ```yaml

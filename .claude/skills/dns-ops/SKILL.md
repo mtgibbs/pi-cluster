@@ -37,6 +37,18 @@ Both paths are independent. Clients may use either Pi-hole instance via DHCP-ass
 - **Node Placement**: Pi 5 nodes ONLY via nodeSelector (Pi 3 hardware causes TCP failures)
 - **Performance**: ~21ms uncached, 0-15ms cached
 
+> **Upstream transport — do NOT set `tcp-upstream: yes`.** It is *not* a "fall back
+> to TCP if UDP fails" toggle (that fallback is automatic on truncated UDP) — it
+> forces **all** upstream recursion over TCP, always. We ran it Dec 2025 → Jun 2026
+> under that misconception (added in `17b857f` as generic "home-network resilience";
+> the AT&T/IPv6 slowness was a **separate** gateway-side fix — UniFi IPv6 prefix
+> delegation, nothing to do with DNS transport). It caused recurring `DNSMASQ_WARN`
+> "max concurrent queries (150)" on **both** Pi-holes at the same instant, plus
+> `CONNECTION_ERROR` premature TCP drops to Unbound (the Jan 2026 TCP-pool bump
+> `4ed431f` only masked the symptom). Removed 2026-06-12. UDP-first + automatic TCP
+> fallback + the default `edns-buffer-size: 1232` is the correct fragmentation-safe
+> setup. If UDP ever *is* proven broken, fix EDNS buffer sizing — don't force TCP.
+
 ## Configuration
 
 ### Pi-hole v6 API (Critical)
