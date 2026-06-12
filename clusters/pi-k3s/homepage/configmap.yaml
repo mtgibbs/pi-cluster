@@ -8,7 +8,7 @@ data:
     title: USCSS PI-K3S
     description: Raspberry Pi Kubernetes Cluster
     theme: dark
-    color: green
+    color: teal
     headerStyle: clean
     statusStyle: dot
     iconStyle: theme
@@ -358,23 +358,25 @@ data:
     mode: cluster
 
   # NOSTROMO terminal theme — specs/homepage-retro-theme/spec.md §7
-  # Structure: tokens → fonts → base → texture → header → cards → status → bookmarks → hover
+  # Muted teal phosphor · darkened-orange errors · icons behind the terminal pane.
+  # Structure: tokens → fonts → base → texture → header → cards → icons → status → bookmarks
   custom.css: |
     @import url('https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&display=swap');
 
     :root {
-      --crt-bg: #050806;            /* near-black, green-tinted */
-      --crt-surface: rgba(10, 18, 12, 0.82);   /* card surface */
-      --crt-border: #1d3a26;        /* card/section borders */
-      --phosphor: #33ff66;          /* P1 green — headings, values, status-up */
-      --phosphor-body: #9be8af;     /* body text */
-      --phosphor-dim: #4d8a5e;      /* descriptions, secondary */
-      --amber: #ffb000;             /* P3 amber — warnings/degraded ONLY */
-      --hal-red: #ff2a1f;           /* down/error ONLY */
-      --neon-cyan: #00e5ff;         /* Blade Runner accent — hover states ONLY */
-      --glow-green: 0 0 8px rgba(51, 255, 102, 0.45);
-      --glow-red: 0 0 10px rgba(255, 42, 31, 0.55);
-      --scanline: rgba(0, 0, 0, 0.16);
+      --crt-bg: #04100f;            /* near-black, teal-tinted */
+      --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
+      --crt-border: #18403a;        /* card/section/badge borders */
+      --phosphor: #54bcab;          /* muted teal — headings, values, status-up */
+      --phosphor-body: #93cabf;     /* body text */
+      --phosphor-dim: #4a8278;      /* descriptions, secondary */
+      --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
+      --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
+      --accent: #6fe7d3;            /* Blade Runner accent — hover states ONLY (bright teal) */
+      --glow-teal: 0 0 8px rgba(84, 188, 171, 0.40);
+      --glow-error: 0 0 10px rgba(194, 82, 30, 0.50);
+      --pane-glow: inset 0 0 10px rgba(84, 188, 171, 0.12);  /* icon-badge inner glass */
+      --scanline: rgba(0, 0, 0, 0.14);
       --vignette: rgba(0, 0, 0, 0.5);
     }
 
@@ -448,7 +450,7 @@ data:
       text-transform: uppercase;
       letter-spacing: 0.2em;
       font-size: 0.9rem !important;
-      text-shadow: var(--glow-green);
+      text-shadow: var(--glow-teal);
       border-bottom: 1px solid var(--crt-border);
       padding-bottom: 0.35rem;
       width: 100%;
@@ -469,7 +471,7 @@ data:
       transition: border-color 120ms ease;
     }
     .service-card:hover {
-      border-color: var(--neon-cyan) !important;
+      border-color: var(--accent) !important;
     }
     .service-name {
       color: var(--phosphor) !important;
@@ -483,7 +485,36 @@ data:
       color: var(--phosphor-body) !important;
     }
 
-    /* ── status indicators — HAL semantics ────────────────────────── */
+    /* ── icons: snapped into a badge, viewed "through the terminal pane" ─ */
+    /* ICON:PANE */
+    .service-icon {
+      box-sizing: border-box !important;
+      background: var(--crt-surface) !important;
+      border: 1px solid var(--crt-border) !important;
+      border-radius: 4px !important;
+      padding: 5px !important;
+      box-shadow: var(--pane-glow) !important;
+      transition: border-color 140ms ease;
+    }
+    /* monochrome any raster (.png) logo toward teal — nothing renders brand-color.
+       grayscale → sepia(warm base) → hue-rotate(spin to teal) → saturate/dim. */
+    .service-icon img,
+    .service-icon svg {
+      filter: grayscale(1) sepia(1) hue-rotate(120deg) saturate(1.5)
+              brightness(0.92) opacity(0.9) !important;
+      transition: filter 140ms ease;
+    }
+    /* hover: the pane lights up */
+    .service-card:hover .service-icon {
+      border-color: var(--accent) !important;
+    }
+    .service-card:hover .service-icon img,
+    .service-card:hover .service-icon svg {
+      filter: grayscale(1) sepia(1) hue-rotate(120deg) saturate(2.2)
+              brightness(1.08) opacity(1) !important;
+    }
+
+    /* ── status indicators — teal/amber/orange semantics ──────────── */
     /* Sanctioned exception (spec §7): state-bearing color utilities,
        scoped inside stable status wrappers only. */
     /* STATUS:DOWN */
@@ -493,8 +524,8 @@ data:
     .site-monitor-status [class*="bg-red"],
     .ping-status [class*="bg-red"],
     .k8s-status [class*="bg-red"] {
-      background-color: var(--hal-red) !important;
-      box-shadow: var(--glow-red);
+      background-color: var(--error-orange) !important;
+      box-shadow: var(--glow-error);
     }
     /* STATUS:WARN */
     .site-monitor-status [class*="bg-yellow"],
@@ -513,11 +544,11 @@ data:
     .ping-status [class*="bg-green"],
     .k8s-status [class*="bg-green"] {
       background-color: var(--phosphor) !important;
-      box-shadow: var(--glow-green);
+      box-shadow: var(--glow-teal);
     }
 
     /* ── bookmarks ────────────────────────────────────────────────── */
     .bookmark-group .bookmark-text,
     .bookmark-name { color: var(--phosphor-body) !important; }
     .bookmark-description { color: var(--phosphor-dim) !important; }
-    .bookmark:hover .bookmark-name { color: var(--neon-cyan) !important; }
+    .bookmark:hover .bookmark-name { color: var(--accent) !important; }

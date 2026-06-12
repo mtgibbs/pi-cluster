@@ -130,18 +130,19 @@ better and keeps the qwen regroup trivial).
 
 ```css
 :root {
-  --crt-bg: #050806;            /* near-black, green-tinted */
-  --crt-surface: rgba(10, 18, 12, 0.82);   /* card surface */
-  --crt-border: #1d3a26;        /* card/section borders */
-  --phosphor: #33ff66;          /* P1 green — headings, values, status-up */
-  --phosphor-body: #9be8af;     /* body text */
-  --phosphor-dim: #4d8a5e;      /* descriptions, secondary */
-  --amber: #ffb000;             /* P3 amber — warnings/degraded ONLY */
-  --hal-red: #ff2a1f;           /* down/error ONLY */
-  --neon-cyan: #00e5ff;         /* Blade Runner accent — hover states ONLY */
-  --glow-green: 0 0 8px rgba(51, 255, 102, 0.45);
-  --glow-red: 0 0 10px rgba(255, 42, 31, 0.55);
-  --scanline: rgba(0, 0, 0, 0.16);     /* CRT texture */
+  --crt-bg: #04100f;            /* near-black, teal-tinted */
+  --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
+  --crt-border: #18403a;        /* card/section/badge borders */
+  --phosphor: #54bcab;          /* muted teal — headings, values, status-up */
+  --phosphor-body: #93cabf;     /* body text */
+  --phosphor-dim: #4a8278;      /* descriptions, secondary */
+  --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
+  --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
+  --accent: #6fe7d3;            /* Blade Runner accent — hover states ONLY (bright teal) */
+  --glow-teal: 0 0 8px rgba(84, 188, 171, 0.40);
+  --glow-error: 0 0 10px rgba(194, 82, 30, 0.50);
+  --pane-glow: inset 0 0 10px rgba(84, 188, 171, 0.12);  /* icon-badge inner glass */
+  --scanline: rgba(0, 0, 0, 0.14);     /* CRT texture */
   --vignette: rgba(0, 0, 0, 0.5);
 }
 ```
@@ -149,10 +150,18 @@ better and keeps the qwen regroup trivial).
 - **Color values (hex/rgba) live ONLY in `:root`** — every rule references `var(--token)`.
 - **Fonts:** group headers + page title `"Michroma", "Eurostile", sans-serif` (the 2001/Alien
   title face); everything else `"Share Tech Mono", ui-monospace, monospace`.
-- **Color semantics:** green = healthy/info. Amber = warning/degraded. HAL red = down/error.
-  Cyan = interactive hover only. Never decorative red/amber.
+- **Color semantics:** muted teal = healthy/info. Amber (gold) = warning/degraded. Darkened
+  orange = down/error (teal's complement). Bright teal = interactive hover only. Never
+  decorative orange/amber.
+- **Icons — "through the terminal pane":** every service icon is snapped into a uniform
+  **badge** (`.service-icon` → `var(--crt-surface)` bg, `var(--crt-border)` border, rounded,
+  `var(--pane-glow)` inner glass). Raster `.png` logos are **monochromed toward teal** with a
+  `filter` chain (grayscale→sepia→hue-rotate) so nothing renders in its native brand color;
+  `mdi-*` icons inherit teal natively via `color: teal` + `iconStyle: theme`. On card hover
+  the pane "lights up" (border → `var(--accent)`, icon filter brightens). No icon shall pop in
+  full color.
 - **Texture:** scanlines via `repeating-linear-gradient` overlay + subtle radial vignette,
-  `pointer-events: none`. Group headers get `text-shadow: var(--glow-green)`, uppercase,
+  `pointer-events: none`. Group headers get `text-shadow: var(--glow-teal)`, uppercase,
   `letter-spacing: 0.2em`.
 - **Motion: NONE.** No `@keyframes`, no `animation:` (no CRT flicker — distracting). Hover
   `transition` ≤ 150ms allowed.
@@ -207,8 +216,10 @@ better and keeps the qwen regroup trivial).
    §7 fallback stacks.
 8. **Unwanted** — if `custom.css` contains `@keyframes` or `animation:`, the gate shall fail.
 9. **State-driven** — while a service is down, its status indicator shall render
-   `var(--hal-red)` + `var(--glow-red)` (CSS rule marked `/* STATUS:DOWN */`); warnings shall
-   use `var(--amber)` (`/* STATUS:WARN */`).
+   `var(--error-orange)` + `var(--glow-error)` (CSS rule marked `/* STATUS:DOWN */`); warnings
+   shall use `var(--amber)` (`/* STATUS:WARN */`).
+9b. **Ubiquitous** — `custom.css` shall style `.service-icon` as a badge (`var(--pane-glow)`)
+   and apply a monochroming `filter:` to `.service-icon img` (rule marked `/* ICON:PANE */`).
 10. **Event-driven** — when `kubectl kustomize` builds `homepage`, `external-services`, and
     `uptime-kuma`, all shall succeed.
 11. **Ubiquitous** — the ConfigMap shall contain no secret values (placeholders only).
@@ -250,7 +261,7 @@ Only **T2** goes to qwen: one-shot generation, fresh context, input = §13 table
 title: USCSS PI-K3S
 description: Raspberry Pi Kubernetes Cluster
 theme: dark
-color: green
+color: teal
 headerStyle: clean
 statusStyle: dot
 iconStyle: theme

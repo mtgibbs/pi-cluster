@@ -62,9 +62,9 @@ MIN="$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).map { |g| g.values.first.len
 [ "$MIN" -ge 3 ] && ok "min-tiles:$MIN" || no "a group has only $MIN tiles"
 
 # AC6. :root token block, literal values; no hex outside :root
-for tok in '--crt-bg: #050806' '--phosphor: #33ff66' '--phosphor-body: #9be8af' \
-           '--phosphor-dim: #4d8a5e' '--amber: #ffb000' '--hal-red: #ff2a1f' \
-           '--neon-cyan: #00e5ff' '--crt-border: #1d3a26'; do
+for tok in '--crt-bg: #04100f' '--phosphor: #54bcab' '--phosphor-body: #93cabf' \
+           '--phosphor-dim: #4a8278' '--amber: #d9a020' '--error-orange: #c2521e' \
+           '--accent: #6fe7d3' '--crt-border: #18403a'; do
   grep -qF -- "$tok" "$CSS" && ok "token ${tok%%:*}" || no "missing token: $tok"
 done
 ROOT_END="$(awk '/^:root/{f=1} f&&/^\}/{print NR; exit}' "$CSS")"
@@ -86,10 +86,17 @@ grep -qF '"Share Tech Mono", ui-monospace, monospace' "$CSS" \
 grep -qE '@keyframes|animation:' "$CSS" && no "animation-found" || ok "no-animation"
 
 # AC9. status-state rules (marked blocks; selector chosen post-audit)
-grep -q 'STATUS:DOWN' "$CSS" && grep -A10 'STATUS:DOWN' "$CSS" | grep -q 'var(--hal-red)' \
-  && ok "status-down-rule" || no "status-down-rule (/* STATUS:DOWN */ + var(--hal-red))"
+grep -q 'STATUS:DOWN' "$CSS" && grep -A10 'STATUS:DOWN' "$CSS" | grep -q 'var(--error-orange)' \
+  && ok "status-down-rule" || no "status-down-rule (/* STATUS:DOWN */ + var(--error-orange))"
 grep -q 'STATUS:WARN' "$CSS" && grep -A10 'STATUS:WARN' "$CSS" | grep -q 'var(--amber)' \
   && ok "status-warn-rule" || no "status-warn-rule (/* STATUS:WARN */ + var(--amber))"
+
+# AC9b. icon badge "through the terminal pane"
+grep -q 'ICON:PANE' "$CSS" && grep -q 'var(--pane-glow)' "$CSS" \
+  && ok "icon-badge-pane" || no "icon-badge (/* ICON:PANE */ + var(--pane-glow))"
+grep -A14 'ICON:PANE' "$CSS" | grep -q '\.service-icon img' \
+  && grep -A14 'ICON:PANE' "$CSS" | grep -q 'filter:' \
+  && ok "icon-monochrome-filter" || no "icon-monochrome-filter (.service-icon img + filter:)"
 
 # AC11 / Safeguard 1. no secret values; placeholders intact
 grep -qE 'sk-[A-Za-z0-9]{16,}|[0-9a-f]{32,}' "$CM" && no "secret-looking-string" || ok "no-secrets"
@@ -122,7 +129,7 @@ grep -q 'showEpisodeNumber: true' "$TMP/services.yaml" \
   && ok "jellyfin-episode-numbers" || no "jellyfin showEpisodeNumber: true missing (§13b)"
 
 # §13 settings theme keys
-for kv in 'statusStyle: dot' 'fullWidth: true' 'iconStyle: theme' 'headerStyle: clean' 'color: green'; do
+for kv in 'statusStyle: dot' 'fullWidth: true' 'iconStyle: theme' 'headerStyle: clean' 'color: teal'; do
   grep -q "$kv" "$TMP/settings.yaml" && ok "settings:$kv" || no "settings missing: $kv"
 done
 
