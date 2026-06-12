@@ -130,12 +130,12 @@ better and keeps the qwen regroup trivial).
 
 ```css
 :root {
-  --crt-bg: #04100f;            /* near-black, teal-tinted */
-  --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
-  --crt-border: #18403a;        /* card/section/badge borders */
-  --phosphor: #3e9285;          /* muted teal — headings, values, status-up (toned down R3) */
-  --phosphor-body: #86ab9f;     /* body text */
-  --phosphor-dim: #4a8278;      /* descriptions, secondary */
+  --crt-bg: #04100f;            /* near-black, teal-tinted (page) */
+  --crt-surface: #081512;       /* card / icon-badge surface — SOLID dark for contrast (R4) */
+  --crt-border: #1f4a42;        /* card/section/badge borders */
+  --phosphor: #4fb3a2;          /* muted teal — headings, values, status-up (R4 contrast) */
+  --phosphor-body: #93c4b8;     /* body text (readable) */
+  --phosphor-dim: #5e978b;      /* descriptions, secondary */
   --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
   --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
   --error-bg: rgba(194, 82, 30, 0.14);   /* widget API-error banner tint */
@@ -359,6 +359,18 @@ badge + a grayscale→sepia→hue-rotate(120deg) filter monochroming raster logo
 > first (now in `docs/flux-gitops.md`). (2) **verify the served artifact** — caught it because
 > served `custom.css` was 5721B (old) vs 6908B (new), not just "pod Ready". Byte-size check
 > earned its place.
+
+**Round 3 (2026-06-12)** — themed widget API-error banners (`bg-rose`→`--error-bg`/`--error-orange`)
+that the status-dot rules had missed; muted the teal a stop. **Round 4 (2026-06-12)** — that
+muting overshot into *washout*: discovered homepage's `color: teal` paints a **bright teal page
+background** (my `#page_container` override didn't catch it), so dark-teal text on bright-teal
+had no contrast. Fix = contrast, not just brightness: `--crt-surface` → **solid dark** (was 82%
+translucent — the translucency let the bright bg bleed through every card), a `BG:FORCE`
+`[class*="bg-theme-"]` override to kill the bright theme bg, and fonts to a readable mid-teal.
+
+> Taste-iteration lesson: "too bright" and "washed out" had the *same* root cause — low
+> contrast — pulling in opposite directions on the font lever. The real fix was the
+> *background/surface*, not the text. Translucent cards over an uncontrolled theme bg is a trap.
 
 ## Two-way sync rule
 

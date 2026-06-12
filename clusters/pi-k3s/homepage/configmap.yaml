@@ -364,12 +364,12 @@ data:
     @import url('https://fonts.googleapis.com/css2?family=Michroma&family=Share+Tech+Mono&display=swap');
 
     :root {
-      --crt-bg: #04100f;            /* near-black, teal-tinted */
-      --crt-surface: rgba(8, 26, 24, 0.82);    /* card / icon-badge surface */
-      --crt-border: #18403a;        /* card/section/badge borders */
-      --phosphor: #3e9285;          /* muted teal — headings, values, status-up (toned down) */
-      --phosphor-body: #86ab9f;     /* body text */
-      --phosphor-dim: #4a8278;      /* descriptions, secondary */
+      --crt-bg: #04100f;            /* near-black, teal-tinted (page) */
+      --crt-surface: #081512;       /* card / icon-badge surface — SOLID dark for contrast */
+      --crt-border: #1f4a42;        /* card/section/badge borders */
+      --phosphor: #4fb3a2;          /* muted teal — headings, values, status-up */
+      --phosphor-body: #93c4b8;     /* body text (readable) */
+      --phosphor-dim: #5e978b;      /* descriptions, secondary */
       --amber: #d9a020;             /* warnings/degraded ONLY (muted gold) */
       --error-orange: #c2521e;      /* down/error ONLY — darkened orange (teal's complement) */
       --error-bg: rgba(194, 82, 30, 0.14);   /* widget API-error banner tint */
@@ -384,6 +384,12 @@ data:
     /* ── fonts + base ─────────────────────────────────────────────── */
     html, body, #page_container {
       background: var(--crt-bg) !important;
+    }
+    /* BG:FORCE — homepage's color:teal theme paints a bright teal page bg that
+       washes everything out. Force every theme-tinted surface dark; cards
+       re-assert their own surface below (.service-card comes later = wins). */
+    [class*="bg-theme-"] {
+      background-color: var(--crt-bg) !important;
     }
     body {
       font-family: "Share Tech Mono", ui-monospace, monospace !important;
