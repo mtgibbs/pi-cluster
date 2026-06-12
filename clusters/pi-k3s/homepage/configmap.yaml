@@ -107,8 +107,7 @@ data:
             widget:
               type: unifi
               url: https://192.168.1.1
-              username: "{{HOMEPAGE_VAR_UNIFI_USER}}"
-              password: "{{HOMEPAGE_VAR_UNIFI_PASS}}"
+              key: "{{HOMEPAGE_VAR_UNIFI_KEY}}"
               fields: ["wlan_users", "lan_devices", "wan"]
         - Tailscale:
             icon: tailscale.png
