@@ -1,5 +1,5 @@
 ---
-# Endpoints for Unifi Controller (external device)
+# Endpoints for UniFi Controller (UDM Pro Max, 192.168.1.1 — UniFi OS on 443; CK Gen1 retired 2026-04-19)
 apiVersion: v1
 kind: Endpoints
 metadata:
@@ -7,9 +7,9 @@ metadata:
   namespace: external-services
 subsets:
   - addresses:
-      - ip: 192.168.1.30
+      - ip: 192.168.1.1
     ports:
-      - port: 8443
+      - port: 443
         name: https
 ---
 # Service pointing to the external endpoints
@@ -20,8 +20,8 @@ metadata:
   namespace: external-services
 spec:
   ports:
-    - port: 8443
-      targetPort: 8443
+    - port: 443
+      targetPort: 443
       name: https
 ---
 # Ingress with TLS termination
@@ -51,4 +51,4 @@ spec:
               service:
                 name: unifi-external
                 port:
-                  number: 8443
+                  number: 443
