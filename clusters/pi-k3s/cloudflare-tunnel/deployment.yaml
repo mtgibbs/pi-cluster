@@ -36,7 +36,7 @@ spec:
       initContainers:
         # Convert tunnel token to credentials.json format
         - name: create-credentials
-          image: alpine:3.21
+          image: alpine:3.24
           command:
             - sh
             - -c
