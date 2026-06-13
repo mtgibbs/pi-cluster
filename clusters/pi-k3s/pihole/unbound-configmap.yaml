@@ -74,11 +74,16 @@ data:
       serve-expired-client-timeout: 1800
       serve-expired-reply-ttl: 30
 
-      # TCP fallback for unreliable UDP
-      tcp-upstream: yes
+      # NOTE: tcp-upstream is intentionally NOT set. It does NOT mean "fall back
+      # to TCP if UDP fails" (that fallback is automatic on truncated UDP) — it
+      # forces ALL upstream recursion over TCP, always. That TCP-everything design
+      # caused concurrent-query saturation (dnsmasq max 150) + premature TCP
+      # connection drops to Pi-hole. UDP-first + automatic TCP fallback paired with
+      # the default edns-buffer-size (1232) is the correct fragmentation-safe setup.
+      # Removed 2026-06-12 — see .claude/skills/dns-ops/SKILL.md. Do NOT re-add.
 
-      # TCP connection management
-      # Defaults (10/10) are too low when tcp-upstream is enabled
+      # TCP connection management — headroom for the occasional TCP fallback
+      # (large/DNSSEC responses). Generous vs. the 10/10 defaults; harmless.
       incoming-num-tcp: 256
       outgoing-num-tcp: 128
       edns-tcp-keepalive: yes
