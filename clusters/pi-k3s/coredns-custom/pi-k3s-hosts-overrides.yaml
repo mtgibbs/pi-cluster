@@ -40,7 +40,7 @@ spec:
       hostNetwork: false
       containers:
         - name: ensure-hosts
-          image: alpine:3.19
+          image: alpine:3.24
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true

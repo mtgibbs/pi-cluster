@@ -29,7 +29,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: resolver
-              image: alpine:3.21
+              image: alpine:3.24
               env:
                 - name: SONARR_API_KEY
                   valueFrom:
