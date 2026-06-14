@@ -1,0 +1,101 @@
+# Media/*arr config RESTORE — DR / drill TEMPLATE.
+#
+# ⚠️  NOT referenced in kustomization.yaml on purpose — Flux must never auto-apply this.
+#     It is applied BY HAND during a restore or a restore drill.
+#
+# It mounts the TARGET PVC directly (so K3s auto-provisions the local-path volume on the
+# right node — no pvc-<uuid> path hunting), rsyncs the backup from the QNAP back into it,
+# then fixes ownership to the apps' 1029:100. Mirror of media-backup-cronjob.yaml.
+#
+# Usage:
+#   1. Scale the app down (RWO PVC can only be mounted once):
+#        kubectl -n media scale deploy/sonarr --replicas=0
+#   2. Substitute the __PLACEHOLDERS__ and apply, e.g.:
+#        sed -e 's/__APP__/sonarr/' -e 's/__PVC__/sonarr-config/' \
+#            -e 's/__NODE__/pi5-worker-1/' -e 's#__SRC__#media/media_sonarr-config#' \
+#            -e 's/__DATE__/2026-06-14/' \
+#          clusters/pi-k3s/backup-jobs/restore-job.template.yaml | kubectl apply -f -
+#        kubectl -n media logs -f job/restore-sonarr
+#   3. Scale the app back up:  kubectl -n media scale deploy/sonarr --replicas=1
+#   4. Clean up:              kubectl -n media delete job restore-sonarr
+#
+# Placeholders:
+#   __APP__   job-name suffix, e.g. sonarr
+#   __PVC__   target PVC (media ns), e.g. sonarr-config
+#   __NODE__  node that owns the local-path PVC:
+#               pi5-worker-1 → sonarr radarr prowlarr qbittorrent jellyseerr
+#                              lazylibrarian calibre-web readarr lidarr
+#               pi5-worker-2 → sabnzbd bazarr
+#   __SRC__   backup sub-path under the dated dir:
+#               worker-1 apps → media/media_<app>-config
+#               worker-2 apps → worker2/media_<app>-config
+#   __DATE__  dated backup dir, e.g. 2026-06-14
+#             (list: ssh cluster-backup@storage.lab.mtgibbs.dev ls -dt /share/cluster/backups/*/)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restore-__APP__
+  namespace: media
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: __NODE__
+      containers:
+        - name: restore
+          image: instrumentisto/rsync-ssh:alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              NAS_USER="cluster-backup"
+              NAS_HOST="storage.lab.mtgibbs.dev"
+              SRC="/share/cluster/backups/__DATE__/__SRC__"
+
+              cp /ssh/id_ed25519 /tmp/k && chmod 600 /tmp/k
+
+              echo "=== Restore __PVC__  <=  ${NAS_HOST}:${SRC} ==="
+              # Guard: refuse if the backup source is empty/missing (don't --delete a live PVC to nothing)
+              COUNT=$(ssh -i /tmp/k -o StrictHostKeyChecking=no "${NAS_USER}@${NAS_HOST}" \
+                       "ls -1A '${SRC}' 2>/dev/null | wc -l" || echo 0)
+              if [ "${COUNT}" -lt 1 ]; then
+                echo "ABORT: backup source ${SRC} is empty or missing (${COUNT} entries)"; exit 1
+              fi
+              echo "Source has ${COUNT} top-level entries; proceeding."
+
+              rsync -av --delete \
+                -e "ssh -i /tmp/k -o StrictHostKeyChecking=no" \
+                "${NAS_USER}@${NAS_HOST}:${SRC}/" \
+                /restore-target/
+
+              echo "=== Fixing ownership to 1029:100 ==="
+              chown -R 1029:100 /restore-target
+
+              echo "=== Restore complete. Top of /restore-target: ==="
+              ls -la /restore-target/ | head -20
+              rm -f /tmp/k
+          volumeMounts:
+            - name: target
+              mountPath: /restore-target
+            - name: ssh-key
+              mountPath: /ssh
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: target
+          persistentVolumeClaim:
+            claimName: __PVC__
+        - name: ssh-key
+          secret:
+            secretName: backup-ssh-key
+            defaultMode: 0400
