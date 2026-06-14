@@ -164,11 +164,56 @@ On the Beelink. Backups are at `cluster-backup@storage.lab.mtgibbs.dev:/share/cl
    ```
    (same shape for `dewey-data`→`open-webui-dewey`, `pipelines-data`→`pipelines`, `ops-pipelines-data`→`pipelines-ops`)
 
-### Restore Procedure (PVC)
-1. Identify the backup on NAS: `ssh cluster-backup@storage.lab.mtgibbs.dev "ls /share/cluster/backups/"`
-2. Scale down the deployment using the PVC
-3. Rsync from NAS back to the PVC directory on the correct node
-4. Scale deployment back up
+### Restore Procedure — Media/*arr config PVCs (TESTED)
+
+Recovery = Flux redeploys the apps (empty PVCs) + restore each config PVC from the QNAP.
+Uses `clusters/pi-k3s/backup-jobs/restore-job.template.yaml` — a Job that **mounts the
+target PVC** (K3s auto-provisions the local-path volume on the right node, so no
+`pvc-<uuid>` path hunting) and rsyncs the backup back in.
+
+> **Proven 2026-06-14** via a scratch-PVC dry-run: sonarr's backup restored with
+> `PRAGMA integrity_check: ok` and real config (7 indexers, 2 download clients, 1 root
+> folder), production untouched.
+
+> ⚠️ **The chown to `1029:100` is MANDATORY.** The QNAP squashes backup file ownership to
+> the backup user (**uid 1001**) on write, but the apps run as **PUID 1029 / PGID 100**.
+> The restore Job re-chowns; skip it and the restored app can't read its own config.
+> (All media apps share 1029:100 — verify with `kubectl exec deploy/<app> -- ls -ln /config` if unsure.)
+
+**Per-app steps:**
+1. Latest dated backup: `ssh cluster-backup@storage.lab.mtgibbs.dev "ls -dt /share/cluster/backups/*/ | head"`
+2. Scale app down (RWO PVC must be free): `kubectl -n media scale deploy/<app> --replicas=0`
+3. Substitute placeholders + apply (node/src map below), then watch:
+   ```sh
+   sed -e 's/__APP__/sonarr/' -e 's/__PVC__/sonarr-config/' \
+       -e 's/__NODE__/pi5-worker-1/' -e 's#__SRC__#media/media_sonarr-config#' \
+       -e 's/__DATE__/2026-06-14/' \
+     clusters/pi-k3s/backup-jobs/restore-job.template.yaml | kubectl apply -f -
+   kubectl -n media logs -f job/restore-sonarr     # has an empty-source guard
+   ```
+4. Scale up + clean up: `kubectl -n media scale deploy/<app> --replicas=1 && kubectl -n media delete job restore-<app>`
+5. Verify in-app (indexers/profiles present; `*-config` API key still works).
+
+**Node + source map** (local-path PVCs are node-pinned):
+
+| Node | `__SRC__` prefix | apps |
+|---|---|---|
+| `pi5-worker-1` | `media/media_<app>-config` | sonarr radarr prowlarr qbittorrent jellyseerr lazylibrarian calibre-web readarr lidarr |
+| `pi5-worker-2` | `worker2/media_<app>-config` | sabnzbd bazarr |
+
+**API-key note:** restoring the PVC keeps the app's API key matching 1Password
+(`<app>.lab.mtgibbs.dev/api-key`), so homepage / MCP / import-resolver keep working. A
+from-**empty** rebuild (no restore) mints a NEW key — re-harvest it into 1Password.
+
+**Caveats:** single NAS copy, `rsync --delete` mirror, ~4 weekly snapshots, no offsite.
+NFS media library (movies/tv/music/books) lives on the QNAP and is **not** in these config
+backups. The `restore-job.template.yaml` is intentionally **excluded from kustomization**
+(Flux never auto-runs it).
+
+### Restore Procedure (other PVCs — pihole / grafana / uptime-kuma)
+These live on `pi-k3s` (via `pvc-backup`). Same idea, but they're not media-namespace:
+identify the backup, scale the workload down, rsync the dated dir back to the node's
+`/var/lib/rancher/k3s/storage/pvc-*_<ns>_<name>/`, fix ownership, scale up.
 
 ### Restore Procedure (PostgreSQL)
 1. Scale Immich deployment to 0
