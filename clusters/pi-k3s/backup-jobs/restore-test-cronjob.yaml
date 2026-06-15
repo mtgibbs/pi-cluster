@@ -1,0 +1,95 @@
+# Weekly restore-test CANARY — proves the backups are actually RESTORABLE + intact,
+# not merely that the backup jobs ran. Restores sonarr's latest config backup into a
+# dedicated scratch PVC (never touches prod), runs PRAGMA integrity_check, and confirms
+# real config is present (indexers > 0).
+#
+# Failure handling: the job EXITS NON-ZERO on any problem → caught within 15m by the
+# existing BackupJobFailed alert (kube_job_failed{namespace="backup-jobs"} in
+# prometheusrule.yaml), and by BackupCronJobStale if it stops succeeding for 8 days.
+# No new alert rule needed — it inherits the backup-jobs alerting by living here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restore-canary
+  namespace: backup-jobs
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restore-test
+  namespace: backup-jobs
+spec:
+  schedule: "0 4 * * 0"   # Sundays 4:00 AM — after media-backup (3:00) has written today's dir
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          # local-path scratch PVC is node-pinned — keep pod + PVC co-located on one node
+          nodeSelector:
+            kubernetes.io/hostname: pi-k3s
+          containers:
+            - name: restore-test
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  NAS="cluster-backup@storage.lab.mtgibbs.dev"
+                  BASE="/share/cluster/backups"
+                  cp /ssh/id_ed25519 /tmp/k && chmod 600 /tmp/k
+                  SSH="ssh -i /tmp/k -o StrictHostKeyChecking=no"
+
+                  DATE=$($SSH $NAS "ls -1 $BASE | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -1")
+                  SRC="$BASE/$DATE/media/media_sonarr-config"
+                  echo "Canary: restoring ${SRC}"
+
+                  COUNT=$($SSH $NAS "ls -1A '${SRC}' 2>/dev/null | wc -l" || echo 0)
+                  [ "${COUNT}" -ge 1 ] || { echo "FAIL: backup source empty/missing (${SRC})"; exit 1; }
+
+                  rsync -a --delete -e "$SSH" "${NAS}:${SRC}/" /restore-target/
+
+                  apk add --no-cache sqlite >/dev/null 2>&1 || { echo "FAIL: cannot install sqlite to verify"; exit 1; }
+                  DB=/restore-target/sonarr.db
+                  [ -s "${DB}" ] || { echo "FAIL: sonarr.db missing/empty after restore"; exit 1; }
+
+                  CHK=$(sqlite3 "${DB}" 'PRAGMA integrity_check;' 2>&1 || echo "error")
+                  [ "${CHK}" = "ok" ] || { echo "FAIL: integrity_check = ${CHK}"; exit 1; }
+
+                  IDX=$(sqlite3 "${DB}" 'SELECT count(*) FROM Indexers;' 2>/dev/null || echo 0)
+                  [ "${IDX}" -ge 1 ] || { echo "FAIL: 0 indexers in restored DB (config not really restored)"; exit 1; }
+
+                  echo "OK: backup ${DATE} is restorable — integrity_check=ok, indexers=${IDX}"
+                  rm -f /tmp/k
+              volumeMounts:
+                - name: target
+                  mountPath: /restore-target
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: target
+              persistentVolumeClaim:
+                claimName: restore-canary
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400
