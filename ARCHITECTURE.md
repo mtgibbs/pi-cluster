@@ -551,7 +551,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  Data Flow:                                                       │  │
 │  │  User request (Jellyseerr) → Sonarr/Radarr → Prowlarr searches  │  │
 │  │  indexers → SABnzbd downloads via usenet → Files land in QNAP   │  │
-│  │  NFS share → Jellyfin picks up new media (15-min scan interval) │  │
+│  │  NFS share → Jellyfin picks up new media (daily 4am scan)       │  │
 │  │                                                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
@@ -695,6 +695,14 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • media-backup      - Weekly media configs (Sun 3:00 AM)        │  │
 │  │  • git-mirror-backup - Weekly git repos (Sun 3:30 AM)            │  │
 │  │  • unifi-backup      - Weekly UniFi config (Sun 3:30 AM)         │  │
+│  │  • restore-test      - Weekly restore canary (Sun 4:00 AM)       │  │
+│  │    Restores sonarr backup → scratch PVC, PRAGMA integrity_check  │  │
+│  │    Exits non-zero on failure → BackupJobFailed alert fires       │  │
+│  │                                                                   │  │
+│  │  DR: restore-job.template.yaml (excluded from kustomization)     │  │
+│  │  Mounts target PVC + rsyncs QNAP backup back in.                │  │
+│  │  MANDATORY: chown 1029:100 post-rsync (QNAP squashes to uid 1001)│  │
+│  │  Full runbook: .claude/skills/backup-ops/SKILL.md               │  │
 │  │                                                                   │  │
 │  │  Storage Target: /share/cluster/backups on QNAP NAS             │  │
 │  │  (storage.lab.mtgibbs.dev / 192.168.1.61)                       │  │
@@ -2120,7 +2128,7 @@ Files saved to NFS: /cluster/media/downloads (QNAP)
   ↓
 Sonarr/Radarr renames and moves to library
   ↓
-Jellyfin detects new media via 15-min scheduled scan
+Jellyfin detects new media via daily 4am scheduled scan
 ```
 
 **Trade-offs**:
@@ -2142,7 +2150,7 @@ Jellyfin detects new media via 15-min scheduled scan
   - TV: /cluster/media/video/tv
   - Movies: /cluster/media/video/Movies
 - Jellyseerr authenticates users via Jellyfin OAuth
-- Library scanning via 15-minute scheduled task (inotify does not work over NFS)
+- Library scanning via daily 4am scheduled task (inotify does not work over NFS)
 
 ## Observability Stack
 
