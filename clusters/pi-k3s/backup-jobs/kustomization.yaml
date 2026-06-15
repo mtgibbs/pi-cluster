@@ -13,4 +13,5 @@ resources:
   - git-mirror-cronjob.yaml
   - unifi-backup-secret.yaml
   - unifi-backup-cronjob.yaml
+  - restore-test-cronjob.yaml
   - prometheusrule.yaml
