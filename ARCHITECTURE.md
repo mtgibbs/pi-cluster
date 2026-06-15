@@ -302,53 +302,6 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                        carl namespace                             │  │
-│  │                                                                   │  │
-│  │  CARL (Canvas Assignment Reminder Liaison)                       │  │
-│  │  • REST API server for Canvas LMS integration                    │  │
-│  │  • Sends assignment reminders with LLM-enhanced intent detection │  │
-│  │  • Integrates with Ollama for local inference                    │  │
-│  │  • Image: ghcr.io/mtgibbs/carl:0.3.3 (auto-deployed via Flux)   │  │
-│  │  • Ingress: carl.lab.mtgibbs.dev                                 │  │
-│  │  • Resources: 100m-500m CPU / 128Mi-256Mi memory                 │  │
-│  │                                                                   │  │
-│  │  Configuration:                                                   │  │
-│  │  • ExternalSecret syncs from 1Password CARL item                 │  │
-│  │  • Canvas API credentials (URL + token)                          │  │
-│  │  • Ollama integration config (URL + model)                       │  │
-│  │                                                                   │  │
-│  │  Flux Image Automation:                                          │  │
-│  │  • ImagePolicy tracks semver releases (v*.*.*)                   │  │
-│  │  • Auto-updates deployment on new GHCR pushes                    │  │
-│  │                                                                   │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                       ollama namespace                            │  │
-│  │                                                                   │  │
-│  │  Ollama Local LLM Server                                          │  │
-│  │  • Self-hosted language model inference on ARM64                 │  │
-│  │  • Provides LLM capabilities to CARL for intent detection        │  │
-│  │  • Image: ollama/ollama:latest                                   │  │
-│  │  • Service: ollama.ollama.svc.cluster.local:11434                │  │
-│  │  • Resources: 500m-2 CPU / 2-4Gi memory                          │  │
-│  │                                                                   │  │
-│  │  Storage:                                                         │  │
-│  │  • PVC: ollama-models (2Gi) for model cache                      │  │
-│  │  • Persisted to local-path storage on pi5-worker-1               │  │
-│  │                                                                   │  │
-│  │  Startup Process:                                                 │  │
-│  │  • Auto-pulls model from 1Password config (OLLAMA_MODEL)         │  │
-│  │  • Waits for server ready before accepting traffic               │  │
-│  │  • Model name configurable via ExternalSecret                    │  │
-│  │                                                                   │  │
-│  │  Scheduling:                                                      │  │
-│  │  • nodeAffinity: pinned to pi5-worker-1                          │  │
-│  │  • Reason: consistent performance and storage locality           │  │
-│  │                                                                   │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │                flux-notifications namespace                       │  │
 │  │                                                                   │  │
 │  │  Flux Notification System                                        │  │
@@ -779,13 +732,11 @@ Dewey has an extra hop — Pipelines — that Adults do not. This is intentional
 
 ### Pi Cluster → Beelink
 
-Both `local-llm-mcp` and `carl` (on the Pi cluster) call Beelink LiteLLM via HTTPS with per-client virtual keys. Neither calls Ollama directly.
+`local-llm-mcp` (on the Pi cluster) calls Beelink LiteLLM via HTTPS with a per-client virtual key. (CARL — which used to call its own in-cluster Ollama directly — and that Ollama were both retired 2026-05-30; see §33.)
 
 ```
 Pi K3s Cluster
   local-llm-mcp  ──HTTPS→  ai.lab.mtgibbs.dev/v1/  →  LiteLLM  →  Ollama
-  carl           ──HTTP──►  ollama.ollama.svc.cluster.local:11434   (in-cluster Ollama,
-                                                                     evaluate migrating)
   kiwix-mcp      ──(called by Dewey pipeline from Beelink side, not from cluster)
 ```
 
@@ -1796,8 +1747,9 @@ transforms:
 > [`docs/canvas-ingestion.md`](docs/canvas-ingestion.md) and
 > [`docs/data-architecture.md`](docs/data-architecture.md)). That path uses the
 > `op://pi-cluster/canvas` item; the old `CARL` 1Password item + the empty `carl` namespace
-> can be deleted. The diagrams / port tables / §34 references below are **historical** —
-> kept for provenance, not current state.
+> can be deleted. The stale "active" CARL/Ollama entries (topology diagram, port table,
+> repo tree, access list) were removed 2026-06-15; the §33–§34 narrative below is kept for
+> provenance, not current state.
 
 **Decision** *(historical)*: Deploy custom Canvas LMS integration service with local LLM inference
 
@@ -1868,6 +1820,11 @@ clusters/pi-k3s/carl/
 ---
 
 ### 34. Ollama - On-Cluster LLM Inference for CARL
+
+> **⚠️ RETIRED 2026-05-30 (with §33 CARL).** The in-cluster Ollama existed only to serve
+> CARL; the two were decommissioned together — `clusters/pi-k3s/ollama/` no longer exists
+> and the `ollama` namespace is an empty shell. Cluster-adjacent LLM needs are now served by
+> the Beelink AI stack (LiteLLM/Ollama, see the Beelink sections). Kept below for provenance.
 
 **Decision**: Deploy Ollama local LLM server on cluster instead of using external API
 
@@ -2316,21 +2273,6 @@ pi-cluster/
         │   ├── ingress.yaml              # site.lab.mtgibbs.dev with TLS
         │   ├── image-automation.yaml     # ImageRepository + ImagePolicy + ImageUpdateAutomation
         │   └── kustomization.yaml
-        ├── carl/
-        │   ├── namespace.yaml            # carl namespace
-        │   ├── deployment.yaml           # CARL API server (ghcr.io/mtgibbs/carl:0.3.3)
-        │   ├── service.yaml              # ClusterIP service
-        │   ├── ingress.yaml              # carl.lab.mtgibbs.dev with TLS
-        │   ├── image-automation.yaml     # ImageRepository + ImagePolicy (semver) + ImageUpdateAutomation
-        │   ├── external-secret.yaml      # Canvas + Ollama config from 1Password
-        │   └── kustomization.yaml
-        ├── ollama/
-        │   ├── namespace.yaml            # ollama namespace
-        │   ├── deployment.yaml           # Ollama LLM server (pinned to pi5-worker-1)
-        │   ├── service.yaml              # ClusterIP service :11434
-        │   ├── pvc.yaml                  # 2Gi for model storage
-        │   ├── external-secret.yaml      # OLLAMA_MODEL from 1Password
-        │   └── kustomization.yaml
         ├── cloudflare-tunnel/
         │   ├── namespace.yaml            # cloudflare-tunnel namespace
         │   ├── deployment.yaml           # cloudflared with init container for credentials
@@ -2436,8 +2378,6 @@ LAN Clients (Dual-Stack)
 | Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) — retained, status TBD |
 | QNAP NAS | 8080 | HTTP | External (192.168.1.61) → Ingress (qnap.lab.mtgibbs.dev) |
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
-| CARL | 8080 | TCP | Ingress (carl.lab.mtgibbs.dev) |
-| Ollama | 11434 | TCP | ClusterIP (internal only, CARL access) |
 | Flux ImageRepository | N/A | N/A | Scans GHCR every 5 minutes |
 | Flux ImageUpdateAutomation | N/A | N/A | Git push to main branch |
 | cloudflared (Tunnel) | 2000 | TCP | Metrics endpoint for health probes |
@@ -2479,7 +2419,6 @@ kubectl -n pihole logs -f deploy/pihole
 # Unifi:          https://unifi.lab.mtgibbs.dev
 # NAS:            https://nas.lab.mtgibbs.dev
 # Personal Site:  https://site.lab.mtgibbs.dev (auto-deployed from GHCR)
-# CARL:           https://carl.lab.mtgibbs.dev (Canvas Assignment Reminder Liaison)
 
 # Flux commands
 flux get all                              # Check all Flux resources
