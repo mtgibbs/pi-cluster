@@ -69,3 +69,38 @@ resources:
   - namespace.yaml      # Creates 'myapp' namespace
   - helmrelease.yaml    # Contains HelmRepo (flux-system) + HelmRelease (myapp)
 ```
+
+## Branch protection — force-push guard only (intentional)
+
+`main` is protected against **force-pushes and branch deletion** (`enforce_admins: true`, so it
+applies to the owner too) — but has **no required-PR, required-review, or required-status-check**
+rule. This is deliberate.
+
+**Why force-push-only, not full protection:** Flux `ImageUpdateAutomation` (mtgibbs-site,
+mcp-homelab, review-hub, local-llm-mcp, kiwix-mcp, private-exit-node) commits image-tag bumps
+**directly to `main`** as the Flux bot. A required-PR rule would reject those bot pushes and
+silently halt image automation. Force-push/deletion blocking does **not** interfere — those are
+normal fast-forward pushes — so the guard stops history-destroying force-pushes without any PR
+friction and without breaking Flux. (Flux *reading* from `main` is unrelated to branch
+protection; it's the *write-back* image automation that constrains the choice.)
+
+**Manage it:**
+```bash
+# View current protection
+gh api repos/mtgibbs/pi-cluster/branches/main/protection
+
+# Temporarily lift (to intentionally force-push), then re-apply afterward
+gh api -X DELETE repos/mtgibbs/pi-cluster/branches/main/protection
+
+# (Re-)apply the guard
+gh api -X PUT repos/mtgibbs/pi-cluster/branches/main/protection --input - <<'JSON'
+{ "required_status_checks": null, "enforce_admins": true,
+  "required_pull_request_reviews": null, "restrictions": null,
+  "allow_force_pushes": false, "allow_deletions": false }
+JSON
+```
+
+**Backstop:** the weekly `git-mirror-backup` job mirrors this repo to the QNAP, so even a
+worst-case history loss has a recovery copy.
+
+Applied 2026-06-15.
