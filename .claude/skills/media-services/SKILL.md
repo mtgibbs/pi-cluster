@@ -33,7 +33,8 @@ The QNAP **Storage Pool** view (and MCP `list_storages` / `get_system_info`) sho
 
 ### Common NFS Settings
 - **Protocol**: NFSv3 (negotiated by default; NFSv4 explicitly set on any PV caused mount failures for immich — remove `nfsvers=4` if present)
-- **DNS name**: All PVs use `storage.lab.mtgibbs.dev` — IP change requires only a Pi-hole DNS flip + pod restart
+- **DNS name**: Worker-node PVs use `storage.lab.mtgibbs.dev` (IP change = a Pi-hole DNS flip + pod restart). **Exception — `jellyfin-video-nfs` hardcodes `192.168.1.61`**: it mounts on **pi-k3s**, which uses *public* DNS (not Pi-hole) and resolves the hostname only via the `/etc/hosts` override DaemonSet (a single point of failure). Hardcoding removes that hop. (Trade-off: a future QNAP IP change must edit this PV directly, not just DNS.)
+- **Mount resilience**: media PVs should be **`soft,timeo=600,retrans=2,nconnect=4`** — a `hard` mount turns a brief NAS read-stall into a *permanent* freeze (see recovery runbook below). `jellyfin-video-nfs` carries these as of 2026-06-15; extend to the other media PVs when convenient.
 - **Squash**: "No mapping" (preserves client UIDs; no all_squash)
 - **nolock mountOption**: Required on QNAP — NLM (network lock manager) is unreachable on this QNAP config
 
@@ -45,6 +46,32 @@ If pods are stuck in `ContainerCreating`:
 3. Verify `storage.lab.mtgibbs.dev` resolves correctly: `dig storage.lab.mtgibbs.dev @192.168.1.55`
 4. After PV path/server changes, force-recreate the pod (`kubectl delete pod`) — running containers keep old mounts
 5. Verify actual mount target via `kubectl exec -- mount | grep nfs` NOT `df` (df can show stale entries)
+
+### NFS mount WEDGED ("server not responding, still trying") — recovery
+
+**Symptom:** a pod (esp. **Jellyfin**, pinned to pi-k3s) hangs on every media read — `ls /media`
+may still list (cached metadata) but `dd`/actual reads hang; the pod gets stuck `Terminating`.
+`dmesg` on the node shows `nfs: server storage.lab.mtgibbs.dev not responding, still trying`.
+
+**Root cause (confirmed 2026-06-15):** a brief NAS read-stall (spinning-RAID5 seek contention
+under streaming load — see the disk-contention schedule below) on a **`hard`** mount → the kernel
+retries *forever* instead of erroring, so a momentary hiccup becomes a permanent freeze. Everything
+else was healthy — NAS up (worker-1 read at 89 MB/s), node Ready, **conntrack 3% full, 0 NIC
+errors, DNS fine**. It is **array-stall × hard-mount**, not network/DNS/CPU. The
+`soft,nconnect` mount options on the PV are the durable fix; `kubectl rollout restart` does NOT
+clear it (a rolling restart never drops the wedged mount — you must fully release it).
+
+**Fast recovery (~30 s):**
+```sh
+# 1. force-lazy-unmount the wedged NFS mount on the node it's pinned to (Jellyfin = pi-k3s / .55)
+ssh mtgibbs@192.168.1.55 \
+  "mount | grep jellyfin-video-nfs | awk '{print \$3}' | xargs -r sudo umount -f -l"
+# 2. recreate the pod so it mounts a FRESH connection (force — the old one won't terminate)
+kubectl delete pod -n jellyfin --all --force --grace-period=0
+# 3. verify a real read is fast again (expect ~100 MB/s)
+kubectl exec -n jellyfin deploy/jellyfin -- sh -c \
+  'dd if="$(find /media/Movies -name "*.mkv" | head -1)" of=/dev/null bs=1M count=64'
+```
 
 ## Immich (Photos)
 - **URL**: `https://immich.lab.mtgibbs.dev`
