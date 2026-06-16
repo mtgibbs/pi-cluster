@@ -9,8 +9,16 @@ spec:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-media-downloads
+  # ReadWriteMany → keep `hard` (a `soft` timeout mid-write can corrupt; `soft` is only used on
+  # the read-only jellyfin video PV). nconnect=4 + tuned timeo/retrans add throughput (big for
+  # SAB writing large files) + resilience, without the corruption risk. Hostname kept — these
+  # mount on the WORKERS (Pi-hole DNS), unlike jellyfin on pi-k3s. See media-services SKILL.
   mountOptions:
     - nolock
+    - hard
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
     server: storage.lab.mtgibbs.dev
     path: /cluster/media/downloads
@@ -41,6 +49,10 @@ spec:
   storageClassName: nfs-media-library
   mountOptions:
     - nolock
+    - hard
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
     server: storage.lab.mtgibbs.dev
     path: /cluster/media/video
@@ -71,6 +83,10 @@ spec:
   storageClassName: nfs-media-music
   mountOptions:
     - nolock
+    - hard
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
     server: storage.lab.mtgibbs.dev
     path: /cluster/media/music
@@ -101,6 +117,10 @@ spec:
   storageClassName: nfs-media-books
   mountOptions:
     - nolock
+    - hard
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
     server: storage.lab.mtgibbs.dev
     path: /cluster/media/books
