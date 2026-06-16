@@ -46,6 +46,41 @@ checking the applied revision matches your commit (`get_flux_status` → `Applie
 > Kustomization applies, `restart_deployment` the workload. Verify the served artifact actually
 > changed (e.g. byte size of `/api/config/custom.css`), not just that the pod is Ready.
 
+## Changing immutable PV/PVC fields (`mountOptions`, `nfs.server`) — suspend through the whole swap
+
+PV `mountOptions`, `nfs.server`, and `nfs.path` are **immutable**. Editing them in git and
+reconciling does **not** update the bound PV — the API rejects it and the Kustomization goes
+NotReady. You must **delete + recreate** the PV *and* its PVC. For an NFS PV that's just a
+pointer (`Retain` policy, data lives on the NAS), recreate is safe — **no data loss**.
+
+> **The trap (learned 2026-06-16, the media-PV mount-options swap):** if the Kustomization is
+> *active* during the swap, Flux re-applies the Deployments (`replicas:1`) and re-spawns
+> consumer pods **while the PVC is mid-delete**. Those Pending pods hold the PVC's
+> `pvc-protection` finalizer → the PVC sticks in `Terminating` → the new PVC can't be created →
+> pods stay Pending. **Deadlock.**
+
+**Correct procedure — keep the Kustomization SUSPENDED the entire time:**
+```bash
+K=media; NS=media; APPS="sabnzbd qbittorrent radarr sonarr lidarr readarr lazylibrarian calibre-web bazarr"
+flux suspend kustomization $K                                  # 1. freeze — stops pod re-spawns
+gh pr merge <PR> --squash                                     # 2. land the new manifest
+kubectl -n $NS scale deploy $APPS --replicas=0                # 3. drop ALL pod references
+kubectl wait --for=delete pod -n $NS -l '<selector>' --timeout=120s
+kubectl -n $NS delete pvc <pvcs...> && kubectl delete pv <pvs...>   # 4. PVCs first, then PVs
+flux reconcile source git flux-system
+flux resume kustomization $K && flux reconcile kustomization $K     # 5. ONLY NOW resume → recreates PV/PVC + scales up
+# 6. verify: PVs Bound w/ new opts, pods Running (Running ⇒ mounted OK), a RW write succeeds
+```
+
+**If a PVC is already stuck `Terminating`** (you resumed too early): scale its consumers to 0,
+then force-clear the finalizer — safe for an NFS-pointer PVC (no data on it):
+```bash
+kubectl patch pvc <name> -n <ns> -p '{"metadata":{"finalizers":null}}' --type=merge
+```
+Then delete the now-`Released` PV (`Retain` leaves a stale `claimRef` that blocks rebinding) and
+let Flux recreate both. See `.claude/skills/media-services/SKILL.md` for the NFS mount-options
+rationale (soft for read-only, hard for read-write).
+
 ## Kustomize Best Practices
 
 ### Namespace Transformer (IMPORTANT)
