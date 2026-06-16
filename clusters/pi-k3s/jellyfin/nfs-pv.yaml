@@ -9,10 +9,23 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-video
+  # NFSv3 (do NOT add nfsvers=4 — it breaks QNAP mounts; see media-services SKILL).
+  # soft + timeo/retrans: a brief NAS read-stall ERRORS and recovers instead of a `hard`
+  #   mount hanging "still trying" forever — that wedge froze Jellyfin 2026-06-15 and needed
+  #   a manual force-unmount. (Read-only media, so `soft` is safe — no write-corruption risk.)
+  # nconnect=4: parallel TCP connections → more throughput headroom + resilience to a
+  #   single-connection stall (the actual recurring failure mode).
   mountOptions:
     - nolock
+    - soft
+    - timeo=600
+    - retrans=2
+    - nconnect=4
   nfs:
-    server: storage.lab.mtgibbs.dev
+    # Hardcoded IP (not storage.lab.mtgibbs.dev) ON PURPOSE: this PV mounts on pi-k3s, which
+    # uses PUBLIC DNS (not Pi-hole) and only resolves the hostname via the /etc/hosts override
+    # DaemonSet — a single point of failure. The QNAP IP is stable; hardcoding removes that hop.
+    server: 192.168.1.61
     path: /cluster/media/video
     readOnly: true
 ---
