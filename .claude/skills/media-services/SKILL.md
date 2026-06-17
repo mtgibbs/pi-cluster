@@ -172,9 +172,23 @@ Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP ca
       Raw sector counts not MCP-exposed (SSH/UI only); QPKG footprint minimal (no indexer/AV scan job).
 - [x] **QNAP load correlation** (2026-06-17): CPU idle (~0.3 load / 4-core) through both stalls → pure
       iowait, not QNAP CPU/process. NOTE: `query_top_processes` returns empty even live — tool unusable here.
-- [ ] **Cluster-side iowait attribution** — THE open blocker now: which pod/cgroup on `pi-k3s` drove 90%
-      iowait @ 20:30 / 22:18 EDT (evening, no scheduled heavy job)? **NOT Immich** (server scaled to 0,
-      2026-06-17) — check Jellyfin's own scan/trickplay/chapter tasks + cAdvisor per-container I/O.
+- [x] **Cluster-side iowait attribution (2026-06-17)** — chased every discrete competing-job candidate;
+      ALL ruled out for the 06-16 20:32 / 22:18 EDT window:
+      - **Downloads/imports** — Sonarr last import `06-15 14:30Z`; Radarr last `06-16 02:58Z` (=06-15
+        22:58 EDT), nothing on 06-16 evening; backups weekly-Sunday (last 06-14); SAB idle at recovery. A
+        download finishing "exactly at 20:32" would fire an *arr `downloadFolderImported` — none exists.
+      - **Immich** — server scaled to 0. **QNAP** — disk healthy, CPU idle, no indexer job.
+      - **Plex** — DEAD. `plex-external` endpoint `192.168.1.53:32400` (legacy "external Pi 3") does not
+        respond (no ping, conn timeout). Plex was replaced by Jellyfin Dec 2025; Pi 3 decommissioned May
+        2026. `clusters/pi-k3s/external-services/plex.yaml` is STALE config (Endpoint+Svc+Ingress+TLS for
+        nothing) — candidate for deletion.
+- [ ] **Two survivors only** (need live capture to decide): (a) a **concurrent 2nd Jellyfin stream/
+      transcode** reading the same array, or (b) the **spinning RAID5 is simply marginal** for a 4K-remux
+      read pattern. **Decisive test:** node **network RX on `pi-k3s`** during the stall = total NFS read
+      throughput. HIGH RX → a greedy reader (find it); LOW RX + high iowait → storage-limited (array).
+      No direct Prometheus ingress — query via Grafana (`grafana.lab.mtgibbs.dev`, auth) datasource proxy,
+      or better: **instrument for the NEXT occurrence** (enable node-exporter `mountstats` collector +
+      a panel, or log `nfsiostat` during streaming) — forensic replay keeps hitting "not captured live."
 - [ ] **Then:** tune soft-mount `timeo`/`retrans` up for longer ride-through (do NOT revert to bare `hard`
       — reintroduces the permanent wedge). Optional: raw SMART via `smartctl`/UI as belt-and-suspenders.
 
