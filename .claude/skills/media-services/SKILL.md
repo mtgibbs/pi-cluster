@@ -76,6 +76,101 @@ kubectl exec -n jellyfin deploy/jellyfin -- sh -c \
   'dd if="$(find /media/Movies -name "*.mkv" | head -1)" of=/dev/null bs=1M count=64'
 ```
 
+### OPEN — streaming still drops early AFTER the 2026-06-15 soft-mount fix (tracking)
+
+**The soft mount stopped the *permanent freeze* but did NOT stop the *stream drop*.** Post-fix, a NAS
+read stall no longer wedges Jellyfin forever — instead the stream dies early and the pod self-heals.
+This is a **new, still-open failure mode**; the soft mount changed the *symptom*, not the root cause.
+
+**Incident 2026-06-16 (~20:01 & ~20:32 EDT / `00:32Z` 6/17):** "Kill Bill: Vol. 2" via **Infuse-Direct**
+(direct play, Apple TV) dropped **early and repeatedly** — playback stopped at `108507 ms` (**1:48**) then
+`172278 ms` (**2:52**). Recovered on its own (stream restartable; no pod restart).
+
+Evidence captured:
+- **I/O-starvation tell present:** `get_media_status` → `healthy: true`, `restarts: 0`; **simultaneously**
+  `get_cluster_health` → `Liveness probe failed ... GET /health: context deadline exceeded` at `00:32:59Z`.
+  Alive but I/O-blocked, not crashed (matches the segment-scan tell documented below).
+- **Ruled OUT — scheduled scans:** every heavy Jellyfin task ran its off-hours slot (`02:00`–`06:00`);
+  **zero** scan/task activity in the 19:xx–20:xx pod-log window. The Master Schedule is being honored.
+- **Ruled OUT — competing downloads:** at recovery SABnzbd `Idle` (0 items), Sonarr & Radarr queues empty.
+  (Caveat: snapshot was ~3 min post-recovery; a job finishing *exactly* at 20:32 can't be fully excluded.)
+- Earlier 19:25–19:54 session was a *transcode* (Pride & Prejudice 2160p HEVC → libfdk_aac); Kill Bill
+  attempts at 20:01/20:32 were **direct play** (source read straight off NFS, no transcode buffer).
+
+**Update 2026-06-16 ~22:17 EDT (cluster-ops verified live during a 3rd drop):**
+- **Mount IS `soft` — the fix is live** on the running pod (age 22h, 0 restarts, pinned pi-k3s):
+  `192.168.1.61:/cluster/media/video ... nfs4 (ro,...,soft,proto=tcp,nconnect=4,timeo=600,retrans=2,addr=192.168.1.61)`.
+  **The "still on old `hard` mount" sub-theory is DISPROVEN.**
+- **No wedge present:** live read test ran **70 → 202 MB/s**, clean exit; `dmesg` on pi-k3s shows NO recent
+  "not responding, still trying" (only old pre-fix entries from Jun 15 22:05). Destructive recovery was
+  correctly **NOT** run — nothing to unwedge.
+- **Drops hit at VARYING positions** → rules out file-specific corruption. Tonight: `1:48` (108507ms),
+  `2:52` (172278ms), then a **clean ~96-min session**, then a deep stop at **1:36:40** (`5799856ms`). The
+  `soft` mount is surfacing each transient QNAP hiccup as a stream-death-then-self-recover.
+- **iowait smoking gun (Grafana replay, pi-k3s `192.168.1.55:9100`):** an active stream idles at **~5%**
+  iowait; at the **20:32 drop iowait SLAMMED to 90% for ~6 min (20:30–20:36)** and at the **22:18 drop to
+  50%**, CPU otherwise flat. The Pi's NFS reads were starved → **the QNAP could not serve reads** — not a
+  cluster / network / CPU / mount fault. A *sustained 6-min* 90% stall reads more like a heavy QNAP-side
+  job than a momentary disk hiccup. **Identifying which QNAP process/disk spiked at 20:32 & 22:18 is the
+  open blocker** — pull it via the `qnap-ro` MCP (confirmed healthy; see hypothesis 1 + RESUME below).
+
+**Leading hypotheses (updated 2026-06-17):**
+1. **QNAP weak/failing disk — INVESTIGATED, NOT SUPPORTED (2026-06-17).** The promoted data-risk
+   hypothesis was checked via `qnap-ro` and does **not** hold up:
+   - **System log clean for 7 weeks.** `list_logs` (warning+error) returns only **15 entries total**,
+     newest **2026-04-30** — ZERO disk / RAID / SMART / bad-sector / read-error / command-timeout events,
+     and **nothing at the 06-16 stall times**. A drive in TLER deep-recovery or reallocating sectors would
+     raise QTS System-Event warnings; there are none.
+   - **All 3 disks healthy & cool:** WDC WD100EFGX (WD Red 10TB, CMR) at **48 / 49 / 46 °C**, no temp
+     alerts; RAID5 intact (`pool_status:-1` / `usable:false` are the documented display quirks, not faults);
+     volume 41% used (thick-provisioning confirmed again).
+   - **Caveat — raw SMART sector counts are NOT MCP-reachable.** `qnap-ro` exposes disk *temperature +
+     status flags* (`get_system_info`, `list_storages`) but NOT reallocated/pending/uncorrectable counts.
+     To read those, use `smartctl -a /dev/sd[abc]` over SSH or the QTS UI (Storage & Snapshots → Disk →
+     SMART). Given 7 weeks of clean logs + healthy temps + intact RAID, raw-SMART is belt-and-suspenders,
+     not urgent.
+   - **MCP access note:** `qnap-ro` did NOT auto-connect this session (Claude launched without `mcp-auth`
+     in its env — the `claude()` zsh guard only fires on a terminal launch, not GUI/IDE). Reached it
+     **directly via JSON-RPC over HTTP** with no Claude restart: `op read "op://pi-cluster/QNAP NAS/
+     MCP_Token_ReadOnly"` → `POST http://qnap-mcp.lab.mtgibbs.dev:8442/mcp` (initialize → grab
+     `Mcp-Session-Id` header → notifications/initialized → tools/list → tools/call). This is the reliable
+     fallback when the in-process MCP client isn't connected.
+2. **Soft-mount over-correction.** `soft,timeo=600,retrans=2` errors a transient blip that `hard` would
+   ride through (and that Infuse's small buffer gives up on even before the mount errors). Real but
+   *secondary* — it's the messenger, not the cause. Do NOT revert to bare `hard` (reintroduces the
+   permanent wedge); if disk health is clean, consider tuning `timeo`/`retrans` for longer ride-through.
+3. **Immich on the same spindles** — `immich-postgresql` had 4 restarts, `valkey` 3; `/cluster/photos`
+   shares the RAID5. Lower priority now (drops happened with varying load); confirm via iowait replay.
+
+**▶ RESUME HERE (2026-06-17) — QNAP disk de-risked; pivot to cluster-side iowait attribution:**
+The QNAP-disk-failure hypothesis is ruled out (see #1 — clean logs, healthy temps, intact RAID). The QNAP
+**CPU was idle during both proven stalls** (`query_load_avg`: load_1min **0.31 @ 20:24** and **0.25 @
+22:14** on a 4-core box ≈ 8%), confirming pure disk-seek / iowait — not CPU, not a runaway QNAP process.
+`query_top_processes` is **broken on this NAS** (returns empty even for *now*), so process attribution must
+come from the **cluster side**, not the QNAP. **First action:** in Prometheus/Grafana on `pi-k3s`
+(`192.168.1.55:9100`), attribute the **90% iowait @ 20:30–20:36** and **50% @ 22:18 EDT 2026-06-16** to a
+**container/cgroup** — which pod drove NFS reads in that evening window when the Master Schedule says NO
+heavy job should run? **Prime suspect: Immich on the same spindles (#3)** — `/cluster/photos` shares the
+RAID5; `immich-postgresql`/`valkey` had restarts. Then decide soft-mount `timeo`/`retrans` tuning (#2).
+Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP can't reach sector counts).
+
+**Diagnostics status:**
+- [x] **Fix is live** (2026-06-16, cluster-ops): mount confirmed `soft,nconnect=4,timeo=600,retrans=2` on
+      the running pod; reads 70–202 MB/s; no wedge in dmesg. "Still on hard mount" disproven.
+- [x] **iowait replay** (2026-06-16): I/O-bound fingerprint confirmed — 90% @ 20:30–20:36, 50% @ 22:18,
+      CPU flat → QNAP-side read stall, not cluster/network/CPU/mount.
+- [x] **`qnap-ro` MCP triaged** (2026-06-16): server healthy (HTTP 200); "offline" was `mcp-auth` not
+      loaded into the launch shell. Fixed `~/.zshrc` (added `MCP_AUTH_LOADED` flag + `claude()` guard).
+- [x] **QNAP disk health via `qnap-ro`** (2026-06-17, direct HTTP): logs clean 7 wk (no disk/RAID/SMART
+      events), disks 46–49 °C no alerts, RAID5 intact, 41% used. **Disk-failure hypothesis NOT supported.**
+      Raw sector counts not MCP-exposed (SSH/UI only); QPKG footprint minimal (no indexer/AV scan job).
+- [x] **QNAP load correlation** (2026-06-17): CPU idle (~0.3 load / 4-core) through both stalls → pure
+      iowait, not QNAP CPU/process. NOTE: `query_top_processes` returns empty even live — tool unusable here.
+- [ ] **Cluster-side iowait attribution** — THE open blocker now: which pod/cgroup on `pi-k3s` drove 90%
+      iowait @ 20:30 / 22:18 EDT (evening, no scheduled heavy job)? Immich (#3) is the prime suspect.
+- [ ] **Then:** tune soft-mount `timeo`/`retrans` up for longer ride-through (do NOT revert to bare `hard`
+      — reintroduces the permanent wedge). Optional: raw SMART via `smartctl`/UI as belt-and-suspenders.
+
 ## Immich (Photos)
 - **URL**: `https://immich.lab.mtgibbs.dev`
 - **Version**: v2.4.x (PostgreSQL with pgvector)
