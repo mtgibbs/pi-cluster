@@ -4,5 +4,4 @@ namespace: external-services
 resources:
   - namespace.yaml
   - unifi.yaml
-  - plex.yaml
   - qnap.yaml
