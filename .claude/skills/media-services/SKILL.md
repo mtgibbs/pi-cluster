@@ -139,8 +139,12 @@ Evidence captured:
    ride through (and that Infuse's small buffer gives up on even before the mount errors). Real but
    *secondary* — it's the messenger, not the cause. Do NOT revert to bare `hard` (reintroduces the
    permanent wedge); if disk health is clean, consider tuning `timeo`/`retrans` for longer ride-through.
-3. **Immich on the same spindles** — `immich-postgresql` had 4 restarts, `valkey` 3; `/cluster/photos`
-   shares the RAID5. Lower priority now (drops happened with varying load); confirm via iowait replay.
+3. **Immich on the same spindles — RULED OUT (2026-06-17).** `immich-server` is **replicas: 0** (scaled
+   to zero) and ML is off (`machine-learning.enabled: false`); only `immich-postgresql` (idle) + `valkey`
+   run. The server that does all photo I/O isn't running, so Immich **cannot** be driving the evening
+   iowait (the pg/valkey restarts are incidental). **Config drift to note:** the HelmRelease declares
+   `server.enabled: true` (wants 1 replica) but live is 0 — a manual scale-down not in Git, or Flux not
+   reconciling immich. Worth a look, but a separate issue from the stream drops.
 
 **▶ RESUME HERE (2026-06-17) — QNAP disk de-risked; pivot to cluster-side iowait attribution:**
 The QNAP-disk-failure hypothesis is ruled out (see #1 — clean logs, healthy temps, intact RAID). The QNAP
@@ -150,8 +154,10 @@ The QNAP-disk-failure hypothesis is ruled out (see #1 — clean logs, healthy te
 come from the **cluster side**, not the QNAP. **First action:** in Prometheus/Grafana on `pi-k3s`
 (`192.168.1.55:9100`), attribute the **90% iowait @ 20:30–20:36** and **50% @ 22:18 EDT 2026-06-16** to a
 **container/cgroup** — which pod drove NFS reads in that evening window when the Master Schedule says NO
-heavy job should run? **Prime suspect: Immich on the same spindles (#3)** — `/cluster/photos` shares the
-RAID5; `immich-postgresql`/`valkey` had restarts. Then decide soft-mount `timeo`/`retrans` tuning (#2).
+heavy job should run? **Immich is RULED OUT (#3)** — `immich-server` is replicas 0
+(scaled to zero). Look instead at **Jellyfin's own scheduled tasks** (library / segment / trickplay /
+chapter scans — did one roam into the evening?) and **cAdvisor per-container I/O** on `pi-k3s` at the
+stall timestamps. Then decide soft-mount `timeo`/`retrans` tuning (#2).
 Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP can't reach sector counts).
 
 **Diagnostics status:**
@@ -167,7 +173,8 @@ Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP ca
 - [x] **QNAP load correlation** (2026-06-17): CPU idle (~0.3 load / 4-core) through both stalls → pure
       iowait, not QNAP CPU/process. NOTE: `query_top_processes` returns empty even live — tool unusable here.
 - [ ] **Cluster-side iowait attribution** — THE open blocker now: which pod/cgroup on `pi-k3s` drove 90%
-      iowait @ 20:30 / 22:18 EDT (evening, no scheduled heavy job)? Immich (#3) is the prime suspect.
+      iowait @ 20:30 / 22:18 EDT (evening, no scheduled heavy job)? **NOT Immich** (server scaled to 0,
+      2026-06-17) — check Jellyfin's own scan/trickplay/chapter tasks + cAdvisor per-container I/O.
 - [ ] **Then:** tune soft-mount `timeo`/`retrans` up for longer ride-through (do NOT revert to bare `hard`
       — reintroduces the permanent wedge). Optional: raw SMART via `smartctl`/UI as belt-and-suspenders.
 
