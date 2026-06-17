@@ -146,19 +146,15 @@ Evidence captured:
    `server.enabled: true` (wants 1 replica) but live is 0 — a manual scale-down not in Git, or Flux not
    reconciling immich. Worth a look, but a separate issue from the stream drops.
 
-**▶ RESUME HERE (2026-06-17) — QNAP disk de-risked; pivot to cluster-side iowait attribution:**
-The QNAP-disk-failure hypothesis is ruled out (see #1 — clean logs, healthy temps, intact RAID). The QNAP
-**CPU was idle during both proven stalls** (`query_load_avg`: load_1min **0.31 @ 20:24** and **0.25 @
-22:14** on a 4-core box ≈ 8%), confirming pure disk-seek / iowait — not CPU, not a runaway QNAP process.
-`query_top_processes` is **broken on this NAS** (returns empty even for *now*), so process attribution must
-come from the **cluster side**, not the QNAP. **First action:** in Prometheus/Grafana on `pi-k3s`
-(`192.168.1.55:9100`), attribute the **90% iowait @ 20:30–20:36** and **50% @ 22:18 EDT 2026-06-16** to a
-**container/cgroup** — which pod drove NFS reads in that evening window when the Master Schedule says NO
-heavy job should run? **Immich is RULED OUT (#3)** — `immich-server` is replicas 0
-(scaled to zero). Look instead at **Jellyfin's own scheduled tasks** (library / segment / trickplay /
-chapter scans — did one roam into the evening?) and **cAdvisor per-container I/O** on `pi-k3s` at the
-stall timestamps. Then decide soft-mount `timeo`/`retrans` tuning (#2).
-Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP can't reach sector counts).
+**▶ RESUME HERE (2026-06-17, updated) — byte-path + failure model now CONFIRMED; instrumentation live.**
+The cluster-side attribution pivot is DONE — see **"Byte-path + burst-buffer failure model"** below. Short
+version: Infuse direct-play **proxies** `QNAP →(NFS)→ Jellyfin (pi-k3s) →(HTTP)→ Apple TV` (RX≈TX confirmed)
+and **front-loads a ~12 GB buffer in one ~370 Mbps burst, then coasts** with ~0 reads — so pi-k3s iowait IS
+the right vantage, it just only sees load during the brief refill bursts. A **drop = a buffer-fill burst the
+RAID5 can't sustain** (high RX **and** high iowait *together*). Instrumentation is live (commit `6f4e1af`):
+alert `NodeIOWaitStall` + Grafana dashboard `media-nfs-health`. **Next:** catch a burst that coincides with
+a stall (iowait > 40% + high RX), then pick the fix — soft-mount `timeo`/`retrans` tuning (#2), a QNAP SSD
+read-cache, or a faster array. Disk-failure remediation would be chasing the wrong thing.
 
 **Diagnostics status:**
 - [x] **Fix is live** (2026-06-16, cluster-ops): mount confirmed `soft,nconnect=4,timeo=600,retrans=2` on
@@ -182,15 +178,41 @@ Optional belt-and-suspenders: raw SMART via `smartctl` over SSH / QTS UI (MCP ca
         respond (no ping, conn timeout). Plex was replaced by Jellyfin Dec 2025; Pi 3 decommissioned May
         2026. `clusters/pi-k3s/external-services/plex.yaml` is STALE config (Endpoint+Svc+Ingress+TLS for
         nothing) — candidate for deletion.
-- [ ] **Two survivors only** (need live capture to decide): (a) a **concurrent 2nd Jellyfin stream/
-      transcode** reading the same array, or (b) the **spinning RAID5 is simply marginal** for a 4K-remux
-      read pattern. **Decisive test:** node **network RX on `pi-k3s`** during the stall = total NFS read
-      throughput. HIGH RX → a greedy reader (find it); LOW RX + high iowait → storage-limited (array).
-      No direct Prometheus ingress — query via Grafana (`grafana.lab.mtgibbs.dev`, auth) datasource proxy,
-      or better: **instrument for the NEXT occurrence** (enable node-exporter `mountstats` collector +
-      a panel, or log `nfsiostat` during streaming) — forensic replay keeps hitting "not captured live."
-- [ ] **Then:** tune soft-mount `timeo`/`retrans` up for longer ride-through (do NOT revert to bare `hard`
-      — reintroduces the permanent wedge). Optional: raw SMART via `smartctl`/UI as belt-and-suspenders.
+- [x] **Live capture + instrumentation (2026-06-17)** — deployed alert `NodeIOWaitStall` (>30% iowait 5m →
+      Discord) + Grafana dashboard `media-nfs-health` pairing **iowait × NIC-RX** (commit `6f4e1af`, verified
+      rendering). Captured a live Infuse direct-play session → **byte-path + burst-buffer model confirmed**
+      (subsection below). The earlier "two survivors" question is reframed: a drop is a buffer-fill burst the
+      array can't sustain — **high RX AND high iowait together** (RX alone or iowait alone is ambiguous).
+- [ ] **Catch a stall during a burst** — needs iowait > 40% AND high RX concurrently (the alert + dashboard
+      now make this self-announcing). Then tune soft-mount `timeo`/`retrans` up (do NOT revert to bare
+      `hard`) and/or add a **QNAP SSD read-cache** in front of the RAID5. Optional: raw SMART via `smartctl`.
+
+### Byte-path + burst-buffer failure model — CONFIRMED via live capture (2026-06-17)
+
+Captured a live "Atomic Blonde" Infuse direct-play session (Apple TV) with per-30s iowait + NIC RX/TX
+sampling on pi-k3s (`192.168.1.55:9100`), cross-checked against QNAP `eth2` packet counters:
+
+- **Byte path = proxy through Jellyfin, NOT direct-to-QNAP.** During the opening read, pi-k3s `eth0`
+  **RX ≈ TX ≈ 45 MB/s, locked together** → `QNAP →(NFS, RX)→ pi-k3s/Jellyfin →(HTTP, TX)→ Apple TV`. Equal
+  in/out = pass-through, **no transcode** (true direct play). **So pi-k3s iowait/RX IS the correct vantage
+  point** — the "are the metrics off?" doubt is resolved (they're right; Infuse's behavior is what misleads).
+- **Infuse slurps, then coasts.** It pulled **~12 GB in one ~4.5-min ~370 Mbps burst** (13:56:30–14:01:00),
+  then RX/TX fell to ~0 for 45+ min while playing from its **local buffer**. The QNAP was **idle during the
+  coast** (eth2 TX ~2 pkt/s) — nothing reads the array between bursts.
+- **Failure model (refined):** a **drop = a buffer-fill burst the RAID5 can't sustain.** The ~370 Mbps burst
+  saturates the read path for minutes; if it collides with seek contention, the buffer-fill underruns the
+  playhead → stall. **Intermittent by nature** (bursts are brief + infrequent, ~1–2 per movie) — explains
+  "works fine most nights" and the Kill Bill *double*-drop (20:01 + 20:32 = two refill bursts on a busy array).
+- **Alert on RX × iowait TOGETHER:** high RX + **high iowait (50–90%)** = array can't serve the burst = drop;
+  high RX + **low iowait (~20%)** = healthy burst (this session sustained 45 MB/s at ~20% iowait, no drop —
+  array fine when uncontended). **iowait alone is ambiguous** — Jellyfin's `/config` PVC is local-path, so its
+  SQLite/image/log writes raise iowait with **zero NFS RX** (observed 14:34: ~10% iowait, RX ~0). The
+  dashboard's RX panel disambiguates.
+
+**Implication for the fix:** it's not a failing disk or a rogue job — it's a **3-disk spinning RAID5
+occasionally unable to deliver a ~370 Mbps burst under seek contention.** Durable fixes, in order:
+(1) **QNAP SSD read-cache** in front of the RAID5 (absorbs burst reads); (2) soft-mount `timeo`/`retrans`
+tuning for longer ride-through; (3) reduce Infuse buffer-burst aggressiveness if configurable.
 
 ## Immich (Photos)
 - **URL**: `https://immich.lab.mtgibbs.dev`
