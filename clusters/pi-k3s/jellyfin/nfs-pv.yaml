@@ -13,12 +13,17 @@ spec:
   # soft + timeo/retrans: a brief NAS read-stall ERRORS and recovers instead of a `hard`
   #   mount hanging "still trying" forever — that wedge froze Jellyfin 2026-06-15 and needed
   #   a manual force-unmount. (Read-only media, so `soft` is safe — no write-corruption risk.)
+  # timeo=150 (15s; was 600/60s): a hung NFS read errors after ~15s per attempt instead of ~60s,
+  #   so a QNAP read-stall becomes a short blip rather than a multi-minute freeze. The 2026-06-17
+  #   "Bad Guys 2" freeze pinned pi-k3s iowait at 92% for 8 min on the old 60s timeout (a read
+  #   that never returned). NOTE: retrans=2 still multiplies this (~15s × backoff, twice, before
+  #   EIO) — drop retrans to 1 if an even harder ceiling is wanted.
   # nconnect=4: parallel TCP connections → more throughput headroom + resilience to a
   #   single-connection stall (the actual recurring failure mode).
   mountOptions:
     - nolock
     - soft
-    - timeo=600
+    - timeo=150
     - retrans=2
     - nconnect=4
   nfs:
