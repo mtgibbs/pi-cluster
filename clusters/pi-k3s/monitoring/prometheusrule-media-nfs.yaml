@@ -1,0 +1,31 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: media-nfs-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: media-nfs
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  groups:
+    - name: media-nfs.rules
+      rules:
+        # Catches the Jellyfin streaming-drop signature LIVE so the next occurrence
+        # is attributable instead of reconstructed forensically (see media-services
+        # SKILL.md "OPEN — streaming still drops early"). Proven stall: iowait 90% @
+        # 20:30-20:36 and 50% @ 22:18 EDT 2026-06-16; normal streaming idles ~5%.
+        - alert: NodeIOWaitStall
+          expr: |
+            avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 0.30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High sustained iowait on {{ $labels.instance }} ({{ $value | humanizePercentage }})"
+            description: >-
+              {{ $labels.instance }} has been >30% iowait for 5m. On pi-k3s this is the Jellyfin / NFS
+              streaming-stall fingerprint (spinning-RAID5 seek contention on the QNAP) — streams can drop
+              mid-playback. Open the "Media NFS / Streaming Health" Grafana dashboard and read the two panels
+              TOGETHER: HIGH NIC receive throughput during the spike → a greedy reader is competing (find it);
+              LOW throughput + high iowait → the QNAP array itself is the limit. Threshold 0.30 is tunable
+              (normal streaming ~0.05). NOTE: may also fire during the Sunday backup window — that is expected.
