@@ -358,7 +358,9 @@ absence of drops over coast-prone movies — which costs nothing.
   run `hdparm -C /dev/sd[abc]` to check for a `standby` → `spinning-up` state transition.
 - [ ] **`retrans` tuning:** if 15-second stalls still drop Infuse, lower `retrans` from 2 to 1 for a
   harder EIO ceiling (~15 s flat instead of ~45 s worst case).
-- [ ] **`kiwix-zim-nfs` PV:** also read-only NFS on pi-k3s, currently only `[nolock]`. Could benefit
-  from `soft,timeo,retrans,nconnect` treatment, but kiwix is lower-stakes than live streaming — deferred.
+- [x] **`kiwix-zim-nfs` PV brought to standard** (2026-06-18, commit `b4e9d80`): was bare `[nolock]`;
+  added `soft,timeo=150,retrans=2,nconnect=4` to match jellyfin. Applied **in place** (mountOptions is
+  mutable — Flux patched the PV, `rollout restart` remounted; no PV-delete swap) and verified on the live
+  mount (`vers=4.1,soft,…,timeo=150` on worker-1). Also re-validated the `affe330` mutable-mountOptions path.
 - [ ] **Investigate the 01:38–01:44 UTC iowait spike** (noted in the skill) — a second broad-random-read
   job lands in that window; identify it before it ambushes a stream.
