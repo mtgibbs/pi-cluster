@@ -135,10 +135,11 @@ Evidence captured:
      MCP_Token_ReadOnly"` → `POST http://qnap-mcp.lab.mtgibbs.dev:8442/mcp` (initialize → grab
      `Mcp-Session-Id` header → notifications/initialized → tools/list → tools/call). This is the reliable
      fallback when the in-process MCP client isn't connected.
-2. **Soft-mount over-correction.** `soft,timeo=600,retrans=2` errors a transient blip that `hard` would
-   ride through (and that Infuse's small buffer gives up on even before the mount errors). Real but
-   *secondary* — it's the messenger, not the cause. Do NOT revert to bare `hard` (reintroduces the
-   permanent wedge); if disk health is clean, consider tuning `timeo`/`retrans` for longer ride-through.
+2. **Soft-mount timeout AMPLIFIES a hung read — MITIGATED 2026-06-18.** `soft,timeo=600(=60s),retrans=2`
+   turned a single slow QNAP read into a multi-minute freeze (~60s × retries before EIO). Shortened
+   `timeo`→`150` (15s/attempt; commit `69181d4`, verified live) so a hang errors ~4× faster → blip, not
+   freeze. Do NOT revert to bare `hard` (reintroduces the permanent wedge). `retrans=2` still multiplies
+   before EIO — drop to 1 for a harder ceiling if 15s-class blips still drop Infuse.
 3. **Immich on the same spindles — RULED OUT (2026-06-17).** `immich-server` is **replicas: 0** (scaled
    to zero) and ML is off (`machine-learning.enabled: false`); only `immich-postgresql` (idle) + `valkey`
    run. The server that does all photo I/O isn't running, so Immich **cannot** be driving the evening
@@ -146,15 +147,17 @@ Evidence captured:
    `server.enabled: true` (wants 1 replica) but live is 0 — a manual scale-down not in Git, or Flux not
    reconciling immich. Worth a look, but a separate issue from the stream drops.
 
-**▶ RESUME HERE (2026-06-17, updated) — byte-path + failure model now CONFIRMED; instrumentation live.**
-The cluster-side attribution pivot is DONE — see **"Byte-path + burst-buffer failure model"** below. Short
-version: Infuse direct-play **proxies** `QNAP →(NFS)→ Jellyfin (pi-k3s) →(HTTP)→ Apple TV` (RX≈TX confirmed)
-and **front-loads a ~12 GB buffer in one ~370 Mbps burst, then coasts** with ~0 reads — so pi-k3s iowait IS
-the right vantage, it just only sees load during the brief refill bursts. A **drop = a buffer-fill burst the
-RAID5 can't sustain** (high RX **and** high iowait *together*). Instrumentation is live (commit `6f4e1af`):
-alert `NodeIOWaitStall` + Grafana dashboard `media-nfs-health`. **Next:** catch a burst that coincides with
-a stall (iowait > 40% + high RX), then pick the fix — soft-mount `timeo`/`retrans` tuning (#2), a QNAP SSD
-read-cache, or a faster array. Disk-failure remediation would be chasing the wrong thing.
+**▶ STATUS (2026-06-18) — ROOT CAUSE FOUND: QNAP HDD Standby spin-down. Two-layer fix in place.**
+The drops are **HDD spin-up latency**, not a failing disk and not a "burst the array can't sustain."
+QNAP **Disk Standby was enabled with a 30-min timer** (`Disk StandBy Timeout = 30`, confirmed via SSH).
+Infuse front-loads a huge buffer then **coasts 30+ min with zero reads** (measured: QNAP idle during the
+coast) → the 3 disks **spin down** → the next refill read hits **cold disks** → spin-up (~15–30 s, RAID5
+staggered = longer) **hangs the NFS read** → pi-k3s iowait pins ~90%, RX collapses to 0 → on the old 60 s
+mount timeout the freeze ran to minutes → drop. This fits **every** datapoint (healthy SMART, idle CPU,
+no logged event, 0 TCP retransmits, intermittent, "fine on short movies"). **Fixes (2026-06-18):**
+(1) **Disk Standby DISABLED** on the QNAP — removes the cause; (2) `timeo=600→150` on `jellyfin-video-nfs`
+(commit `69181d4`) — backstop so any future read-stall errors in ~15 s, not 60 s. **Confirm:** watch a few
+long movies that coast >30 min; expect zero drops + no `NodeIOWaitStall`. Full detail in the subsection below.
 
 **Diagnostics status:**
 - [x] **Fix is live** (2026-06-16, cluster-ops): mount confirmed `soft,nconnect=4,timeo=600,retrans=2` on
@@ -180,39 +183,53 @@ read-cache, or a faster array. Disk-failure remediation would be chasing the wro
         nothing) — candidate for deletion.
 - [x] **Live capture + instrumentation (2026-06-17)** — deployed alert `NodeIOWaitStall` (>30% iowait 5m →
       Discord) + Grafana dashboard `media-nfs-health` pairing **iowait × NIC-RX** (commit `6f4e1af`, verified
-      rendering). Captured a live Infuse direct-play session → **byte-path + burst-buffer model confirmed**
-      (subsection below). The earlier "two survivors" question is reframed: a drop is a buffer-fill burst the
-      array can't sustain — **high RX AND high iowait together** (RX alone or iowait alone is ambiguous).
-- [ ] **Catch a stall during a burst** — needs iowait > 40% AND high RX concurrently (the alert + dashboard
-      now make this self-announcing). Then tune soft-mount `timeo`/`retrans` up (do NOT revert to bare
-      `hard`) and/or add a **QNAP SSD read-cache** in front of the RAID5. Optional: raw SMART via `smartctl`.
+      rendering). Captured the real crash in Prometheus → **mid-stream NFS read-hang** (RX collapses + iowait
+      pins; NOT a "burst the array can't sustain").
+- [x] **ROOT CAUSE + fix (2026-06-18):** QNAP **Disk Standby (30-min spin-down) DISABLED** — it spun the
+      disks down during long Infuse coasts; the refill read then hung on spin-up. Backstop: `timeo=600→150`.
+- [ ] **Confirm the fix:** watch a few long movies that coast >30 min — expect zero drops and no
+      `NodeIOWaitStall`. If drops persist, re-open (drop `retrans` to 1; recheck for any other idle-spindown).
 
-### Byte-path + burst-buffer failure model — CONFIRMED via live capture (2026-06-17)
+### Confirmed failure model — HDD-standby spin-up hang (root cause found 2026-06-18)
 
-Captured a live "Atomic Blonde" Infuse direct-play session (Apple TV) with per-30s iowait + NIC RX/TX
-sampling on pi-k3s (`192.168.1.55:9100`), cross-checked against QNAP `eth2` packet counters:
+**Root cause:** QNAP **Disk Standby** was enabled with a **30-minute** spin-down timer
+(`Disk StandBy Timeout = 30`, confirmed via SSH `getcfg`/`uLinux.conf`). The chain:
 
-- **Byte path = proxy through Jellyfin, NOT direct-to-QNAP.** During the opening read, pi-k3s `eth0`
-  **RX ≈ TX ≈ 45 MB/s, locked together** → `QNAP →(NFS, RX)→ pi-k3s/Jellyfin →(HTTP, TX)→ Apple TV`. Equal
-  in/out = pass-through, **no transcode** (true direct play). **So pi-k3s iowait/RX IS the correct vantage
-  point** — the "are the metrics off?" doubt is resolved (they're right; Infuse's behavior is what misleads).
-- **Infuse slurps, then coasts.** It pulled **~12 GB in one ~4.5-min ~370 Mbps burst** (13:56:30–14:01:00),
-  then RX/TX fell to ~0 for 45+ min while playing from its **local buffer**. The QNAP was **idle during the
-  coast** (eth2 TX ~2 pkt/s) — nothing reads the array between bursts.
-- **Failure model (refined):** a **drop = a buffer-fill burst the RAID5 can't sustain.** The ~370 Mbps burst
-  saturates the read path for minutes; if it collides with seek contention, the buffer-fill underruns the
-  playhead → stall. **Intermittent by nature** (bursts are brief + infrequent, ~1–2 per movie) — explains
-  "works fine most nights" and the Kill Bill *double*-drop (20:01 + 20:32 = two refill bursts on a busy array).
-- **Alert on RX × iowait TOGETHER:** high RX + **high iowait (50–90%)** = array can't serve the burst = drop;
-  high RX + **low iowait (~20%)** = healthy burst (this session sustained 45 MB/s at ~20% iowait, no drop —
-  array fine when uncontended). **iowait alone is ambiguous** — Jellyfin's `/config` PVC is local-path, so its
-  SQLite/image/log writes raise iowait with **zero NFS RX** (observed 14:34: ~10% iowait, RX ~0). The
-  dashboard's RX panel disambiguates.
+1. **Byte path:** `QNAP →(NFSv4.1)→ pi-k3s/Jellyfin →(HTTP)→ Apple TV` (no direct Apple TV↔QNAP path —
+   only the 3 K3s nodes hold NFS/2049 connections). During an active read pi-k3s `eth0` RX ≈ TX (pure
+   pass-through, no transcode).
+2. **Infuse front-loads a huge buffer (~12 GB) then COASTS** — between bursts pi-k3s RX, QNAP TX *and*
+   the QNAP disks all go idle (measured: QNAP `eth2` ~2 pkt/s during a 45-min coast).
+3. **Coast > 30 min → the 3 disks spin DOWN** (standby timer fires).
+4. Buffer drains → Infuse issues the next **refill read → it hits cold disks → the array spins them back
+   up** (~15–30 s, RAID5 staggered = longer). The **NFS READ RPC hangs** during spin-up.
+5. Jellyfin's read thread blocks **uninterruptible (D-state)** → pi-k3s **iowait pins ~90% while RX
+   collapses to ~0** (iowait = *waiting*, not throughput) → the stream can't advance → Infuse's buffer
+   drains → drop. The old `soft,timeo=600(60s),retrans=2` mount **amplified** the spin-up wait into a
+   multi-minute freeze before EIO.
 
-**Implication for the fix:** it's not a failing disk or a rogue job — it's a **3-disk spinning RAID5
-occasionally unable to deliver a ~370 Mbps burst under seek contention.** Durable fixes, in order:
-(1) **QNAP SSD read-cache** in front of the RAID5 (absorbs burst reads); (2) soft-mount `timeo`/`retrans`
-tuning for longer ride-through; (3) reduce Infuse buffer-burst aggressiveness if configurable.
+**Clean capture (Prometheus, "Bad Guys 2", 2026-06-17 13:12 EDT):** steady stream ~6% iowait /
+~11.7 MB/s RX, then at 13:12 RX **collapsed** (11.7→0.06) while iowait **pinned ~92% for 8 min**; SD card
+stayed 3%. Jellyfin logged `/health "task was canceled"` (alive but I/O-blocked) then `Playback stopped`.
+
+**Why this matched every earlier dead end:** healthy SMART (spin-up isn't an error), idle QNAP CPU
+(spin-up is mechanical), no logged event, **0 TCP retransmits / 0 NIC errors** (TCP delivered the request —
+the QNAP just couldn't answer until the platters were up), and **intermittent** (only when a coast exceeds
+30 min then needs a refill — so short / fully-buffered movies "work fine").
+
+**Two-layer fix (2026-06-18):**
+- **Removed the cause:** QNAP **Disk Standby DISABLED** (disks never spin down → no spin-up to hang on).
+- **Backstop:** `timeo=600→150` on `jellyfin-video-nfs` (commit `69181d4`, live `vers=4.1,...,timeo=150`) —
+  any future read-stall errors in ~15 s, a blip not an 8-min freeze.
+
+**Status:** very high confidence (config-confirmed mechanism + textbook symptom), **pending post-fix
+confirmation** — watch a few long, coast-prone movies; expect zero drops and no `NodeIOWaitStall`.
+
+**Two instrumentation caveats (learned the hard way 2026-06-17):** (1) **pi-k3s iowait ALONE is noisy** —
+brief 40–54% blips self-recover in ~1 min and are often local `/config` (SD-card) writes, not a stream
+stall. The real signature is a **sustained (5-min+) iowait PIN with RX collapsing** — exactly what the
+deployed `NodeIOWaitStall` (>30% for 5 min) keys on. (2) During **coast** there are no live reads, so a
+movie plays fine with everything idle — "it's playing" ≠ "the read path is healthy."
 
 ## Immich (Photos)
 - **URL**: `https://immich.lab.mtgibbs.dev`
