@@ -32,7 +32,7 @@ The QNAP **Storage Pool** view (and MCP `list_storages` / `get_system_info`) sho
 - Real free space inside the volume is ~9 TB. The 80% pool *alert* is just the thick reservation crossing the threshold — cosmetic.
 
 ### Common NFS Settings
-- **Protocol**: NFSv3 (negotiated by default; NFSv4 explicitly set on any PV caused mount failures for immich — remove `nfsvers=4` if present)
+- **Protocol**: auto-negotiated (no `nfsvers` pinned). Verified 2026-06-18 — `jellyfin-video` mounts as **NFSv4.1** with this QNAP. Do NOT explicitly set `nfsvers=4` — it broke immich mounts (remove if present).
 - **DNS name**: Worker-node PVs use `storage.lab.mtgibbs.dev` (IP change = a Pi-hole DNS flip + pod restart). **Exception — `jellyfin-video-nfs` hardcodes `192.168.1.61`**: it mounts on **pi-k3s**, which uses *public* DNS (not Pi-hole) and resolves the hostname only via the `/etc/hosts` override DaemonSet (a single point of failure). Hardcoding removes that hop. (Trade-off: a future QNAP IP change must edit this PV directly, not just DNS.)
 - **Mount resilience**: a plain `hard` mount turns a brief NAS stall into a *permanent* freeze (see recovery runbook below). The right fix differs by access mode:
   - **Read-only** PVs (`jellyfin-video-nfs`; also `kiwix-zim-nfs`): `soft,timeo=600,retrans=2,nconnect=4` — `soft` makes a stall **error-and-recover** instead of hang (safe — no writes to corrupt). Jellyfin: 2026-06-15.

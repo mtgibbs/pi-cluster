@@ -9,7 +9,8 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-video
-  # NFSv3 (do NOT add nfsvers=4 — it breaks QNAP mounts; see media-services SKILL).
+  # No nfsvers pinned → auto-negotiates (verified live 2026-06-18: lands on NFSv4.1 with this QNAP).
+  #   Do NOT explicitly set nfsvers=4 — that broke immich mounts (see media-services SKILL).
   # soft + timeo/retrans: a brief NAS read-stall ERRORS and recovers instead of a `hard`
   #   mount hanging "still trying" forever — that wedge froze Jellyfin 2026-06-15 and needed
   #   a manual force-unmount. (Read-only media, so `soft` is safe — no write-corruption risk.)

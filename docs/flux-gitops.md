@@ -46,12 +46,24 @@ checking the applied revision matches your commit (`get_flux_status` → `Applie
 > Kustomization applies, `restart_deployment` the workload. Verify the served artifact actually
 > changed (e.g. byte size of `/api/config/custom.css`), not just that the pod is Ready.
 
-## Changing immutable PV/PVC fields (`mountOptions`, `nfs.server`) — suspend through the whole swap
+## Changing PV fields: `mountOptions` (mutable) vs `nfs.server`/`nfs.path` (immutable)
 
-PV `mountOptions`, `nfs.server`, and `nfs.path` are **immutable**. Editing them in git and
-reconciling does **not** update the bound PV — the API rejects it and the Kustomization goes
-NotReady. You must **delete + recreate** the PV *and* its PVC. For an NFS PV that's just a
-pointer (`Retain` policy, data lives on the NAS), recreate is safe — **no data loss**.
+**`mountOptions` is MUTABLE** — verified 2026-06-18 on `jellyfin-video-nfs` (`timeo=600`→`150`).
+Editing it in git and reconciling **patches the bound PV in place** (Flux applies cleanly, the
+Kustomization stays Ready). It only goes **live** once the consumer **remounts**, so the whole
+procedure is just edit → push → bounce the consumer:
+```bash
+kubectl -n <ns> rollout restart deploy/<app>     # e.g. -n jellyfin deploy/jellyfin
+```
+No PV delete, no PVC dance, no deadlock.
+
+**Only `nfs.server` and `nfs.path` (the volume *source*) are IMMUTABLE.** Editing those is rejected
+by the API → the Kustomization goes NotReady → *those* need the full **delete + recreate** of the PV
+*and* its PVC. (The 2026-06-16 "mount-options" deadlock was really an `nfs.server` change: commit #16
+hardcoded the QNAP IP **and** tweaked options in one go, and it was the **server** change that got
+rejected — not the options.) For an NFS PV that's just a pointer (`Retain` policy, data lives on the
+NAS), recreate is safe — **no data loss**. The swap for those source-field changes — keep the
+Kustomization SUSPENDED the whole time:
 
 > **The trap (learned 2026-06-16, the media-PV mount-options swap):** if the Kustomization is
 > *active* during the swap, Flux re-applies the Deployments (`replicas:1`) and re-spawns
