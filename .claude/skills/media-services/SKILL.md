@@ -147,17 +147,19 @@ Evidence captured:
    `server.enabled: true` (wants 1 replica) but live is 0 — a manual scale-down not in Git, or Flux not
    reconciling immich. Worth a look, but a separate issue from the stream drops.
 
-**▶ STATUS (2026-06-18) — ROOT CAUSE FOUND: QNAP HDD Standby spin-down. Two-layer fix in place.**
-The drops are **HDD spin-up latency**, not a failing disk and not a "burst the array can't sustain."
+**▶ STATUS (2026-06-18) — LEADING HYPOTHESIS (not confirmed): QNAP HDD Standby spin-down. Fix applied.**
+Suspected cause is **HDD spin-up latency** (not a failing disk, not a "burst the array can't sustain").
 QNAP **Disk Standby was enabled with a 30-min timer** (`Disk StandBy Timeout = 30`, confirmed via SSH).
-Infuse front-loads a huge buffer then **coasts 30+ min with zero reads** (measured: QNAP idle during the
-coast) → the 3 disks **spin down** → the next refill read hits **cold disks** → spin-up (~15–30 s, RAID5
-staggered = longer) **hangs the NFS read** → pi-k3s iowait pins ~90%, RX collapses to 0 → on the old 60 s
-mount timeout the freeze ran to minutes → drop. This fits **every** datapoint (healthy SMART, idle CPU,
-no logged event, 0 TCP retransmits, intermittent, "fine on short movies"). **Fixes (2026-06-18):**
-(1) **Disk Standby DISABLED** on the QNAP — removes the cause; (2) `timeo=600→150` on `jellyfin-video-nfs`
-(commit `69181d4`) — backstop so any future read-stall errors in ~15 s, not 60 s. **Confirm:** watch a few
-long movies that coast >30 min; expect zero drops + no `NodeIOWaitStall`. Full detail in the subsection below.
+*Theory:* Infuse front-loads a huge buffer then **coasts 30+ min with zero reads** (measured: QNAP idle
+during the coast) → the 3 disks **spin down** → the next refill read hits **cold disks** → spin-up
+(~15–30 s) **hangs the NFS read** → pi-k3s iowait pins ~90%, RX collapses to 0 → the old 60 s mount timeout
+stretched the freeze to minutes → drop. Fits most datapoints (healthy SMART, idle CPU, no logged event,
+0 TCP retransmits, intermittent). **NOT CONFIRMED:** we never caught the disks spinning up during a hang,
+never reproduced it, and the one crash captured in detail (13:12) was preceded by ~22 min of *steady* reads
+— which keep platters spun up, so it doesn't cleanly fit spin-down (see caveat in the subsection).
+**Fix applied 2026-06-18 (low-risk, worth doing regardless):** (1) **Disk Standby DISABLED**; (2) `timeo=600→150`
+on `jellyfin-video-nfs` (`69181d4`) backstop. **Confirm by absence:** a few long coast-prone movies, zero
+drops + no `NodeIOWaitStall` = case closed; a recurrence = theory wrong, reopen.
 
 **Diagnostics status:**
 - [x] **Fix is live** (2026-06-16, cluster-ops): mount confirmed `soft,nconnect=4,timeo=600,retrans=2` on
@@ -185,15 +187,17 @@ long movies that coast >30 min; expect zero drops + no `NodeIOWaitStall`. Full d
       Discord) + Grafana dashboard `media-nfs-health` pairing **iowait × NIC-RX** (commit `6f4e1af`, verified
       rendering). Captured the real crash in Prometheus → **mid-stream NFS read-hang** (RX collapses + iowait
       pins; NOT a "burst the array can't sustain").
-- [x] **ROOT CAUSE + fix (2026-06-18):** QNAP **Disk Standby (30-min spin-down) DISABLED** — it spun the
-      disks down during long Infuse coasts; the refill read then hung on spin-up. Backstop: `timeo=600→150`.
-- [ ] **Confirm the fix:** watch a few long movies that coast >30 min — expect zero drops and no
-      `NodeIOWaitStall`. If drops persist, re-open (drop `retrans` to 1; recheck for any other idle-spindown).
+- [x] **Leading hypothesis + fix applied (2026-06-18):** QNAP **Disk Standby (30-min spin-down) DISABLED**
+      (suspected: spun disks down during long Infuse coasts → refill read hangs on spin-up). Backstop:
+      `timeo=600→150`. Both low-risk — applied even though causation is **unproven**.
+- [ ] **CONFIRM (still open):** a few long coast-prone movies, zero drops + no `NodeIOWaitStall` = confirmed
+      by absence. A recurrence = theory wrong → start from the steady-read inconsistency (subsection caveat).
 
-### Confirmed failure model — HDD-standby spin-up hang (root cause found 2026-06-18)
+### Leading failure model (HYPOTHESIS — not confirmed) — HDD-standby spin-up hang
 
-**Root cause:** QNAP **Disk Standby** was enabled with a **30-minute** spin-down timer
-(`Disk StandBy Timeout = 30`, confirmed via SSH `getcfg`/`uLinux.conf`). The chain:
+**Leading hypothesis (NOT confirmed — see the caveat at the end):** QNAP **Disk Standby** was enabled with
+a **30-minute** spin-down timer (`Disk StandBy Timeout = 30`, confirmed via SSH `getcfg`/`uLinux.conf`).
+The proposed chain — **steps 1–2 measured; steps 3–4 inferred, never observed directly**:
 
 1. **Byte path:** `QNAP →(NFSv4.1)→ pi-k3s/Jellyfin →(HTTP)→ Apple TV` (no direct Apple TV↔QNAP path —
    only the 3 K3s nodes hold NFS/2049 connections). During an active read pi-k3s `eth0` RX ≈ TX (pure
@@ -222,8 +226,18 @@ the QNAP just couldn't answer until the platters were up), and **intermittent** 
 - **Backstop:** `timeo=600→150` on `jellyfin-video-nfs` (commit `69181d4`, live `vers=4.1,...,timeo=150`) —
   any future read-stall errors in ~15 s, a blip not an 8-min freeze.
 
-**Status:** very high confidence (config-confirmed mechanism + textbook symptom), **pending post-fix
-confirmation** — watch a few long, coast-prone movies; expect zero drops and no `NodeIOWaitStall`.
+**What we PROVED vs INFERRED (the honest line):** *Proved* — the symptom (read-hang: RX→0 + iowait pin),
+the rule-outs (not network / CPU / disk-error / local-disk / competing-job), and that Disk Standby **was
+enabled** (30-min timer). *Inferred* — that a coast actually spun the disks down and the refill hung on
+spin-up. We **never** observed the disks in standby during a hang, and **never reproduced** it (the
+"replay from 1h15m" was a transient iowait blip while playing from buffer, not a real repro).
+
+**⚠️ The inconsistency that keeps this a HYPOTHESIS, not a confirmed cause:** the only crash captured in
+detail (13:12) was preceded by **~22 min of *steady* ~11.7 MB/s reads** — continuous reads keep platters
+spun up, so a spin-down shouldn't have been possible right before it. Either that crash was atypical, or
+there's a gap at the 2-min sampling granularity, or spin-down is the wrong explanation for it.
+**Confirmation is still OPEN:** (a) by absence — long coast-prone movies, zero drops + no `NodeIOWaitStall`;
+or (b) the gold standard — catch a `hdparm -C` **standby → spinning-up** transition *during* a live hang.
 
 **Two instrumentation caveats (learned the hard way 2026-06-17):** (1) **pi-k3s iowait ALONE is noisy** —
 brief 40–54% blips self-recover in ~1 min and are often local `/config` (SD-card) writes, not a stream
