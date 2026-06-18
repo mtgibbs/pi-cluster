@@ -13,8 +13,16 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-kiwix
+  # Read-only NFS resilience (matches jellyfin-video-nfs; added 2026-06-18, was bare `nolock`).
+  # `soft` makes a NAS read-stall error-and-recover instead of a `hard` mount hanging "still trying"
+  # forever; `timeo=150` (15s) fails fast so a stall is a blip not a multi-minute freeze; `nconnect=4`
+  # = throughput + resilience to a single-connection stall. Read-only data → `soft` is safe (no writes).
   mountOptions:
     - nolock
+    - soft
+    - timeo=150
+    - retrans=2
+    - nconnect=4
   nfs:
     server: storage.lab.mtgibbs.dev
     path: /cluster/kiwix/zim
