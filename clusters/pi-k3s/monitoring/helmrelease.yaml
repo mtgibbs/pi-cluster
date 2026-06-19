@@ -68,8 +68,12 @@ spec:
     # Prometheus settings
     prometheus:
       prometheusSpec:
-        retention: 7d
-        retentionSize: 2GB
+        # 2026-06-19: bumped from 7d/2GB. The 2GB size cap pruned to ~3 days, too short for
+        # overnight job look-backs. 7GB ≈ ~10 days at the current scrape rate; size-capped well
+        # under the 10Gi PVC (leaves compaction headroom). Growing the PVC needs an Operator
+        # STS+PVC recreate (local-path has no in-place expansion) — see docs/flux-gitops.md if redone.
+        retention: 21d
+        retentionSize: 7GB
         resources:
           requests:
             cpu: 100m
@@ -84,7 +88,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 5Gi
+                  storage: 10Gi  # 2026-06-19: 5Gi→10Gi (on pi-k3s SD card, 21G free). local-path = no in-place resize; STS+PVC recreate required.
         # Scrape the Beelink AI box (outside the cluster) over the LAN.
         # node-exporter :9100 (host + GPU textfile metrics), cAdvisor :8081.
         additionalScrapeConfigs:
