@@ -29,3 +29,27 @@ spec:
               TOGETHER: HIGH NIC receive throughput during the spike → a greedy reader is competing (find it);
               LOW throughput + high iowait → the QNAP array itself is the limit. Threshold 0.30 is tunable
               (normal streaming ~0.05). NOTE: may also fire during the Sunday backup window — that is expected.
+
+        # Faster + signature-specific: a node that WAS reading at stream-rate now has iowait PINNED
+        # and NIC-RX COLLAPSED to ~0 — the exact QNAP NFS read-hang fingerprint (captured 2026-06-19
+        # "Harvey": iowait 4%→94%, RX 8→0 MB/s, self-recovered ~5-18 min later; also Bad Guys 2). Fires
+        # in ~2m (vs NodeIOWaitStall's 5m) so the QNAP can be grabbed red-handed DURING the hang.
+        - alert: MediaNFSReadHang
+          expr: |
+            (avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[2m])) > 0.50)
+            and on (instance)
+            (sum by (instance) (rate(node_network_receive_bytes_total{device=~"eth0|end0"}[2m])) < 1e6)
+            and on (instance)
+            (max_over_time((sum by (instance) (rate(node_network_receive_bytes_total{device=~"eth0|end0"}[2m])))[15m:1m]) > 5e6)
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NFS read-hang on {{ $labels.instance }} — iowait pinned + RX collapsed (was streaming)"
+            description: >-
+              {{ $labels.instance }} was reading at stream-rate, now iowait is pinned >50% while NIC RX has
+              collapsed to ~0 — the QNAP stopped answering NFS reads mid-stream (the recurring Harvey /
+              Bad Guys 2 hang). Usually self-recovers in ~5–18 min. CAPTURE IT NOW: SSH the QNAP and grab
+              `cat /proc/net/rpc/nfsd` (the `th` line = nfsd thread saturation), per-disk await from
+              `/proc/diskstats`, `free`, `dmesg | tail`. On the "QNAP Storage Health" dashboard: disk await
+              HIGH = disks stuck; FLAT = nfsd stalled (disks idle). That split decides the root cause.
