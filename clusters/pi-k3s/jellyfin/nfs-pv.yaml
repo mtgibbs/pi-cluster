@@ -19,14 +19,18 @@ spec:
   #   "Bad Guys 2" freeze pinned pi-k3s iowait at 92% for 8 min on the old 60s timeout (a read
   #   that never returned). NOTE: retrans=2 still multiplies this (~15s × backoff, twice, before
   #   EIO) — drop retrans to 1 if an even harder ceiling is wanted.
-  # nconnect=4: parallel TCP connections → more throughput headroom + resilience to a
-  #   single-connection stall (the actual recurring failure mode).
+  # nconnect=2 (was 4; lowered 2026-06-20 per deep-research wf_630caced). For a SINGLE sequential
+  #   stream (Jellyfin direct-play, single-threaded low-queue-depth read), parallel TCP connections
+  #   give ~no throughput benefit and can HURT: on a marginal NFS server a subset of nconnect
+  #   connections can get stuck/stale and fail to recover (NFS-Ganesha #1374; Azure NFS guidance) —
+  #   a near-exact analog of the recurring mid-stream read-hang. This is a low-cost experiment;
+  #   if 2 is still inconclusive, drop to 1 (remove the option). (Earlier "resilience" claim was wrong.)
   mountOptions:
     - nolock
     - soft
     - timeo=150
     - retrans=2
-    - nconnect=4
+    - nconnect=2
   nfs:
     # Hardcoded IP (not storage.lab.mtgibbs.dev) ON PURPOSE: this PV mounts on pi-k3s, which
     # uses PUBLIC DNS (not Pi-hole) and only resolves the hostname via the /etc/hosts override
