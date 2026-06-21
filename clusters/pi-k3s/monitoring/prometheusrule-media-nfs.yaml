@@ -10,46 +10,47 @@ spec:
   groups:
     - name: media-nfs.rules
       rules:
-        # Catches the Jellyfin streaming-drop signature LIVE so the next occurrence
-        # is attributable instead of reconstructed forensically (see media-services
-        # SKILL.md "OPEN — streaming still drops early"). Proven stall: iowait 90% @
-        # 20:30-20:36 and 50% @ 22:18 EDT 2026-06-16; normal streaming idles ~5%.
-        - alert: NodeIOWaitStall
-          expr: |
-            avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 0.30
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "High sustained iowait on {{ $labels.instance }} ({{ $value | humanizePercentage }})"
-            description: >-
-              {{ $labels.instance }} has been >30% iowait for 5m. On pi-k3s this is the Jellyfin / NFS
-              streaming-stall fingerprint (spinning-RAID5 seek contention on the QNAP) — streams can drop
-              mid-playback. Open the "Media NFS / Streaming Health" Grafana dashboard and read the two panels
-              TOGETHER: HIGH NIC receive throughput during the spike → a greedy reader is competing (find it);
-              LOW throughput + high iowait → the QNAP array itself is the limit. Threshold 0.30 is tunable
-              (normal streaming ~0.05). NOTE: may also fire during the Sunday backup window — that is expected.
-
-        # Faster + signature-specific: a node that WAS reading at stream-rate now has iowait PINNED
-        # and NIC-RX COLLAPSED to ~0 — the exact QNAP NFS read-hang fingerprint (captured 2026-06-19
-        # "Harvey": iowait 4%→94%, RX 8→0 MB/s, self-recovered ~5-18 min later; also Bad Guys 2). Fires
-        # in ~2m (vs NodeIOWaitStall's 5m) so the QNAP can be grabbed red-handed DURING the hang.
+        # PRIMARY DETECTOR — gates on node_procs_blocked (D-state count), the AUTHORITATIVE
+        # real-I/O-hang signal. Discovered 2026-06-20: iowait% alone over-reads on a near-idle
+        # node (per-CPU accounting "sticks" high after a stream stops), but procs_blocked is clean —
+        # 30h history showed it sits at 0 baseline and spikes to 11–25 during EVERY real hang
+        # (06-19 18:46/21:42/21:52, 06-20 21:44). Requiring procs_blocked>=4 AND high iowait
+        # eliminates the idle-artifact false positive while keeping every real event. (Also corrected
+        # a prior over-reaction: the hangs ARE real I/O stalls — procs_blocked proves it — NOT an
+        # artifact; a single mistimed `ps` at the recovery edge misled us.)
         - alert: MediaNFSReadHang
           expr: |
-            (avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[2m])) > 0.50)
+            (max_over_time(node_procs_blocked[2m]) >= 4)
             and on (instance)
-            (sum by (instance) (rate(node_network_receive_bytes_total{device=~"eth0|end0"}[2m])) < 1e6)
-            and on (instance)
-            (max_over_time((sum by (instance) (rate(node_network_receive_bytes_total{device=~"eth0|end0"}[2m])))[15m:1m]) > 5e6)
-          for: 2m
+            (avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[2m])) > 0.40)
+          for: 1m
           labels:
             severity: warning
           annotations:
-            summary: "NFS read-hang on {{ $labels.instance }} — iowait pinned + RX collapsed (was streaming)"
+            summary: "Real I/O hang on {{ $labels.instance }} — processes stuck in D-state + iowait pinned"
             description: >-
-              {{ $labels.instance }} was reading at stream-rate, now iowait is pinned >50% while NIC RX has
-              collapsed to ~0 — the QNAP stopped answering NFS reads mid-stream (the recurring Harvey /
-              Bad Guys 2 hang). Usually self-recovers in ~5–18 min. CAPTURE IT NOW: SSH the QNAP and grab
-              `cat /proc/net/rpc/nfsd` (the `th` line = nfsd thread saturation), per-disk await from
-              `/proc/diskstats`, `free`, `dmesg | tail`. On the "QNAP Storage Health" dashboard: disk await
-              HIGH = disks stuck; FLAT = nfsd stalled (disks idle). That split decides the root cause.
+              {{ $labels.instance }} has processes stuck in uninterruptible D-state (procs_blocked>=4) AND
+              iowait pinned — a GENUINE I/O hang (procs_blocked is the authoritative signal; iowait alone is
+              noisy). This is the recurring Jellyfin streaming stall (Harvey, Bad Guys 2). Self-recovers in
+              ~2–18 min. CAPTURE IT NOW, FAST (it self-clears) — the OPEN question is WHAT the blocked procs
+              wait on (QNAP media-NFS vs other). On pi-k3s: `ps -eo state,pid,comm,wchan | awk '$1~/^D/'`
+              (what's stuck + its wait-channel), `cat /proc/PID/stack` for a blocked pid, `nfsstat -m`,
+              `grep -A40 cluster/media/video /proc/self/mountstats` (xprt backlog). On the QNAP (if SSH
+              reachable): `iostat -x 2`, `cat /proc/net/rpc/nfsd`, `dmesg -T | tail`, `free`. The QNAP
+              recorder cron (#1) logs this every minute so a mistimed manual probe no longer loses the event.
+
+        # Legacy / coarse: iowait-only. KEPT as a wide net but DEPRECATED as a root-cause signal —
+        # iowait% over-reads on an idle node (2026-06-20 finding). Trust MediaNFSReadHang (procs_blocked).
+        - alert: NodeIOWaitSustained
+          expr: |
+            (avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 0.30)
+            and on (instance) (max_over_time(node_procs_blocked[5m]) >= 1)
+          for: 5m
+          labels:
+            severity: info
+          annotations:
+            summary: "Sustained iowait on {{ $labels.instance }} (corroborated by procs_blocked)"
+            description: >-
+              {{ $labels.instance }} >30% iowait for 5m WITH at least one blocked process (so not a pure
+              idle-node artifact). Coarser/slower than MediaNFSReadHang; may also fire during the Sunday
+              backup window (expected). For streaming stalls, MediaNFSReadHang is the precise signal.
