@@ -76,17 +76,22 @@ kubectl exec -n jellyfin deploy/jellyfin -- sh -c \
   'dd if="$(find /media/Movies -name "*.mkv" | head -1)" of=/dev/null bs=1M count=64'
 ```
 
-### RESOLVED (2026-06-22) — streaming drops were the NFS `nconnect` stuck-connection; the SD card is a SEPARATE chronic issue
+### PARTIAL (2026-06-22) — streaming drops REDUCED by `nconnect=1` but ROOT CAUSE STILL OPEN; SD card is a SEPARATE chronic issue
 
-**TWO independent problems were tangled together for days. Both now understood:**
+**TWO problems were tangled together. One is mitigated-not-solved, one is understood:**
 
-**1. THE STREAMING DROPS → NFS `nconnect` multi-connection stuck-secondary-socket. FIXED by `nconnect=1`.**
-On `nconnect=4`/`2`, one of the parallel NFS TCP connections intermittently wedged (sent-but-unanswered
-RPCs accumulating on connection #2 — the NFS-Ganesha #1374 pattern; seen in live `mountstats xprt` on
-6/21), starving the stream. Lowering to a **single connection** removed the failure mode (commit `18de740`,
-`nconnect=4→2→1`). **PROOF (2026-06-22):** "Harvey" (4K remux, ~70 Mbps direct-play) **sailed past its exact
-historical crash point (1:16:54)** on `nconnect=1` and kept streaming — the run that reliably died on
-`nconnect=4`. Strong (n=1; worth a couple more 4K runs to call bulletproof).
+**1. THE STREAMING DROPS → REDUCED by `nconnect=1`, but NOT fixed. ROOT CAUSE STILL OPEN.**
+Theory: on `nconnect=4`/`2`, a parallel NFS TCP connection intermittently wedged (sent-but-unanswered RPCs
+on connection #2 — NFS-Ganesha #1374; seen in live `mountstats xprt` 6/21), starving the stream. Lowering
+to a single connection (commit `18de740`, `nconnect=4→2→1`) **clearly REDUCED the frequency** — Harvey (4K
+remux) sailed past its old 1:16:54 crash point, and many hours/movies played clean.
+⚠️ **But it did NOT eliminate it:** "Hundreds of Beavers" **crashed at 1:32:21 on `nconnect=1`** (2026-06-22,
+same alive-but-I/O-blocked signature: `/health` "task was canceled", playback stopped, pod restartCount 0→1).
+So `nconnect=1` is an **improvement, not a cure** — keep it, but the residual crash mechanism is **unidentified.**
+**CRITICAL recorder caveat:** the recorder triggered on `procs_blocked>=4`, which catches the many-process SD
+stalls but **MISSES the few-process NFS read stall that actually crashes streaming** — so "classifier 0 NFS"
+was a THRESHOLD ARTIFACT, not evidence. Recorder **v2 re-tuned** (`procs_blocked>=2` OR a jellyfin/ffmpeg/dotnet
+thread in D-state) to capture the NEXT streaming crash with stacks. **Until then the streaming root cause is OPEN.**
 
 **2. THE pi-k3s SD CARD → a real, chronic, SEPARATE issue that does NOT kill the stream.** A client-side
 recorder caught **7 hangs** with kernel stacks (2026-06-22): every one was the **local SD card**
@@ -110,8 +115,13 @@ EEPROM firmware update → cap SD speed / move to NVMe. All 3 Pi 5s are on the s
 - **The QNAP was healthy the entire time** — every QNAP theory (failing disk, RAID5, thin-provisioning,
   SSD-cache, HDD-standby) was a dead end; deep-research wf_630caced verdict TUNE-not-replace held up.
 
-**Detection:** `MediaNFSReadHang` (procs_blocked>=4 + iowait) + `NodeIOWaitSustained` alerts live (commit
-`29ab46b`); `media-nfs-health` Grafana dashboard (`6f4e1af`). Full arc: `docs/recaps/2026-06-22-*`.
+**Detection / NEXT STEP:** persistent recorder **v2** runs on pi-k3s (`/usr/local/bin/nfs-hang-recorder.sh`,
+systemd `nfs-hang-recorder.service`, logs `/var/log/nfs-hang-recorder.log`) — re-tuned 2026-06-22 to trigger
+on `procs_blocked>=2` OR a jellyfin/ffmpeg/dotnet D-state thread, so it catches the **few-process NFS read
+stall** the v1 `>=4` threshold missed. **The open task: capture the next streaming crash (Beavers-type, ~1:30
+into a movie) with stacks → identify the residual root cause** (NFS read stall vs SD-stall-hitting-the-reader
+vs Infuse/Jellyfin). Also live: `MediaNFSReadHang` + `NodeIOWaitSustained` alerts (`29ab46b`), `media-nfs-health`
+dashboard (`6f4e1af`). Full arc: `docs/recaps/2026-06-22-*` (note: that recap also says "RESOLVED" — superseded by this).
 
 <details><summary>Investigation history (superseded theories — kept for the record)</summary>
 
