@@ -19,18 +19,19 @@ spec:
   #   "Bad Guys 2" freeze pinned pi-k3s iowait at 92% for 8 min on the old 60s timeout (a read
   #   that never returned). NOTE: retrans=2 still multiplies this (~15s × backoff, twice, before
   #   EIO) — drop retrans to 1 if an even harder ceiling is wanted.
-  # nconnect=2 (was 4; lowered 2026-06-20 per deep-research wf_630caced). For a SINGLE sequential
-  #   stream (Jellyfin direct-play, single-threaded low-queue-depth read), parallel TCP connections
-  #   give ~no throughput benefit and can HURT: on a marginal NFS server a subset of nconnect
-  #   connections can get stuck/stale and fail to recover (NFS-Ganesha #1374; Azure NFS guidance) —
-  #   a near-exact analog of the recurring mid-stream read-hang. This is a low-cost experiment;
-  #   if 2 is still inconclusive, drop to 1 (remove the option). (Earlier "resilience" claim was wrong.)
+  # nconnect=1 (was 2, was 4). EXPERIMENT 2026-06-21: two live hang captures (8:25 & 9:40 PM,
+  #   Shawshank) BOTH showed the IDENTICAL fingerprint — of the nconnect=2 pair, connection #2 had
+  #   exactly 2 sent-but-unanswered NFS requests while connection #1 was clean and FRESH reads ran at
+  #   90-107 MB/s. I.e. the stream's reads wedge on one stuck secondary connection while the array is
+  #   fine (NFS-Ganesha #1374 / Azure single-stream guidance). nconnect=1 removes the secondary
+  #   connection entirely → no subset can get stuck. If hangs STOP, that was the cause. If they
+  #   CONTINUE, it's server/disk-side (branch eliminated). Revert to 2/4 if 1 underperforms.
   mountOptions:
     - nolock
     - soft
     - timeo=150
     - retrans=2
-    - nconnect=2
+    - nconnect=1
   nfs:
     # Hardcoded IP (not storage.lab.mtgibbs.dev) ON PURPOSE: this PV mounts on pi-k3s, which
     # uses PUBLIC DNS (not Pi-hole) and only resolves the hostname via the /etc/hosts override
