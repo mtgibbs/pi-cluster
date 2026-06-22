@@ -76,11 +76,48 @@ kubectl exec -n jellyfin deploy/jellyfin -- sh -c \
   'dd if="$(find /media/Movies -name "*.mkv" | head -1)" of=/dev/null bs=1M count=64'
 ```
 
-### OPEN — streaming still drops early AFTER the 2026-06-15 soft-mount fix (tracking)
+### RESOLVED (2026-06-22) — streaming drops were the NFS `nconnect` stuck-connection; the SD card is a SEPARATE chronic issue
 
-**The soft mount stopped the *permanent freeze* but did NOT stop the *stream drop*.** Post-fix, a NAS
-read stall no longer wedges Jellyfin forever — instead the stream dies early and the pod self-heals.
-This is a **new, still-open failure mode**; the soft mount changed the *symptom*, not the root cause.
+**TWO independent problems were tangled together for days. Both now understood:**
+
+**1. THE STREAMING DROPS → NFS `nconnect` multi-connection stuck-secondary-socket. FIXED by `nconnect=1`.**
+On `nconnect=4`/`2`, one of the parallel NFS TCP connections intermittently wedged (sent-but-unanswered
+RPCs accumulating on connection #2 — the NFS-Ganesha #1374 pattern; seen in live `mountstats xprt` on
+6/21), starving the stream. Lowering to a **single connection** removed the failure mode (commit `18de740`,
+`nconnect=4→2→1`). **PROOF (2026-06-22):** "Harvey" (4K remux, ~70 Mbps direct-play) **sailed past its exact
+historical crash point (1:16:54)** on `nconnect=1` and kept streaming — the run that reliably died on
+`nconnect=4`. Strong (n=1; worth a couple more 4K runs to call bulletproof).
+
+**2. THE pi-k3s SD CARD → a real, chronic, SEPARATE issue that does NOT kill the stream.** A client-side
+recorder caught **7 hangs** with kernel stacks (2026-06-22): every one was the **local SD card**
+(`jbd2/mmcblk0p2` journal + `mmc_blk_rw_wait` + `mmc_sd_detect`/`mmc_rescan` re-detecting the card) — the
+card intermittently drops off the MMC bus and stalls all local writes (`procs_blocked` spikes 5–9, ext4
+journal blocks, pihole/k3s pile up). **Classifier across all events: jbd2/mmc = 37, NFS/rpc = 0.** Crucially,
+**Harvey survived TWO of these stalls mid-stream** (16:21 @ rx 8.94, 16:36 @ rx 7.08 MB/s) — so the SD stalls
+are NOT the stream-killer; they were a confounding signal the recorder surfaced. **Likely cause:** healthy
+SanDisk high-endurance card (≤6 mo) run at **SDR104/200 MHz** on a Pi 5 with **stale EEPROM (Jun 2025)** —
+marginal high-speed signaling, NOT wear (no logged mmc errors; command hangs ~9 s then silently recovers).
+**Fix (for CLUSTER HEALTH, not streaming — the SD card backs the k3s datastore + pihole + `/config`):**
+EEPROM firmware update → cap SD speed / move to NVMe. All 3 Pi 5s are on the same stale bootloader + SD boot.
+
+**KEY LESSONS (hard-won):**
+- **`iowait%` and `load` are MISLEADING aggregates on a near-idle Pi** — they inflate from transient D-state
+  churn. `node_procs_blocked` (D-state count: 0 baseline → 5–25 during a real hang) + **kernel stacks** are
+  ground truth. Months of chasing "iowait pinned = QNAP stall" was partly chasing an inflated metric.
+- **Self-clearing ~1–18 min events defeat manual point-in-time SSH** — every hand-timed probe mistimed the
+  peak (caught the recovery edge, looked healthy). A **continuous on-node recorder** (`/tmp/hang-recorder.sh`,
+  8 s sampling, dumps `procs_blocked`+xprt+D-state stacks on `>=4`) is what finally cracked it.
+- **The QNAP was healthy the entire time** — every QNAP theory (failing disk, RAID5, thin-provisioning,
+  SSD-cache, HDD-standby) was a dead end; deep-research wf_630caced verdict TUNE-not-replace held up.
+
+**Detection:** `MediaNFSReadHang` (procs_blocked>=4 + iowait) + `NodeIOWaitSustained` alerts live (commit
+`29ab46b`); `media-nfs-health` Grafana dashboard (`6f4e1af`). Full arc: `docs/recaps/2026-06-22-*`.
+
+<details><summary>Investigation history (superseded theories — kept for the record)</summary>
+
+**The soft mount (2026-06-15) stopped the *permanent freeze* but not the *stream drop*** — which kicked off
+the multi-day hunt below. The QNAP rule-outs and instrumentation here are still accurate; the *conclusions*
+(HDD-standby, "QNAP-side stall") were superseded by the `nconnect` + SD-card findings above.
 
 **Incident 2026-06-16 (~20:01 & ~20:32 EDT / `00:32Z` 6/17):** "Kill Bill: Vol. 2" via **Infuse-Direct**
 (direct play, Apple TV) dropped **early and repeatedly** — playback stopped at `108507 ms` (**1:48**) then
@@ -244,6 +281,13 @@ brief 40–54% blips self-recover in ~1 min and are often local `/config` (SD-ca
 stall. The real signature is a **sustained (5-min+) iowait PIN with RX collapsing** — exactly what the
 deployed `NodeIOWaitStall` (>30% for 5 min) keys on. (2) During **coast** there are no live reads, so a
 movie plays fine with everything idle — "it's playing" ≠ "the read path is healthy."
+
+> **POSTSCRIPT (2026-06-22):** the HDD-standby hypothesis above was SUPERSEDED. The continuous recorder
+> caught the hangs with kernel stacks — they're the **local SD card** (`jbd2`/`mmc`), not QNAP spin-down,
+> and they do **not** kill the stream (Harvey survived two mid-stream). The streaming drops were the NFS
+> `nconnect` stuck-connection, fixed by `nconnect=1`. See the **RESOLVED** block at the top of this section.
+
+</details>
 
 ## Immich (Photos)
 - **URL**: `https://immich.lab.mtgibbs.dev`
