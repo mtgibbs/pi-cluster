@@ -114,6 +114,35 @@ cases:
         function from `wrangler`, update your import to use `@cloudflare/workers-utils`.
       - Remove experimental autoconfig exports.
 
+  - id: wrangler-lockfile-removal
+    file: edge/email-worker/package-lock.json
+    branch: renovate/wrangler-4.x-lockfile
+    verdict: flag
+    why: LOCKFILE bump (mechanical, transitive) but the changelog REMOVES public exports — the tuned rule flags a removal REGARDLESS of bump type or unstable/experimental prefix. (The real PR #21 the live model fast-passed pre-tuning; encodes the desired behavior.)
+    diff: |
+      @@ -1240,9 +1240,9 @@
+           "node_modules/wrangler": {
+      -      "version": "4.94.0",
+      -      "resolved": "https://registry.npmjs.org/wrangler/-/wrangler-4.94.0.tgz",
+      +      "version": "4.103.0",
+      +      "resolved": "https://registry.npmjs.org/wrangler/-/wrangler-4.103.0.tgz",
+      @@ -1310,8 +1310,8 @@
+           "node_modules/@cloudflare/workers-shared": {
+      -      "version": "0.18.0",
+      +      "version": "0.20.1",
+      (… ~600 more lines of mechanical transitive version churn …)
+    changelog: |
+      > This PR body was truncated due to platform limits.
+      ### Release Notes  (wrangler 4.94.0 -> 4.103.0)
+      #### Minor Changes
+      - The `unstable_getWorkerNameFromProject` export has been REMOVED from the `wrangler` package.
+        If you were importing this function from `wrangler`, update your import to use
+        `@cloudflare/workers-utils` instead.
+      - The experimental autoconfig exports (`experimental_getDetailsForAutoConfig`,
+        `experimental_runAutoConfig`, `experimental_AutoConfigFramework`) have been REMOVED.
+      #### Patch Changes
+      - Prevent `wrangler dev` crash when source-mapping a truncated error chunk.
+
   - id: postgres-major-migration
     file: clusters/pi-k3s/n8n/postgresql.yaml
     branch: renovate/postgres-16.x
