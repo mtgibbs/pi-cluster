@@ -116,6 +116,9 @@ class DependencyUpdateValidator:
         if not changes:
             return [], False, None
         changelog = meta.get("body") or ""
+        # Advisory dependency reviews are cheaper + very stable (eval is unanimous), so cap at 3
+        # votes — faster than the MCP safety gates' 5, scoped here so those stay at the receiver's reps.
+        reps = min(reps, 3)
         runs = []
         for r in range(reps):
             rdir = Path(raw_dir) / f"rep{r}" if reps > 1 else Path(raw_dir)

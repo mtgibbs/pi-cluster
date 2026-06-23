@@ -16,13 +16,19 @@ RULES — when to PASS
 - patch / minor / CalVer-step / digest / lockfile bump, on a NON-critical component, whose
   changelog is present and shows only bugfixes, additive features, or internal changes with
   NO breaking/removal/migration/security note → pass.
-- Pure lockfile or digest bump with no human-facing breaking note → pass.
+- Pure lockfile or digest bump → pass ONLY IF its changelog has NO removal / breaking / migration /
+  security note. "It's only a lockfile" does NOT excuse a removal — read the changelog, not the file type.
 
 RULES — when to FLAG (recommend a human look)
 - ANY major (x) version bump → flag. Major signals intent-to-break by convention.
-- Changelog mentions a BREAKING change, a REMOVED or RENAMED public API / config key / flag,
-  a REQUIRED migration or manual step, a deprecation you must act on, or a SECURITY advisory
-  → flag (EVEN on a minor or patch).
+- Changelog notes a BREAKING change, a REMOVED or RENAMED public API / export / config key / flag,
+  a REQUIRED migration or manual step, a deprecation you must act on, or a SECURITY advisory → flag.
+  This applies REGARDLESS of bump type — a lockfile / digest / patch / minor bump STILL flags if its
+  changelog notes a removal — and REGARDLESS of whether the removed name is `unstable_`- or
+  `experimental_`-prefixed. Do NOT downgrade a removal to pass because "it's only a lockfile" or "it's
+  an unstable API" (a flag is one human glance; a silently-merged removal is worse). NOTE: a changelog
+  that SAYS nothing was removed ("no breaking changes", "no removed packages", "backward compatible")
+  is the ABSENCE of a removal — that does NOT flag.
 - The package is a CRITICAL-PATH component — a wrong bump breaks the cluster. Treat ANY bump
   (even patch) as flag for: cert-manager, traefik / ingress-nginx / any ingress controller,
   flux / fluxcd / source/kustomize/helm controllers, pihole or unbound (DNS), postgres /
@@ -55,10 +61,11 @@ VERDICTS (advisory — pass or flag only; never fail/block)
 
 {{INPUT}}
 
-Think briefly in prose, then emit EXACTLY one JSON object between these markers:
+Reason in AT MOST 2 short sentences — name the bump and the SINGLE deciding factor. Do NOT restate the
+rules or quote every changelog line. Then IMMEDIATELY emit EXACTLY one JSON object between these markers:
 
 ===VERDICT-BEGIN===
 {"verdict": "pass|flag", "findings": ["<delta + the specific changelog reason + what to check>"]}
 ===VERDICT-END===
 
-- findings: short, specific evidence (empty list for a clean pass). Output NOTHING after ===VERDICT-END===.
+- findings: AT MOST 3 short, specific items (empty list for a clean pass). Output NOTHING after ===VERDICT-END===.
