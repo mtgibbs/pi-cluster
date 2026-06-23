@@ -22,8 +22,6 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  set -e
-
                   # Install PostgreSQL client
                   apk add --no-cache postgresql16-client
 

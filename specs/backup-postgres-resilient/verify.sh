@@ -36,6 +36,8 @@ chk("logs SKIP for unreachable target (A3)", re.search(r"SKIP", src, re.I) is no
 chk("pg_dump carries connect_timeout=10 (A7)", "connect_timeout=10" in src)
 chk("no bash indirect expansion ${!...} — BusyBox ash (Norms §7)", "${!" not in src)
 chk("no bash here-string <<< — BusyBox ash (Norms §7)", "<<<" not in src)
+chk("no script-wide 'set -e' — explicit per-target handling required (§4, A4)",
+    re.search(r"(?m)^\s*set -e", src) is None)
 chk("explicit non-zero exit on reachable failure (A4)",
     re.search(r"exit\s+1|exit\s+\$|exit\s+\"\$", src) is not None)
 chk("DB_PASSWORD env retained (A6)", "DB_PASSWORD" in src)
