@@ -95,7 +95,12 @@ class DependencyUpdateValidator:
     name = "dependency-update"
     concern = "Is this Renovate dependency bump safe to merge, or does it need human review (major / breaking / migration / security / critical-path)?"
     repos = {"mtgibbs/pi-cluster"}
-    globs = ["clusters/pi-k3s/*.yaml", "clusters/pi-k3s/*.yml", "*Dockerfile*", "*package.json", "*.lock", "renovate.json"]
+    # Broad on purpose: the renovate/* branch gate in review() is the real filter, so these
+    # only need to not MISS a Renovate target. `clusters/pi-k3s/*` (fnmatch `*` spans `/`) catches
+    # every manifest bump; the rest cover npm (incl. *-lock.json — the gap that skipped PR #21),
+    # pnpm, Dockerfiles, go, and GitHub-Actions workflow bumps.
+    globs = ["clusters/pi-k3s/*", "*Dockerfile*", "*package.json", "*package-lock.json",
+             "*pnpm-lock.yaml", "*.lock", "go.mod", "go.sum", "renovate.json", ".github/workflows/*"]
 
     def applies_files(self, files):
         import fnmatch
