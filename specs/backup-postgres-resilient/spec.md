@@ -169,3 +169,18 @@ complete corrected file; the orchestrator writes it and runs `verify.sh`. Model 
 - **OQ1 (resolved):** Is Immich parked deliberately? **Yes** — parked during the streaming investigation;
   keep it parked. Hence runtime-skip, not block removal.
 - **OQ2 (resolved):** Does `pg_isready` ship in `postgresql16-client`? **Yes** (same package as `pg_dump`).
+
+## 14. Tuning log
+
+- **Round 1 (Q8):** used `${!password_env}` indirect expansion — bash-only, fails in BusyBox ash. Gate
+  hardened (`${!` ban) + §6/§7 written back (pass the password value as an arg).
+- **Round 2 (Q8):** added a broken skip-counter `grep -q "SKIPPED" <<< $(echo "---")` — a `<<<` here-string
+  (ash-incompat) wrapping logic that never matches. Gate hardened (`<<<` ban) + §7/§9 written back (count
+  INSIDE the function; the caller is plain statements).
+- **Round 3 (Q8):** passed the 16-check gate; merged as PR #22. **Post-merge review caught a latent gap the
+  gate missed:** the model edited *around* the leading `set -e` (its hunks started at line 45) and left it
+  in. Harmless in the current config (immich is skipped → `return 0`; n8n is the last/only reachable target,
+  so nothing is short-circuited), but it violates A4 ("attempt remaining targets") if immich is ever
+  un-parked AND its dump fails. **Follow-up:** removed `set -e`; added a "no script-wide `set -e`" assertion
+  to `verify.sh`. **Lesson:** a passing static gate can still be confidently wrong — a human eyeball of the
+  full diff (not just the changed hunks) remains load-bearing for the autonomous loop.
