@@ -24,6 +24,7 @@ from fail_closed import FailClosedValidator  # noqa: E402
 from read_only_integrity import ReadOnlyIntegrityValidator  # noqa: E402
 from no_false_green import NoFalseGreenValidator  # noqa: E402
 from output_bounds import OutputBoundsValidator  # noqa: E402
+from dependency_update import DependencyUpdateValidator  # noqa: E402
 
 
 def _matches(files, globs):
@@ -66,6 +67,7 @@ REGISTRY = [
     ReadOnlyIntegrityValidator(),
     NoFalseGreenValidator(),
     OutputBoundsValidator(),
+    DependencyUpdateValidator(),
 ]
 
 

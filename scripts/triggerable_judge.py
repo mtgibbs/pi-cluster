@@ -302,6 +302,7 @@ class GitHubForge(Forge):
             raise SystemExit(f"GitHubForge needs a token or ${token_env}")
         self.head_sha = head_sha  # pin file reads to the PR head; else default branch ref
         self._files_cache = None  # PR file list — fetched once, shared across validators
+        self._pr_cache = None  # PR metadata (title/body/branch/...) — fetched once
 
     def _req(self, method, path, body=None):
         req = urllib.request.Request(
@@ -335,6 +336,22 @@ class GitHubForge(Forge):
 
     def changed_patches(self):
         return [(f["filename"], f.get("patch")) for f in self._files_api()]
+
+    def pr_meta(self):
+        # PR title/body/author/branch/labels — fetched once, cached. The body carries
+        # Renovate's embedded changelog (its '### Release Notes' block). Used by the
+        # dependency-update validator to feed the changelog to the judge.
+        if self._pr_cache is not None:
+            return self._pr_cache
+        d = self._req("GET", f"/repos/{self.repo}/pulls/{self.pr}") or {}
+        self._pr_cache = {
+            "title": d.get("title") or "",
+            "body": d.get("body") or "",
+            "user": (d.get("user") or {}).get("login") or "",
+            "head_ref": (d.get("head") or {}).get("ref") or "",
+            "labels": [lbl.get("name") for lbl in (d.get("labels") or [])],
+        }
+        return self._pr_cache
 
     def get_file(self, path, ref="__head__"):
         import base64
@@ -438,6 +455,13 @@ class LocalGitForge(Forge):
                     out.append((f, r.stdout))
                     break
         return out
+
+    def pr_meta(self):
+        # Local dev: no PR API. Branch from git; body empty (the eval harness feeds the
+        # changelog from the case directly, so review()-via-forge is dev-only here).
+        br = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
+        return {"title": "", "body": "", "user": "", "head_ref": br, "labels": []}
 
     def post_review(self, body, block):
         print(body)
