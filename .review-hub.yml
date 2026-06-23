@@ -3,3 +3,4 @@
 # GitHub App is installed org-wide, but only reviews repos that ship this file.
 validators:
   - triggerable-judge   # judges changed CronJobs claiming homelab.mcp/triggerable
+  - dependency-update   # advisory risk read on Renovate dependency-bump PRs (major/breaking/critical-path)

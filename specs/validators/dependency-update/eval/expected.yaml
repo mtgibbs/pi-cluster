@@ -1,0 +1,184 @@
+# dependency-update validator — evaluation set (ground truth).
+#
+# Single concern: is this Renovate dependency bump SAFE to merge unattended (pass) or does
+# it NEED A HUMAN (flag)? Advisory — verdicts are pass | flag ONLY (never fail/block).
+# The model sees the version-bump diff + the changelog Renovate embeds in the PR body.
+#
+# Positive class (what the scorer measures) = {flag} = "needs a human". The asymmetric cost
+# means recall-on-flag is the bar: never miss a major / breaking / critical-path bump.
+# Precision traps (must stay PASS): a routine patch/minor/CalVer bump on a non-critical
+# component with a clean changelog — do NOT over-flag the boring ones.
+#
+# Cases seeded from the live backlog (#3,4,8,9,20,21) + synthetic clear-cuts (postgres
+# major, cert-manager critical, servarr bundle). branch is always renovate/* (the
+# validator's gate); the model judges diff + changelog (branch gate is review() logic,
+# tested separately in verify.sh).
+
+cases:
+  # ---------------- PASS: routine, low-risk bumps ----------------
+  - id: qbittorrent-patch
+    file: clusters/pi-k3s/qbittorrent/deployment.yaml
+    branch: renovate/linuxserver-qbittorrent-5.x
+    verdict: pass
+    why: patch bump (5.2.1 -> 5.2.2), non-critical media app, changelog is bugfixes only.
+    diff: |
+      @@ -18,7 +18,7 @@ spec:
+             containers:
+               - name: qbittorrent
+      -          image: linuxserver/qbittorrent:5.2.1
+      +          image: linuxserver/qbittorrent:5.2.2
+    changelog: |
+      ### Release Notes
+      qBittorrent v5.2.2
+      - BUGFIX: Fix crash when parsing some .torrent files
+      - BUGFIX: Correctly restore window state on start
+      - No breaking changes.
+
+  - id: cloudflared-calver-step
+    file: clusters/pi-k3s/cloudflared/deployment.yaml
+    branch: renovate/cloudflare-cloudflared-2026.x
+    verdict: pass
+    why: CalVer month/patch step (2026.6.0 -> 2026.6.1), routine, changelog additive/bugfix.
+    diff: |
+      @@ -22,7 +22,7 @@ spec:
+      -          image: cloudflare/cloudflared:2026.6.0
+      +          image: cloudflare/cloudflared:2026.6.1
+    changelog: |
+      ### Release Notes
+      2026.6.1
+      - Bug fixes and minor improvements to tunnel connection handling.
+      - No configuration changes required.
+
+  - id: sabnzbd-patch
+    file: clusters/pi-k3s/sabnzbd/deployment.yaml
+    branch: renovate/linuxserver-sabnzbd-5.x
+    verdict: pass
+    why: patch bump (5.0.3 -> 5.0.4) of a non-critical downloader, bugfix changelog.
+    diff: |
+      @@ -20,7 +20,7 @@ spec:
+      -          image: linuxserver/sabnzbd:5.0.3
+      +          image: linuxserver/sabnzbd:5.0.4
+    changelog: |
+      ### Release Notes
+      SABnzbd 5.0.4
+      - Fix a rare assembler error on incomplete downloads.
+      - Update translations. No breaking changes.
+
+  - id: ntfy-minor-additive
+    file: clusters/pi-k3s/ntfy/deployment.yaml
+    branch: renovate/binwiederhier-ntfy-2.x
+    verdict: pass
+    why: minor bump (2.23 -> 2.24), non-critical, changelog is purely additive features.
+    diff: |
+      @@ -19,7 +19,7 @@ spec:
+      -          image: binwiederhier/ntfy:2.23.0
+      +          image: binwiederhier/ntfy:2.24.0
+    changelog: |
+      ### Release Notes
+      ntfy v2.24.0
+      - FEATURE: Add support for Markdown formatting in web app
+      - FEATURE: New `ntfy publish --wait` flag
+      - No breaking changes; config is backward compatible.
+
+  - id: alpine-minor-clean
+    file: clusters/pi-k3s/some-tool/Dockerfile
+    branch: renovate/alpine-3.x
+    verdict: pass
+    why: precision trap — a base-image minor (3.23 -> 3.24) with a clean changelog is routine; do NOT flag base images by reflex.
+    diff: |
+      @@ -1,4 +1,4 @@
+      -FROM alpine:3.23
+      +FROM alpine:3.24
+    changelog: |
+      ### Release Notes
+      Alpine 3.24.0
+      - Routine package and security updates; toolchain bumps.
+      - No removed packages relevant to typical service images; backward compatible.
+
+  # ---------------- FLAG: needs a human ----------------
+  - id: wrangler-minor-removal
+    file: workers/edge/package.json
+    branch: renovate/wrangler-4.x-lockfile
+    verdict: flag
+    why: minor (4.94 -> 4.103) BUT the changelog removes a public export — a consumer-facing breaking removal merits a human glance even on a minor.
+    diff: |
+      @@ -10,7 +10,7 @@
+         "devDependencies": {
+      -    "wrangler": "4.94.0"
+      +    "wrangler": "4.103.0"
+    changelog: |
+      ### Release Notes
+      #### Minor Changes
+      - Move `unstable_getWorkerNameFromProject` from wrangler to `@cloudflare/workers-utils`.
+        The export has been REMOVED from the `wrangler` package. If you were importing this
+        function from `wrangler`, update your import to use `@cloudflare/workers-utils`.
+      - Remove experimental autoconfig exports.
+
+  - id: postgres-major-migration
+    file: clusters/pi-k3s/n8n/postgresql.yaml
+    branch: renovate/postgres-16.x
+    verdict: flag
+    why: MAJOR engine bump (15 -> 16) with an incompatible on-disk format requiring a dump+restore migration — never auto-merge.
+    diff: |
+      @@ -24,7 +24,7 @@ spec:
+      -          image: postgres:15.7
+      +          image: postgres:16.3
+    changelog: |
+      ### Release Notes
+      PostgreSQL 16
+      - The on-disk storage format is INCOMPATIBLE with 15. You MUST pg_dump on 15 and
+        restore into 16 (or use pg_upgrade). Starting 16 against a 15 data directory will fail.
+      - Several configuration parameters renamed.
+
+  - id: cert-manager-minor-critical
+    file: clusters/pi-k3s/cert-manager/helmrelease.yaml
+    branch: renovate/cert-manager-1.x
+    verdict: flag
+    why: critical-path component (TLS for the whole cluster) — flag ANY bump, even a minor, for a human.
+    diff: |
+      @@ -14,7 +14,7 @@ spec:
+           chart:
+             spec:
+      -        version: 1.14.5
+      +        version: 1.15.3
+    changelog: |
+      ### Release Notes
+      cert-manager v1.15
+      - Adds support for new ACME profiles; several CRD fields added.
+      - Minor; no removals noted, but CRDs are updated on upgrade.
+
+  - id: servarr-bundle-major
+    file: clusters/pi-k3s/media/sonarr-deployment.yaml
+    branch: renovate/servarr-stack
+    verdict: flag
+    why: grouped bundle (the servarr stack) that includes a MAJOR — reviewed as a unit per renovate.json; flag.
+    diff: |
+      @@ -18,7 +18,7 @@ spec:
+      -          image: linuxserver/sonarr:4.0.10
+      +          image: linuxserver/sonarr:5.0.1
+      @@ -40,7 +40,7 @@ spec:
+      -          image: linuxserver/radarr:5.9.1
+      +          image: linuxserver/radarr:6.0.0
+    changelog: |
+      ### Release Notes
+      Sonarr v5 / Radarr v6 (major)
+      - Sonarr v5: database schema migration runs on first start; old config keys removed.
+      - Radarr v6: dropped support for the legacy API v3 endpoints.
+
+  - id: traefik-patch-truncated
+    file: clusters/pi-k3s/traefik/helmrelease.yaml
+    branch: renovate/traefik-2.x
+    verdict: flag
+    why: critical-path ingress controller AND the changelog is truncated — cannot confirm safety; flag.
+    diff: |
+      @@ -12,7 +12,7 @@ spec:
+           chart:
+             spec:
+      -        version: 27.0.2
+      +        version: 28.1.0
+    changelog: |
+      > ℹ️ Note
+      > This PR body was truncated due to platform limits.
+      ### Release Notes
+      Traefik chart 28.x
+      - (changelog truncated)
