@@ -26,7 +26,7 @@ spec:
     spec:
       initContainers:
         - name: envsubst
-          image: alpine:3.21
+          image: alpine:3.24
           env:
             - name: DISCORD_WEBHOOK_URL
               valueFrom:

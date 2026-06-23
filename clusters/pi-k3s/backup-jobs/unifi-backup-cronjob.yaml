@@ -16,7 +16,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: unifi-backup
-              image: alpine:3.21
+              image: alpine:3.24
               command:
                 - /bin/sh
                 - -c
