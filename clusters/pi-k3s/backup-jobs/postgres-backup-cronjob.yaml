@@ -45,55 +45,58 @@ spec:
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/postgres"
 
-                  # Backup Immich PostgreSQL
-                  echo "--- Backing up: Immich PostgreSQL ---"
-                  PGPASSWORD="${DB_PASSWORD}" pg_dump \
-                    -h immich-postgresql.immich.svc.cluster.local \
-                    -U immich \
-                    -d immich \
-                    --format=custom \
-                    --compress=9 \
-                    -f /tmp/immich-postgres.dump
+                  backed_up=0
+                  skipped=0
+                  failed=0
 
-                  echo "Dump created: $(ls -lh /tmp/immich-postgres.dump)"
+                  backup_target() {
+                    local name="$1"
+                    local host="$2"
+                    local user="$3"
+                    local db="$4"
+                    local password="$5"
 
-                  # Transfer to NAS (using rsync - scp SFTP subsystem disabled on NAS)
-                  rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
-                    /tmp/immich-postgres.dump \
-                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"
+                    export PGPASSWORD="$password"
 
-                  echo "Transferred to NAS"
-                  echo ""
+                    if ! pg_isready -h "$host" -U "$user" -t 5 >/dev/null 2>&1; then
+                      echo "--- SKIPPED: ${name} (unreachable) ---"
+                      skipped=$((skipped + 1))
+                      return 0
+                    fi
 
-                  # Backup n8n PostgreSQL (workflows, credentials, intake_items)
-                  echo "--- Backing up: n8n PostgreSQL ---"
-                  PGPASSWORD="${N8N_DB_PASSWORD}" pg_dump \
-                    -h n8n-postgresql.n8n.svc.cluster.local \
-                    -U n8n \
-                    -d n8n \
-                    --format=custom \
-                    --compress=9 \
-                    -f /tmp/n8n-postgres.dump
+                    if ! pg_dump -h "$host" -U "$user" -d "dbname=${db} connect_timeout=10" --format=custom --compress=9 \
+                      -f "/tmp/${name}-postgres.dump"; then
+                      echo "FAILED: ${name} pg_dump failed"
+                      failed=$((failed + 1))
+                      return 1
+                    fi
 
-                  echo "Dump created: $(ls -lh /tmp/n8n-postgres.dump)"
+                    if ! rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                      "/tmp/${name}-postgres.dump" \
+                      "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"; then
+                      echo "FAILED: ${name} rsync failed"
+                      failed=$((failed + 1))
+                      return 1
+                    fi
 
-                  rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
-                    /tmp/n8n-postgres.dump \
-                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/postgres/"
+                    echo "Transferred to NAS"
+                    backed_up=$((backed_up + 1))
+                    return 0
+                  }
 
-                  echo "Transferred to NAS"
-                  echo ""
+                  backup_target "immich" "immich-postgresql.immich.svc.cluster.local" "immich" "immich" "$DB_PASSWORD"
+                  backup_target "n8n" "n8n-postgresql.n8n.svc.cluster.local" "n8n" "n8n" "$N8N_DB_PASSWORD"
 
-                  # Verify backup
                   echo "--- Backup Summary ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} "ls -lh ${NAS_PATH}/${BACKUP_DATE}/postgres/"
 
-                  echo ""
-                  echo "PostgreSQL backup completed successfully!"
+                  echo "Backed up: ${backed_up}, Skipped: ${skipped}, Failed: ${failed}"
 
-                  # Cleanup
                   rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump
+
+                  if [ "${failed}" -gt 0 ]; then exit 1; fi
+                  exit 0
               env:
                 - name: DB_PASSWORD
                   valueFrom:
