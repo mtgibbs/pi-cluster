@@ -32,7 +32,7 @@ This document captures the architecture, decisions, and phased plan for adding a
 - Ollama running on Vulkan/RADV (`OLLAMA_VULKAN=1`) — NOT ROCm (see Decisions Log)
 - Tailscale for remote admin
 - node_exporter, AMD GPU exporter, cAdvisor for metrics (deferred — not yet scraped by Prometheus)
-- All config in Git, deployed via Ansible + systemd-timer git-pull
+- All config in Git (private repo `mtgibbs/beelink-ansible`, remote added 2026-06-24), deployed via Ansible (`ansible-playbook` push from the laptop — there is **no** git-pull timer on the box yet)
 - Models live on LVM volume (single NVMe, LVM layout), bind-mounted into Ollama
 
 ### Storage Layout (Locked 2026-05-20)
@@ -88,6 +88,13 @@ Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for exe
 `sudo aimode {work|family|status}` toggles between **family** (Dewey + 30B coder, multi-tenant)
 and **work** (Q8 Qwen3-Coder-Next, sole tenant). The `hot-coder` LiteLLM alias is the single
 knob — flipping repoints opencode/`oc`, the Ops pipe, and MCP downstream automatically.
+
+> **Context windows (updated 2026-06-24):** work-mode Q8 runs **256k** (`-c 262144` — the model's
+> native max). Qwen3-Next's hybrid linear-attention KV is cheap (~0.8 GiB per 32k), so 256k sits at
+> only ~86 GiB / 96 GiB VRAM. Family-mode Ollama models stay capped at **32k**
+> (`OLLAMA_CONTEXT_LENGTH`) — the dense 30B's quadratic KV would balloon to ~71 GiB at 256k.
+> `opencode.json` declares `context: 262144` to match work mode, so do coding in `work` and keep
+> family-mode sessions short.
 
 | Flip | Wall time | Notes |
 |---|---|---|
@@ -382,7 +389,7 @@ OpenClaw considered for the "Signal/Telegram from anywhere" use case. **Why reje
 
 ### K3s on Beelink — REJECTED, use Docker Compose
 
-Considered single-node K3s on Beelink for Flux uniformity. **Why rejected:** failure isolation matters more than tooling uniformity. If Flux pushes a bad manifest cluster-wide, AI inference must keep serving. Beelink runs Compose, deployed via Ansible + systemd-timer git-pull. Different tool, same GitOps spirit.
+Considered single-node K3s on Beelink for Flux uniformity. **Why rejected:** failure isolation matters more than tooling uniformity. If Flux pushes a bad manifest cluster-wide, AI inference must keep serving. Beelink runs Compose, deployed via Ansible (`ansible-playbook` push from the laptop). Different tool, same GitOps spirit.
 
 ### Hardware — Beelink GTR9 Pro chosen
 
