@@ -1,0 +1,9 @@
+T1: secret_hygiene — create scripts/reviewhub/validators/test_secret_hygiene.py mirroring test_dependency_update.py; read secret_hygiene.py for its real verdicts/globs/aggregation
+T2: input_validation — create test_input_validation.py for input_validation.py, mirroring the worked example; assert its real values
+T3: gate_regression — create test_gate_regression.py for gate_regression.py, mirroring the worked example; assert its real values
+T4: fail_closed — create test_fail_closed.py for fail_closed.py, mirroring the worked example; assert its real values
+T5: concurrency_safety — create test_concurrency_safety.py for concurrency_safety.py, mirroring the worked example; assert its real values
+T6: mutation_gating — create test_mutation_gating.py for mutation_gating.py, mirroring the worked example; assert its real values
+T7: no_false_green — create test_no_false_green.py for no_false_green.py, mirroring the worked example; assert its real values
+T8: output_bounds — create test_output_bounds.py for output_bounds.py, mirroring the worked example; assert its real values
+T9: read_only_integrity — create test_read_only_integrity.py for read_only_integrity.py, mirroring the worked example; assert its real values
