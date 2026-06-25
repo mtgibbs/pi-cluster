@@ -301,6 +301,16 @@ class TestAggregateRuns:
         agg = aggregate_runs(results)
         assert agg["runs"] == ["pass", "flag", "fail"]
 
+    def test_error_with_pass_escalates_to_flag(self):
+        results = [
+            {"verdict": "pass", "criteria": [], "findings": []},
+            {"verdict": "error", "criteria": [], "findings": ["unparseable output"]}
+        ]
+        agg = aggregate_runs(results)
+        assert agg["verdict"] == "flag"
+        assert agg["stable"] is False
+        assert agg["runs"] == ["pass", "error"]
+
 
 class FakeForge:
     """Minimal fake Forge for testing select_triggerable_targets."""
