@@ -21,3 +21,7 @@ clusters/pi-k3s/monitoring/kube-prometheus-values.yaml
 .venv/
 __pycache__/
 *.pyc
+
+# Local MCP config (contains API keys)
+.mcp.json
+opencode.json
