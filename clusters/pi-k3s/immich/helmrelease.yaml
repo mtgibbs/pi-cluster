@@ -35,10 +35,7 @@ spec:
     # Immich Server
     # ========================================
     server:
-      # PARKED 2026-06-17: Immich not in active use; server scaled to zero to stop wasting
-      # Pi resources. Resume = set this true + valkey.enabled true + postgresql.yaml replicas 1.
-      # All data retained on PVCs (library + postgres). Removing server also drops the ingress.
-      enabled: false
+      enabled: true
       controllers:
         main:
           pod:
@@ -120,8 +117,7 @@ spec:
     # Built-in Valkey (Redis replacement)
     # ========================================
     valkey:
-      # PARKED 2026-06-17 with the server — Redis/Valkey is only needed while the server runs.
-      enabled: false
+      enabled: true
       controllers:
         main:
           containers:
