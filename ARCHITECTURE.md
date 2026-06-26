@@ -902,11 +902,12 @@ Pi K3s Cluster
 - Foundation for HA implementations (e.g., dual Pi-hole/Unbound)
 
 **How**:
-- pi-k3s (Pi 5): master + worker (critical infrastructure, DNS primary, monitoring)
-- pi5-worker-1 (Pi 5): worker (media services, DNS secondary, Tailscale exit node)
+- pi-k3s (Pi 5): master + worker (critical infrastructure, DNS primary, monitoring, Immich Postgres — pinned here by its local-path PVC)
+- pi5-worker-1 (Pi 5): worker (media services, DNS secondary, Tailscale exit node, Immich server + valkey)
 - pi5-worker-2 (Pi 5): worker (heavy workloads, distributed apps)
 - pi3-worker-2 (Pi 3): worker (lightweight services only, 1GB RAM)
 - Backup jobs pinned to pi-k3s (require hostPath access to local-path PVCs)
+- Most app placement is scheduler-driven (no nodeSelector) and can move on reschedule; the intentional pins are: Pi-hole primary/Unbound + backup jobs + Immich Postgres → pi-k3s (local-path data locality), Pi-hole secondary → pi5-worker-1.
 
 **Trade-offs**:
 - Increased complexity in workload placement
