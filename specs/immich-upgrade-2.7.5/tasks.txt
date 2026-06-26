@@ -1,0 +1,1 @@
+T1: bump Immich server image tag v2.4.1 -> v2.7.5 in helmrelease.yaml (one line; touch nothing else)
