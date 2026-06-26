@@ -20,9 +20,7 @@ metadata:
   name: immich-postgresql
   namespace: immich
 spec:
-  # PARKED 2026-06-17: Immich server is disabled (see helmrelease.yaml) — no consumer for this DB.
-  # PVC immich-postgresql-data is retained (prune disabled). Set back to 1 to resume Immich.
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
