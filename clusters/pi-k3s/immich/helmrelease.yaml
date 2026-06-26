@@ -46,7 +46,7 @@ spec:
           containers:
             main:
               image:
-                tag: v2.4.1
+                tag: v2.7.5
               env:
                 TZ: "America/New_York"
                 REVERSE_GEOCODING_PRECISION: "1"
