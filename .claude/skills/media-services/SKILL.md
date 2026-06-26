@@ -193,6 +193,9 @@ Evidence captured:
    iowait (the pg/valkey restarts are incidental). **Config drift to note:** the HelmRelease declares
    `server.enabled: true` (wants 1 replica) but live is 0 — a manual scale-down not in Git, or Flux not
    reconciling immich. Worth a look, but a separate issue from the stream drops.
+   **[UPDATE 2026-06-26: that drift was later made durable by the park commit `53e5b34` (6-17); Immich
+   was then RESUMED via PR #33 — `server.enabled`+`valkey.enabled` true, postgres `replicas: 1`. The
+   `replicas: 0` state described here no longer holds; see "Immich (Photos) → Status" below.]**
 
 **▶ STATUS (2026-06-18) — LEADING HYPOTHESIS (not confirmed): QNAP HDD Standby spin-down. Fix applied.**
 Suspected cause is **HDD spin-up latency** (not a failing disk, not a "burst the array can't sustain").
@@ -300,6 +303,12 @@ movie plays fine with everything idle — "it's playing" ≠ "the read path is h
 </details>
 
 ## Immich (Photos)
+- **Status**: **LIVE** — resumed 2026-06-26 (PR #33). Parked 2026-06-17 (commit `53e5b34`) to save Pi
+  resources while unused, then un-parked as the exact reverse of the park. **Park/resume recipe:** flip
+  `helmrelease.yaml` `server.enabled` + `valkey.enabled` *and* `postgresql.yaml` `replicas` together
+  (`true`/`1` ↔ `false`/`0`) — all three must move, or a Helm re-render undoes a partial change. PVCs are
+  `prune: disabled`, so the photo library + Postgres DB survive a park (no restore needed on resume).
+  Resumes on **pinned v2.4.1** / chart `0.10.3`; ML stays disabled. SDD spec: `specs/immich-resume/`.
 - **URL**: `https://immich.lab.mtgibbs.dev`
 - **Version**: v2.4.x (PostgreSQL with pgvector)
 - **Storage**:
