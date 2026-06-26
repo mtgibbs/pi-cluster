@@ -79,10 +79,13 @@ spec:
               resources:
                 requests:
                   cpu: 100m
-                  memory: 256Mi
+                  memory: 512Mi
                 limits:
                   cpu: 2000m
-                  memory: 768Mi
+                  # 768Mi OOMKilled v2.7.5 on boot (api + microservices workers in one
+                  # container); the 768Mi cap was tuned for the lighter v2.4.1 (a8b4d99).
+                  # Raised to 2Gi 2026-06-26. ML still disabled; pi5-worker has 8GB.
+                  memory: 2Gi
       ingress:
         main:
           enabled: true
