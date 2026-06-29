@@ -25,4 +25,5 @@ resources:
   # Alerting
   - prometheusrule.yaml
   # YouTube/short-form blackout (5-7pm allow gate)
+  - pihole-brainrot-setup-job.yaml
   - pihole-brainrot-schedule-cronjob.yaml

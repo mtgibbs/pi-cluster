@@ -1,0 +1,55 @@
+# One-shot setup for the YouTube/short-form blackout. Runs setup-job.sh against
+# both Pi-holes (op-free — WEBPASSWORD comes from the in-cluster secret), creating
+# the 'adults' group, the deny sets, and the allowlist clients. Replaces the
+# fragile postStart-hook approach; its logs are visible (kubectl logs / MCP).
+# Re-run by bumping `metadata.name` (a completed Job is immutable).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pihole-brainrot-setup
+  namespace: pihole
+  labels:
+    app: pihole-brainrot
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: pihole-brainrot
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: setup
+          image: alpine:3.24
+          env:
+            - name: WEBPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pihole-secret
+                  key: WEBPASSWORD
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              apk add --no-cache curl jq >/dev/null
+              sh /config/setup-job.sh
+          volumeMounts:
+            - name: brainrot
+              mountPath: /config
+              readOnly: true
+            - name: allowlist
+              mountPath: /allow
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi
+      volumes:
+        - name: brainrot
+          configMap:
+            name: pihole-brainrot
+        - name: allowlist
+          configMap:
+            name: pihole-allowlist

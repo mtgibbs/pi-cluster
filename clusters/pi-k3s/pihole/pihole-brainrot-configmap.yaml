@@ -150,3 +150,44 @@ data:
       echo "$H: enabled=$STATE on $COUNT brain-rot regex denies"
       curl -s -m 10 -X DELETE "http://$H/api/auth?sid=${SID}" >/dev/null 2>&1 || true
     done
+
+  # ---------------------------------------------------------------------------
+  # One-shot setup — run by the pihole-brainrot-setup Job (op-free, uses the
+  # in-cluster WEBPASSWORD). Creates the 'adults' group, pushes the deny sets
+  # (proper JSON via jq — fixes the backslash-escaping bug), and assigns the
+  # allowlist clients on BOTH Pi-holes. Verbose so the Job logs are debuggable.
+  # Reads denies from /config and the allowlist from /allow.
+  # ---------------------------------------------------------------------------
+  setup-job.sh: |
+    #!/bin/sh
+    set -u
+    PW="${WEBPASSWORD:?WEBPASSWORD required}"
+    HOSTS="192.168.1.55 192.168.1.56"
+    arr() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/#.*//; s/[[:space:]]//g' | grep . | jq -R . | jq -sc .; }
+    for H in $HOSTS; do
+      SID=$(curl -s -m 10 -X POST "http://$H/api/auth" -H 'Content-Type: application/json' -d "{\"password\":\"$PW\"}" | jq -r '.session.sid // empty')
+      if [ -z "$SID" ]; then echo "### $H AUTH FAIL"; continue; fi
+      echo "### $H"
+      code=$(curl -s -m 10 -o /tmp/o -w '%{http_code}' -X POST "http://$H/api/groups?sid=$SID" -H 'Content-Type: application/json' -d '{"name":"adults","comment":"YouTube blackout allowlist (exempt)"}')
+      echo "  group adults -> HTTP $code $(head -c120 /tmp/o)"
+      AID=$(curl -s "http://$H/api/groups?sid=$SID" | jq -r '.groups[]?|select(.name=="adults")|.id')
+      echo "  adults id=$AID"
+      for pair in "/config/brainrot.txt:brain-rot-schedule" "/config/doh-block.txt:doh-block"; do
+        f=${pair%%:*}; c=${pair##*:}
+        [ -f "$f" ] || continue
+        A=$(arr "$f")
+        code=$(curl -s -m 20 -o /tmp/o -w '%{http_code}' -X POST "http://$H/api/domains/deny/regex?sid=$SID" -H 'Content-Type: application/json' -d "{\"domain\":$A,\"comment\":\"$c\",\"groups\":[0],\"enabled\":true}")
+        echo "  deny $c ($(echo "$A" | jq length)) -> HTTP $code $(head -c160 /tmp/o)"
+      done
+      if [ -n "${AID:-}" ] && [ "$AID" != "null" ] && [ -f /allow/allowlist.txt ]; then
+        grep -vE '^[[:space:]]*#|^[[:space:]]*$' /allow/allowlist.txt | sed 's/#.*//; s/[[:space:]]//g' | grep . | while read -r cl; do
+          code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "http://$H/api/clients?sid=$SID" -H 'Content-Type: application/json' -d "{\"client\":\"$cl\",\"comment\":\"adults allowlist\",\"groups\":[$AID]}")
+          echo "  client $cl -> HTTP $code"
+        done
+      fi
+      G=$(curl -s "http://$H/api/groups?sid=$SID" | jq -c '[.groups[]?.name]')
+      D=$(curl -s "http://$H/api/domains?sid=$SID" | jq '[.domains[]?|select(.type=="deny")]|length')
+      C=$(curl -s "http://$H/api/clients?sid=$SID" | jq '.clients|length')
+      echo "  FINAL $H groups=$G denies=$D clients=$C"
+    done
+    echo "setup-job complete"
