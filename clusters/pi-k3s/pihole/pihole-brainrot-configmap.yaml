@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-brainrot
+  namespace: pihole
+data:
+  # ---------------------------------------------------------------------------
+  # "Brain-rot" blackout — YouTube + TikTok + Instagram.
+  # Pushed by the Pi-hole postStart hook (via setup.sh) as REGEX deny domains on
+  # group 0 (the Default group = every client) with comment "brain-rot-schedule".
+  # Two CronJobs toggle these entries' `enabled` flag: OFF 17:00 (allow),
+  # ON 19:00 (block). Default state is ON. Adult devices live in the `adults`
+  # group (see pihole-allowlist) and are NOT in group 0, so they are exempt.
+  #
+  # Regex denies are LIVE (no gravity recompile), which is why they back the
+  # schedulable block instead of an adlist. Scope note: DNS can't isolate
+  # Instagram "Reels" — blocking instagram.com blocks all of Instagram.
+  # fbcdn.net is deliberately NOT blocked (shared with Facebook/Messenger/WhatsApp).
+  # ---------------------------------------------------------------------------
+  brainrot.txt: |
+    # --- YouTube ---
+    (\.|^)youtube\.com$
+    (\.|^)youtu\.be$
+    (\.|^)youtube-nocookie\.com$
+    (\.|^)youtubekids\.com$
+    (\.|^)youtubei\.googleapis\.com$
+    (\.|^)ytimg\.com$
+    (\.|^)ggpht\.com$
+    (\.|^)googlevideo\.com$
+    # --- TikTok ---
+    (\.|^)tiktok\.com$
+    (\.|^)tiktokv\.com$
+    (\.|^)tiktokcdn\.com$
+    (\.|^)tiktokcdn-us\.com$
+    (\.|^)tiktokcdn-eu\.com$
+    (\.|^)byteoversea\.com$
+    (\.|^)ibytedtos\.com$
+    (\.|^)muscdn\.com$
+    (\.|^)musical\.ly$
+    # --- Instagram ---
+    (\.|^)instagram\.com$
+    (\.|^)cdninstagram\.com$
+    (\.|^)instagr\.am$
+
+  # ---------------------------------------------------------------------------
+  # DoH/anti-bypass — PERMANENT (comment "doh-block", never toggled).
+  # Blocks common DNS-over-HTTPS endpoints + the Firefox canary so kid devices
+  # in group 0 can't quietly route around Pi-hole. Adults (adults group) are
+  # unaffected. The gateway Phase 2 rules are the stronger enforcement; this is
+  # the first line.
+  # ---------------------------------------------------------------------------
+  doh-block.txt: |
+    (\.|^)use-application-dns\.net$
+    (\.|^)dns\.google$
+    (\.|^)cloudflare-dns\.com$
+    (\.|^)mozilla\.cloudflare-dns\.com$
+    (\.|^)chrome\.cloudflare-dns\.com$
+    (\.|^)dns\.quad9\.net$
+    (\.|^)doh\.opendns\.com$
+    (\.|^)dns\.nextdns\.io$
+    (\.|^)dns\.adguard-dns\.com$
+
+  # ---------------------------------------------------------------------------
+  # Setup script — invoked by both Pi-hole postStart hooks AFTER they obtain the
+  # API session id:  bash /etc/pihole-config/brainrot-setup.sh "$SID"
+  # Idempotent: ensures the 'adults' group, pushes the deny sets on group 0, and
+  # assigns allowlist clients (MAC or IP) to the adults group. Safe per restart.
+  # ---------------------------------------------------------------------------
+  setup.sh: |
+    #!/bin/sh
+    set -u
+    SID="${1:-}"
+    BASE="http://localhost/api"
+    CFG="/etc/pihole-config"
+    [ -z "$SID" ] && { echo "brainrot-setup: no SID, skipping"; exit 0; }
+
+    # 1) Ensure the 'adults' allowlist group exists (ignore "already exists")
+    curl -s -X POST "${BASE}/groups?sid=${SID}" -H "Content-Type: application/json" \
+      -d '{"name":"adults","comment":"YouTube blackout allowlist (exempt from group 0 denies)"}' \
+      >/dev/null 2>&1 || true
+
+    # Resolve the adults group id
+    ADULTS_ID=$(curl -s "${BASE}/groups?sid=${SID}" \
+      | tr '{' '\n' | grep '"name":"adults"' | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -n1)
+
+    # Batch-add regex denies from a file under a given comment, on group 0
+    add_regex() {
+      _file="$1"; _comment="$2"; _arr=""
+      [ -f "$_file" ] || return 0
+      while IFS= read -r _line; do
+        case "$_line" in ''|\#*) continue ;; esac
+        _line=$(printf '%s' "$_line" | tr -d '[:space:]')
+        [ -z "$_line" ] && continue
+        if [ -z "$_arr" ]; then _arr="\"$_line\""; else _arr="$_arr,\"$_line\""; fi
+      done < "$_file"
+      [ -z "$_arr" ] && return 0
+      curl -s -X POST "${BASE}/domains/deny/regex?sid=${SID}" -H "Content-Type: application/json" \
+        -d "{\"domain\":[${_arr}],\"comment\":\"${_comment}\",\"groups\":[0],\"enabled\":true}" \
+        >/dev/null 2>&1 || true
+    }
+
+    add_regex "${CFG}/brainrot.txt"  "brain-rot-schedule"   # schedulable (5-7pm gate)
+    add_regex "${CFG}/doh-block.txt" "doh-block"            # permanent
+
+    # 2) Allowlist clients -> adults group (one MAC or IP per line)
+    if [ -n "${ADULTS_ID:-}" ] && [ -f "${CFG}/allowlist.txt" ]; then
+      while IFS= read -r _c; do
+        _c=$(printf '%s' "$_c" | sed 's/#.*//' | tr -d '[:space:]')
+        [ -z "$_c" ] && continue
+        curl -s -X POST "${BASE}/clients?sid=${SID}" -H "Content-Type: application/json" \
+          -d "{\"client\":\"${_c}\",\"comment\":\"adults allowlist\",\"groups\":[${ADULTS_ID}]}" \
+          >/dev/null 2>&1 || true
+      done < "${CFG}/allowlist.txt"
+    fi
+
+    echo "brainrot-setup: done (adults group id=${ADULTS_ID:-unknown})"
+
+  # ---------------------------------------------------------------------------
+  # Schedule toggle — run by the two CronJobs. STATE=false at 17:00 (allow),
+  # STATE=true at 19:00 (block). Flips the `enabled` flag on every
+  # "brain-rot-schedule" regex deny on BOTH Pi-holes (.55 + .56). Reads the same
+  # brainrot.txt so it always targets exactly the scheduled set.
+  # ---------------------------------------------------------------------------
+  toggle.sh: |
+    #!/bin/sh
+    set -u
+    STATE="${STATE:?STATE required (true|false)}"
+    PW="${WEBPASSWORD:?WEBPASSWORD required}"
+    LISTFILE="/config/brainrot.txt"
+    HOSTS="192.168.1.55 192.168.1.56"
+
+    urlencode() { jq -rn --arg x "$1" '$x|@uri'; }
+
+    for H in $HOSTS; do
+      SID=$(curl -s -m 10 -X POST "http://$H/api/auth" -H "Content-Type: application/json" \
+        -d "{\"password\":\"$PW\"}" | jq -r '.session.sid // empty')
+      if [ -z "$SID" ]; then echo "WARN: auth failed on $H"; continue; fi
+      COUNT=0
+      while IFS= read -r line; do
+        case "$line" in ''|\#*) continue ;; esac
+        d=$(printf '%s' "$line" | tr -d '[:space:]')
+        [ -z "$d" ] && continue
+        enc=$(urlencode "$d")
+        code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X PUT \
+          "http://$H/api/domains/deny/regex/${enc}?sid=${SID}" \
+          -H "Content-Type: application/json" \
+          -d "{\"comment\":\"brain-rot-schedule\",\"groups\":[0],\"enabled\":${STATE}}")
+        case "$code" in 200|201) COUNT=$((COUNT+1)) ;; *) echo "WARN $H $d -> HTTP $code" ;; esac
+      done < "$LISTFILE"
+      echo "$H: enabled=$STATE on $COUNT brain-rot regex denies"
+      curl -s -m 10 -X DELETE "http://$H/api/auth?sid=${SID}" >/dev/null 2>&1 || true
+    done

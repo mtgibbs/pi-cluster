@@ -6,6 +6,8 @@ resources:
   - unbound-configmap.yaml
   - pihole-adlists-configmap.yaml
   - pihole-whitelist-configmap.yaml
+  - pihole-brainrot-configmap.yaml
+  - pihole-allowlist-configmap.yaml
   - pihole-custom-dns.yaml
   - external-secret.yaml
   # Primary Pi-hole (pi-k3s - 192.168.1.55)
@@ -22,3 +24,5 @@ resources:
   - pihole-secondary-exporter.yaml
   # Alerting
   - prometheusrule.yaml
+  # YouTube/short-form blackout (5-7pm allow gate)
+  - pihole-brainrot-schedule-cronjob.yaml

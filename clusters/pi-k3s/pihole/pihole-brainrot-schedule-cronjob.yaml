@@ -1,0 +1,110 @@
+# Summer "allow gate": brain-rot content is blocked 24/7 EXCEPT 17:00-19:00 daily.
+# `allow` disables the brain-rot-schedule denies at 5pm; `block` re-enables at 7pm.
+# Each job flips both Pi-holes (.55 + .56). Times are America/New_York via timeZone.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pihole-brainrot-allow
+  namespace: pihole
+  labels:
+    app: pihole-brainrot
+spec:
+  schedule: "0 17 * * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: pihole-brainrot
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: toggle
+              image: alpine:3.24
+              env:
+                - name: STATE
+                  value: "false"   # 17:00 — disable the block (allow YouTube/short-form)
+                - name: WEBPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: pihole-secret
+                      key: WEBPASSWORD
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  apk add --no-cache curl jq >/dev/null
+                  sh /config/toggle.sh
+              volumeMounts:
+                - name: brainrot
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: brainrot
+              configMap:
+                name: pihole-brainrot
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pihole-brainrot-block
+  namespace: pihole
+  labels:
+    app: pihole-brainrot
+spec:
+  schedule: "0 19 * * *"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: pihole-brainrot
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: toggle
+              image: alpine:3.24
+              env:
+                - name: STATE
+                  value: "true"    # 19:00 — re-enable the block
+                - name: WEBPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: pihole-secret
+                      key: WEBPASSWORD
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  apk add --no-cache curl jq >/dev/null
+                  sh /config/toggle.sh
+              volumeMounts:
+                - name: brainrot
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          volumes:
+            - name: brainrot
+              configMap:
+                name: pihole-brainrot

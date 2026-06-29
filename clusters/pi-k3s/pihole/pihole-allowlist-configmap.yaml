@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-allowlist
+  namespace: pihole
+data:
+  # ---------------------------------------------------------------------------
+  # Adult device allowlist for the YouTube/short-form blackout.
+  # One identifier per line — a reserved IP or a MAC. The postStart setup.sh
+  # assigns each to the Pi-hole `adults` group, which has NO group-0 denies, so
+  # these devices are exempt from the blackout at all times.
+  # GitOps source of truth: edit here, never the Pi-hole UI.
+  # ---------------------------------------------------------------------------
+  allowlist.txt: |
+    # --- Reserved adult computers (IP-matched, .80-.85) ---
+    192.168.1.80   # Matt Home PC (DESKTOP-SRGOERO)
+    192.168.1.81   # Matt-PC
+    192.168.1.82   # Matt Macbook M2
+    192.168.1.83   # Matt Work Macbook Pro M1
+    192.168.1.84   # Julia Macbook M2 (Julias-MBP)
+    192.168.1.85   # Julia Work Dock + Macbook Pro M5
+
+    # --- All active iPhones (MAC-matched) — "exempt all now, subtract kids later" ---
+    # NOTE: iPhone MACs are randomized. If Private Wi-Fi Address is left on
+    # "Rotating," a MAC here can change and that phone loses its exemption
+    # (re-add the new MAC, or set Private Address > Fixed for permanence).
+    # TODO: identify each KID's iPhone and DELETE its line so they get blocked.
+    da:57:f2:ee:c8:8f   # iPhone (active)
+    4e:2b:56:67:b1:68   # iPhone (active)
+    aa:27:4d:5b:13:f8   # iPhone (active)
+    8e:15:e9:d3:e0:cf   # iPhone (active)
+    ae:30:97:b3:a2:e1   # iPhone (seen ~3wk ago)

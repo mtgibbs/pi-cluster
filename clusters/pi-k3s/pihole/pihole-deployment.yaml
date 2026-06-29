@@ -130,6 +130,9 @@ spec:
                       fi
                     fi
 
+                    # Brain-rot blackout: ensure 'adults' group, push deny sets, assign allowlist clients
+                    [ -f /etc/pihole-config/brainrot-setup.sh ] && bash /etc/pihole-config/brainrot-setup.sh "$SID" || true
+
                     # Run gravity update to fetch the lists
                     curl -s -X POST "http://localhost/api/action/gravity?sid=${SID}" || pihole updateGravity
 
@@ -155,6 +158,22 @@ spec:
             - name: pihole-whitelist
               mountPath: /etc/pihole-config/whitelist.txt
               subPath: whitelist.txt
+              readOnly: true
+            - name: pihole-brainrot
+              mountPath: /etc/pihole-config/brainrot.txt
+              subPath: brainrot.txt
+              readOnly: true
+            - name: pihole-brainrot
+              mountPath: /etc/pihole-config/doh-block.txt
+              subPath: doh-block.txt
+              readOnly: true
+            - name: pihole-brainrot
+              mountPath: /etc/pihole-config/brainrot-setup.sh
+              subPath: setup.sh
+              readOnly: true
+            - name: pihole-allowlist
+              mountPath: /etc/pihole-config/allowlist.txt
+              subPath: allowlist.txt
               readOnly: true
           resources:
             requests:
@@ -196,3 +215,9 @@ spec:
         - name: pihole-whitelist
           configMap:
             name: pihole-whitelist
+        - name: pihole-brainrot
+          configMap:
+            name: pihole-brainrot
+        - name: pihole-allowlist
+          configMap:
+            name: pihole-allowlist
