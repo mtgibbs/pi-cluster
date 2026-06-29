@@ -10,57 +10,42 @@ data:
       enabled: true
       address: "0.0.0.0:8686"
 
-    # Vector receives logs from two sources:
+    # Two ingest paths:
     #   1. Heroku HTTPS log drain (existing)
-    #   2. UDM Pro Max remote syslog — firewall drop logs for DNS-bypass detection
-    #      (the "lock the doors" Phase 1 rules log every blocked public-DNS attempt).
+    #   2. UDM Pro Max remote syslog — we keep ONLY the "Block public DNS bypass"
+    #      firewall drops (the Phase 1 lockdown rules) and discard the rest of the
+    #      UDM's chatter. Each kept event → Loki (table/chart) + ntfy (throttled push).
 
     sources:
-      # Heroku HTTPS log drain endpoint
       heroku_logs:
         type: http_server
         address: "0.0.0.0:8080"
         encoding: text
-        # Heroku sends logs as syslog-formatted text
         headers:
           - Logplex-Drain-Token
           - Logplex-Frame-Id
           - Logplex-Msg-Count
 
-      # UDM Pro Max remote syslog (UDP). NodePort 30514 -> 5514 exposes this on the LAN.
       udm_syslog:
         type: syslog
         address: "0.0.0.0:5514"
         mode: udp
 
     transforms:
-      # Parse and enrich Heroku logs
       parse_heroku:
         type: remap
         inputs:
           - heroku_logs
         source: |
-          # Parse syslog-style Heroku log format
-          # Format: <pri>version timestamp hostname appname procid msgid msg
-
-          # Extract app name from path or headers if available
           .source = "heroku"
-
-          # Try to determine log level from message content
           .level = if contains(string!(.message), "error") || contains(string!(.message), "Error") || contains(string!(.message), "ERROR") {
             "error"
           } else if contains(string!(.message), "warn") || contains(string!(.message), "Warn") || contains(string!(.message), "WARN") {
             "warn"
-          } else if contains(string!(.message), "debug") || contains(string!(.message), "Debug") || contains(string!(.message), "DEBUG") {
-            "debug"
           } else {
             "info"
           }
-
-          # Extract app name from Heroku log format if present
-          # Heroku logs often contain: app[dyno.type]: message
           parsed = parse_regex(.message, r'^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+\+\d{2}:\d{2}) (?P<app>\S+) (?P<dyno>\S+) - (?P<content>.*)$') ?? {}
-
           if exists(parsed.app) {
             .app = parsed.app
             .dyno = parsed.dyno
@@ -71,18 +56,52 @@ data:
             .log_message = .message
           }
 
-      # CAPTURE STAGE: tag UDM syslog and keep the raw message so we can read the real
-      # firewall-drop line format in Vector's stdout, then write a precise parser
-      # (src IP / src MAC / dst / dpt) in a follow-up. No filtering yet — see everything.
-      udm_tag:
+      # Keep only our DNS-bypass drops. A drop line looks like:
+      #   [LAN_IN-D-20001] DESCR="Block public DNS bypass (force Pi-hole" ...
+      #   MAC=<dst6>:<src6>:<ethertype2> SRC=<ip> DST=<resolver> PROTO=UDP DPT=53 ...
+      # Device MAC = octets 7-12 of the MAC= field.
+      udm_dns_bypass:
         type: remap
         inputs:
           - udm_syslog
         source: |
-          .source = "udm"
+          msg = string(.message) ?? ""
+          .keep = contains(msg, "Block public DNS bypass")
+          if .keep {
+            .source = "udm-fw-dns-bypass"
+            .src_ip = parse_regex(msg, r'SRC=(?P<x>\S+)').x ?? ""
+            .dst_ip = parse_regex(msg, r'DST=(?P<x>\S+)').x ?? ""
+            .dpt = parse_regex(msg, r'DPT=(?P<x>\d+)').x ?? ""
+            .proto = parse_regex(msg, r'PROTO=(?P<x>\S+)').x ?? ""
+            .src_mac = parse_regex(msg, r'MAC=(?:[0-9a-fA-F]{2}:){6}(?P<x>(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})').x ?? ""
+            .ip_ver = if contains(msg, "LANv6_IN") { "v6" } else { "v4" }
+            .alert = "🚫 DNS bypass blocked\n" + .src_ip + " (" + .src_mac + ")\n-> " + .dst_ip + ":" + .dpt + " [" + .ip_ver + "]"
+          }
+
+      udm_dns_bypass_only:
+        type: filter
+        inputs:
+          - udm_dns_bypass
+        condition: '.keep == true'
+
+      # Push at most 1 ntfy notification per device per 5 min (a chatty IoT box
+      # can't spam you). Loki still gets every event (unthrottled, below).
+      udm_dns_bypass_throttled:
+        type: throttle
+        inputs:
+          - udm_dns_bypass_only
+        threshold: 1
+        window_secs: 300
+        key_field: "{{ src_ip }}"
+
+      ntfy_body:
+        type: remap
+        inputs:
+          - udm_dns_bypass_throttled
+        source: |
+          .message = string(.alert) ?? "DNS bypass blocked"
 
     sinks:
-      # Send Heroku logs to Loki
       loki:
         type: loki
         inputs:
@@ -96,23 +115,42 @@ data:
           dyno: "{{ dyno }}"
           level: "{{ level }}"
 
-      # Send UDM syslog to Loki (broad label for now; refined once the parser lands)
-      loki_udm:
+      # Structured bypass events → Loki (JSON so Grafana can table src_ip/src_mac/dst_ip).
+      loki_dns_bypass:
         type: loki
         inputs:
-          - udm_tag
+          - udm_dns_bypass_only
         endpoint: http://loki.log-aggregation.svc.cluster.local:3100
         encoding:
-          codec: text
+          codec: json
         labels:
-          source: "udm"
-          host: "{{ hostname }}"
+          source: "udm-fw-dns-bypass"
+          ip_ver: "{{ ip_ver }}"
 
-      # Console for debugging — used to capture the real UDM firewall-log format
+      # Throttled push notification.
+      ntfy_dns_bypass:
+        type: http
+        inputs:
+          - ntfy_body
+        uri: "http://ntfy.ntfy.svc.cluster.local/dns-bypass"
+        method: post
+        encoding:
+          codec: text
+        batch:
+          max_events: 1
+        auth:
+          strategy: basic
+          user: family
+          password: "${NTFY_PASSWORD:-}"
+        request:
+          headers:
+            Title: "DNS bypass blocked"
+            Tags: "no_entry_sign,shield"
+
+      # Bypass events to stdout for debugging (filtered — low volume).
       console:
         type: console
         inputs:
-          - parse_heroku
-          - udm_tag
+          - udm_dns_bypass_only
         encoding:
           codec: json

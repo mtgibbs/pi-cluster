@@ -44,6 +44,7 @@ spec:
                     for i in $(seq 1 30); do [ -f /var/lib/ntfy/auth.db ] && break; sleep 1; done
                     printf '%s\n%s\n' "$FAMILY_PASSWORD" "$FAMILY_PASSWORD" | ntfy user add --ignore-exists family || true
                     ntfy access family "deadlines-*" rw || true
+                    ntfy access family "dns-bypass" rw || true
           env:
             - name: FAMILY_PASSWORD
               valueFrom:

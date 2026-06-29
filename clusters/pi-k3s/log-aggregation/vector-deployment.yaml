@@ -40,6 +40,15 @@ spec:
             - containerPort: 5514
               name: syslog
               protocol: UDP
+          env:
+            # ntfy publish creds (family user) for the DNS-bypass push sink.
+            # optional: Vector still starts if the secret hasn't synced yet.
+            - name: NTFY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vector-ntfy
+                  key: FAMILY_PASSWORD
+                  optional: true
           volumeMounts:
             - name: config
               mountPath: /etc/vector

@@ -5,3 +5,4 @@ resources:
   - loki-helmrelease.yaml
   - vector-configmap.yaml
   - vector-deployment.yaml
+  - vector-ntfy-externalsecret.yaml
