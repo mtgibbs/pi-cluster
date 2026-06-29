@@ -10,8 +10,10 @@ data:
       enabled: true
       address: "0.0.0.0:8686"
 
-    # Vector configuration for Heroku log drain
-    # Receives logs via HTTP, transforms, and sends to Loki
+    # Vector receives logs from two sources:
+    #   1. Heroku HTTPS log drain (existing)
+    #   2. UDM Pro Max remote syslog — firewall drop logs for DNS-bypass detection
+    #      (the "lock the doors" Phase 1 rules log every blocked public-DNS attempt).
 
     sources:
       # Heroku HTTPS log drain endpoint
@@ -24,6 +26,12 @@ data:
           - Logplex-Drain-Token
           - Logplex-Frame-Id
           - Logplex-Msg-Count
+
+      # UDM Pro Max remote syslog (UDP). NodePort 30514 -> 5514 exposes this on the LAN.
+      udm_syslog:
+        type: syslog
+        address: "0.0.0.0:5514"
+        mode: udp
 
     transforms:
       # Parse and enrich Heroku logs
@@ -63,8 +71,18 @@ data:
             .log_message = .message
           }
 
+      # CAPTURE STAGE: tag UDM syslog and keep the raw message so we can read the real
+      # firewall-drop line format in Vector's stdout, then write a precise parser
+      # (src IP / src MAC / dst / dpt) in a follow-up. No filtering yet — see everything.
+      udm_tag:
+        type: remap
+        inputs:
+          - udm_syslog
+        source: |
+          .source = "udm"
+
     sinks:
-      # Send to Loki
+      # Send Heroku logs to Loki
       loki:
         type: loki
         inputs:
@@ -78,10 +96,23 @@ data:
           dyno: "{{ dyno }}"
           level: "{{ level }}"
 
-      # Also log to stdout for debugging (can be removed later)
+      # Send UDM syslog to Loki (broad label for now; refined once the parser lands)
+      loki_udm:
+        type: loki
+        inputs:
+          - udm_tag
+        endpoint: http://loki.log-aggregation.svc.cluster.local:3100
+        encoding:
+          codec: text
+        labels:
+          source: "udm"
+          host: "{{ hostname }}"
+
+      # Console for debugging — used to capture the real UDM firewall-log format
       console:
         type: console
         inputs:
           - parse_heroku
+          - udm_tag
         encoding:
           codec: json
