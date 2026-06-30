@@ -93,6 +93,27 @@ A 4-node Kubernetes learning cluster running on Raspberry Pi hardware, providing
                               └────────────────────────────────────────────────────┘
 ```
 
+### Dual-Stack Reality — IPv4 vs IPv6 paths diverge (discovered 2026-06-29)
+
+The diagram above applies cleanly to IPv4. IPv6 behaves differently:
+
+- **IPv4:** DHCP hands clients `192.168.1.55` and `.56` directly. Clients query Pi-hole
+  as themselves — Pi-hole sees the real device IP and per-device allowlists work.
+- **IPv6:** The UDM's Router Advertisement RDNSS option advertises the UDM's own link-local
+  (`fe80::5ad6:1fff:fe32:f9a1`) as the resolver. macOS and iOS honor RDNSS; Windows ignores
+  it and falls back to the IPv4 path. When macOS uses the UDM v6 link-local, the UDM proxies
+  the query to Pi-hole with source IP `192.168.1.1` — so Pi-hole loses all per-device identity
+  for IPv6-originated queries; every such query appears to come from the gateway.
+
+**Consequence for content filtering:** per-IP and per-MAC allowlists only work for devices that
+reach Pi-hole directly. Any device preferring the IPv6 UDM-proxy path appears as `.1` in the
+FTL log and lands in the default group regardless of its reserved IP. Windows PCs are naturally
+exempt (they ignore RDNSS); macOS, iOS, and some IoT stacks are not.
+
+**Phase 3 (pending):** advertise a stable ULA or global Pi-hole address as the RDNSS entry
+instead of the UDM's link-local so all clients query Pi-hole directly over v6. A link-local
+RDNSS entry is not universally supported (broke Win11 in a test; see the 2026-06-29 recap).
+
 ### Why Recursive DNS (Unbound) Instead of Forwarding?
 
 Traditional setup: Pi-hole → Cloudflare/Google (upstream forwarder)
