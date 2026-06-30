@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-dns-bypass
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  dns-bypass.json: |
+    {
+      "annotations": { "list": [] },
+      "description": "Devices blocked trying to bypass Pi-hole via public DNS / DoT (UDM firewall drops -> Vector -> Loki). Source: source=\"udm-fw-dns-bypass\".",
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Bypass attempts (selected range)",
+          "datasource": "Loki",
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+          "id": 1,
+          "targets": [
+            { "refId": "A", "expr": "sum(count_over_time({source=\"udm-fw-dns-bypass\"} [$__range]))", "queryType": "instant" }
+          ],
+          "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 50 } ] },
+              "unit": "short"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Bypass attempts over time (by device IP)",
+          "datasource": "Loki",
+          "gridPos": { "h": 9, "w": 18, "x": 6, "y": 0 },
+          "id": 2,
+          "targets": [
+            { "refId": "A", "expr": "sum by (src_ip) (count_over_time({source=\"udm-fw-dns-bypass\"} | json [$__interval]))", "legendFormat": "{{src_ip}}" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "bars", "fillOpacity": 70, "stacking": { "mode": "normal", "group": "A" }, "lineWidth": 1 },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } }
+        },
+        {
+          "type": "table",
+          "title": "Recent bypass attempts (who / IP / MAC / resolver / port)",
+          "datasource": "Loki",
+          "gridPos": { "h": 13, "w": 24, "x": 0, "y": 9 },
+          "id": 3,
+          "targets": [
+            { "refId": "A", "expr": "{source=\"udm-fw-dns-bypass\"} | json", "queryType": "range", "maxLines": 500 }
+          ],
+          "transformations": [
+            { "id": "extractFields", "options": { "source": "labels", "replace": false } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Line": true, "labels": true, "tsNs": true, "id": true, "source": true, "source_type": true, "facility": true, "severity": true, "appname": true, "host": true, "hostname": true, "keep": true, "message": true, "source_ip": true, "alert": true },
+                "indexByName": { "Time": 0, "src_ip": 1, "src_mac": 2, "dst_ip": 3, "dpt": 4, "proto": 5, "ip_ver": 6 },
+                "renameByName": { "src_ip": "Device IP", "src_mac": "Device MAC", "dst_ip": "Rogue resolver", "dpt": "Port", "proto": "Proto", "ip_ver": "IP ver" }
+              }
+            }
+          ],
+          "options": { "showHeader": true, "sortBy": [ { "displayName": "Time", "desc": true } ] }
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["dns", "security", "pihole", "lockdown"],
+      "templating": { "list": [] },
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {},
+      "title": "DNS Bypass Attempts",
+      "uid": "dns-bypass",
+      "version": 1,
+      "weekStart": ""
+    }

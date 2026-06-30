@@ -8,6 +8,7 @@ resources:
   - dashboard-k8s-overview.yaml
   - dashboard-beelink.yaml
   - dashboard-media-nfs.yaml
+  - dashboard-dns-bypass.yaml
   - prometheusrule-beelink.yaml
   - prometheusrule-media-nfs.yaml
   - ingress.yaml
