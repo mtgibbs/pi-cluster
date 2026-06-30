@@ -33,6 +33,9 @@ spec:
           args:
             - --config-dir
             - /etc/vector
+            # Hot-reload on ConfigMap changes — otherwise a config-only edit needs
+            # a manual pod restart (which silently dropped two fixes during setup).
+            - --watch-config
           ports:
             - containerPort: 8080
               name: http
