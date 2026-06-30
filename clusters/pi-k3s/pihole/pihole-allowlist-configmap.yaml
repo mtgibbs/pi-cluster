@@ -20,6 +20,15 @@ data:
     192.168.1.84   # Julia Macbook M2 (Julias-MBP)
     192.168.1.85   # Julia Work Dock + Macbook Pro M5
 
+    # --- Adult Macs (MAC-matched) — REQUIRED for IPv6 exemption (Phase 3, 2026-06-30) ---
+    # Over IPv6 a Mac reaches Pi-hole as a LINK-LOCAL (the UDM now advertises Pi-hole's
+    # fe80:: as the v6 resolver), so Pi-hole matches it by MAC, NOT by its .8x IPv4. The
+    # .80-.85 IP lines above still cover the IPv4 path.
+    ee:76:7f:7a:df:24   # Matt Macbook M2 (.82)
+    ae:cd:9a:cc:da:c9   # Matt Work Macbook Pro M1 (.83)
+    58:ef:68:7b:fc:04   # Julia Macbook M2 (.84)
+    64:4b:f0:60:6b:51   # Julia Work Dock + Macbook Pro M5 (.85)
+
     # --- All active iPhones (MAC-matched) — "exempt all now, subtract kids later" ---
     # NOTE: iPhone MACs are randomized. If Private Wi-Fi Address is left on
     # "Rotating," a MAC here can change and that phone loses its exemption
