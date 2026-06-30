@@ -100,11 +100,6 @@ data:
           - udm_dns_bypass_throttled
         source: |
           .message = string(.alert) ?? "DNS bypass blocked"
-          # Build basic-auth ourselves so we can strip any trailing newline the
-          # synced secret carries (raw secret keeps it; `op read` strips it — that
-          # mismatch caused 401s). Auth stays in a field, never in the POST body.
-          pw = strip_whitespace(get_env_var("NTFY_PASSWORD") ?? "")
-          .ntfy_auth = "Basic " + encode_base64("family:" + pw)
 
     sinks:
       loki:
@@ -145,8 +140,11 @@ data:
           max_events: 1
         healthcheck:
           enabled: false
+        auth:
+          strategy: basic
+          user: family
+          password: "${NTFY_PASSWORD}"
         request:
           headers:
-            Authorization: "{{ ntfy_auth }}"
             Title: "DNS bypass blocked"
             Tags: "no_entry_sign,shield"
