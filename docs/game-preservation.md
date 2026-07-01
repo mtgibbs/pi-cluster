@@ -169,7 +169,7 @@ Legend — **H**=Human gate · **C**=Claude orchestrates/reviews · **Q**=qwen o
 
 | # | Task | Owner | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | 🔄 Scaffold RomM GitOps service (Kustomization, app, MariaDB, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | **Manifests drafted by qwen + reviewed, PR open (`feat/romm-service`).** No cache workload needed (Valkey embedded). |
+| 1 | ✅ Scaffold RomM GitOps service (Kustomization, app, MariaDB, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | **LIVE 2026-07-01.** PR #41 merged; hotfixed `enableServiceLinks: false` (Service name `romm` collided with RomM's `ROMM_PORT` env read, crashed nginx) in `4e5a9f4`. Verified: pod Ready, TLS cert issued, `https://romm.lab.mtgibbs.dev/api/heartbeat` → 200 through real ingress. |
 | 2 | ✅ Price prebuilt dumpers + disc-rip kit; produce a buy list | C research → **H** buys | **DONE 2026-07-01 → `docs/dumper-hardware.md`.** Minimal kit ~$350–405 (OSCR HW5 assembled + flashed LG WH16NS40). |
 | 3 | Register metadata provider → creds in 1Password | **H** → C wires ExternalSecret | **ScreenScraper (free acct, no Twitch) = default.** SteamGridDB key for art. IGDB optional (Twitch dev app). |
 | 4 | Define NAS library folder structure (RomM platform slugs) | C spec → Q writes organizer script | `library/roms/<slug>/`; include a rename/organize helper. |
@@ -192,7 +192,7 @@ cluster-ops deploys; humans handle purchases + physical dumping.
 
 ## 6. Open Decisions
 
-- **RomM dependency set** — confirm MariaDB-only vs MariaDB+Valkey against current docs at build.
+- ~~RomM dependency set~~ RESOLVED: MariaDB + embedded Valkey (no separate cache workload).
 - **Auth** — RomM's built-in auth vs front with Authelia (Beelink Authelia is Phase-1 pending).
 - **Deck ↔ library** — browser-play only, NFS-mount the share, or a sync tool? Decide at Task 7.
 - **DS dumping** — worth the homebrew-3DS workflow now, or defer? (Task backlog.)
