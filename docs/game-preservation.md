@@ -29,11 +29,11 @@ is the bulk of the value. Build all of it freely.
 ## 1. Architecture — Two Halves
 
 ```
-                 INGEST (make our own copies)                 HOMESTEAD BASE (catalog + serve)              PLAY (existing hardware)
+                 INGEST (own-made + archival)                 HOMESTEAD BASE (catalog + serve)              PLAY (existing hardware)
   ┌───────────────────────────────────────────┐     ┌──────────────────────────────────┐     ┌──────────────────────────────┐
   │  Cart dumper  ──►  ROM + save files        │     │  RomM (K3s)                      │     │  Steam Decks  (EmuDeck)      │
   │  Disc ripper  ──►  ISO / RVZ files         │ ──► │   - catalog + box art (scrape)   │ ──► │  Laptops      (RomM browser) │
-  │  Homebrew DL  ──►  freely-distributable    │     │   - browser play (EmulatorJS)    │     │  TV box (opt) (Batocera)     │
+  │  Archival DL  ──►  IA / homebrew / PD      │     │   - browser play (EmulatorJS)    │     │  TV box (opt) (Batocera)     │
   └───────────────────────────────────────────┘     │   - save-file management         │     └──────────────────────────────┘
                         │                            └──────────────────────────────────┘                       ▲
                         └────────────► QNAP NFS library (storage.lab.mtgibbs.dev) ◄──── restic backup ──────────┘
@@ -101,9 +101,44 @@ hands-on time. Decision: **buy prebuilt/plug-and-play** hardware (no soldering).
 **Freely-distributable layer (bonus, fully legal):** homebrew + public-domain titles the kids can
 enjoy immediately while the dumping backlog is worked through.
 
+**Verify every copy (provenance):** hash each dump/pull against the **No-Intro** (carts) and
+**Redump** (discs) DAT databases with a tool like **RomVault** / **clrmamepro** — it confirms a
+clean, known-good copy and flags bad dumps. This is real per-file provenance, and exactly the thing
+a bulk warez mirror *can't* give you — you know precisely what each file is.
+
 **Storage sizing:** carts are tiny (KB–MB); discs dominate (PS1 ~700MB, PS2 ~4GB, GC ~1.5GB,
 Wii ~4.7GB each). Realistic family collection is tens–low-hundreds of GB. QNAP has ample room —
 not a capacity concern.
+
+---
+
+## 3B. Archival Sources — Legitimate Third-Party (the durable-art layer)
+
+Beyond copies we make ourselves, there is a real, legitimate way to pursue the broader mission —
+preserving out-of-print art so the kids can *study* it, and holding culture offline against the day
+the network isn't there. The rule that keeps this defensible: **selective and openly-sourced, never a
+warez firehose.**
+
+- **Internet Archive (`archive.org`) — primary archival ingest.** A nonprofit *library*: Console
+  Living Room, MS-DOS/Windows software, historical software collections. Pull with the `ia` CLI or
+  their API into the RomM library, selectively by title. Use it as you'd use any library. This is
+  where genuine abandonment / orphan-works preservation is handled **in the open**, under DMCA safe
+  harbor — not on a private pipe.
+- **Homebrew / public-domain / publisher-freed titles.** Fully legal, download-anywhere. Sources:
+  itch.io (homebrew), archive.org PD/homebrew collections, official publisher freeware releases.
+  Great day-one content for the kids while the dumping backlog is worked.
+- **Legit re-release stores (buy list, not download).** Many "can't get it anymore" titles *are*
+  still purchasable DRM-free — **GOG** exists for exactly this; also Steam, Antstream, and the
+  platform retro-subscriptions. Buying is the highest-quality, permanent, guilt-free copy and it
+  funds more preservation. Keep a running purchase list.
+
+**Hard exclusion (unchanged):** ROM-piracy indexes / Usenet-NZB / warez mirrors (e.g. the r/ROMs
+megathread, Myrient full-set mirrors) are **out of scope** — indiscriminate copies of mostly-in-print
+commercial games, which is piracy, not archival. The mission is served by the three legit channels
+above plus our own dumps.
+
+> Why this is *more* resilient, not less: these copies carry no legal jeopardy, so they can live in
+> the open, be taught from publicly, and be kept forever. An archive that also survives a lawsuit.
 
 ---
 
@@ -140,6 +175,10 @@ Legend — **H**=Human gate · **C**=Claude orchestrates/reviews · **Q**=qwen o
 | 8 | (Optional) Batocera TV box | **H** buys → C guides | Full-outage-proof couch play. |
 | 9 | Bulk dump/rip backlog (ongoing) | **H** | The long tail; no shortcut. |
 | 10 | Write `rom-ops` skill once live | C/recap-architect | Fold conventions into repo knowledge. |
+| 11 | Internet Archive ingest → RomM (`ia` CLI/API), selective by title | Q scripts → C reviews → CO deploys | Primary archival path for out-of-print/abandonware; open-library sourcing only. |
+| 12 | Seed homebrew / PD day-one pack for the kids | C curates → **H** approves | itch.io homebrew, archive.org PD/homebrew, publisher freeware. |
+| 13 | Maintain GOG / re-release buy list (out-of-print but purchasable) | C researches → **H** buys | Highest-quality permanent DRM-free copies; funds preservation. |
+| 14 | Wire dump/pull verification (No-Intro/Redump DATs via RomVault/clrmamepro) | Q scripts → C reviews | Per-file provenance; flags bad dumps — the answer to "I can't verify each file". |
 
 **qwen (Beelink) offload targets:** manifest boilerplate drafts (Task 1), the ROM-organizer /
 No-Intro-style rename script (Task 4), and any glue scripts. Claude orchestrates and reviews;
@@ -154,6 +193,8 @@ cluster-ops deploys; humans handle purchases + physical dumping.
 - **Deck ↔ library** — browser-play only, NFS-mount the share, or a sync tool? Decide at Task 7.
 - **DS dumping** — worth the homebrew-3DS workflow now, or defer? (Task backlog.)
 - **Skill home** — new `rom-ops` skill vs extend `media-services`.
+- **Archival scope** — how selective on Internet Archive pulls; what goes in the homebrew/PD day-one
+  pack; which out-of-print titles to *buy* (GOG) vs *archive* (IA).
 
 ---
 
@@ -168,3 +209,6 @@ Since we're running **Tasks 1 + 2 in parallel**:
    pricing, produce a buy list for Matt to order.
 3. Flag Task 3 (metadata provider signup) to Matt — **ScreenScraper is a free account with zero
    Twitch friction** and is enough to start; IGDB (Twitch dev app) is an optional richer source later.
+4. **Track C (archival) — follows Track A:** once RomM is live, wire **Internet Archive ingest**
+   (Task 11), seed a homebrew/PD day-one pack (Task 12), and start the GOG buy list (Task 13, anytime).
+   Selective, open-library sourcing only — no warez indexes.
