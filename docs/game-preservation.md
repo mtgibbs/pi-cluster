@@ -1,6 +1,6 @@
 # Game Preservation & ROM Homestead — Build Plan
 
-**Status:** PLANNING (started 2026-07-01) · **Owner:** Matt · **Orchestrator:** Claude
+**Status:** BUILDING (started 2026-07-01; RomM manifests PR'd same day) · **Owner:** Matt · **Orchestrator:** Claude
 **Goal:** Preserve the physical game collection (carts + discs) as durable digital copies on the
 homestead, cataloged and playable on any device the family already owns — resilient to any single
 system (or the whole cluster) failing.
@@ -49,11 +49,15 @@ interchangeable — dump once, play anywhere, forever.
 RomM (https://github.com/rommapp/romm) is "Jellyfin for ROMs": catalog, metadata/box-art scraping,
 built-in browser play (EmulatorJS), and save-file management. It deploys as a normal GitOps service.
 
-**Components (verify exact deps against current RomM docs at build time — project moves fast):**
-- `romm` app container (`rommapp/romm`).
-- **MariaDB** database (required).
-- **Valkey/Redis** cache (needed for scans/background tasks in recent versions — confirm).
-- Metadata API credentials (see below).
+**Components (VERIFIED 2026-07-01 against RomM 4.9.2 docs):**
+- `romm` app container (`rommapp/romm:4.9.2`, arm64 published) — serves on 8080.
+- **MariaDB** database (required) — `mariadb:11.4` companion Deployment.
+- **Valkey is EMBEDDED in the romm image** (just a `/redis-data` volume) — no separate cache workload.
+- `HASHEOUS_API_ENABLED=true` gives **keyless metadata scraping day one** (no provider signup needed
+  to start; ScreenScraper/SteamGridDB enrich later).
+- Volumes: `/romm/library`, `/romm/assets`, `/romm/resources` → QNAP NFS `/cluster/games` (subPath
+  mounts, share + subdirs created 2026-07-01); `/romm/config`, `/redis-data`, MariaDB data → local-path PVCs.
+- 1Password item `romm` (db-password, db-root-password, auth-secret-key) created 2026-07-01.
 
 **Integration with existing stack:**
 - **Storage:** ROM library on QNAP NFS (`storage.lab.mtgibbs.dev`) — same pattern as media PVs.
@@ -165,11 +169,11 @@ Legend — **H**=Human gate · **C**=Claude orchestrates/reviews · **Q**=qwen o
 
 | # | Task | Owner | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | Scaffold RomM GitOps service (Kustomization, app, MariaDB, cache, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | Use `add-service` skill for conventions. Verify RomM's current dep list first. |
-| 2 | Price prebuilt dumpers + disc-rip kit; produce a buy list | C research → **H** buys | OSCR pre-assembled + GBxCart RW; PC drive for discs. |
+| 1 | 🔄 Scaffold RomM GitOps service (Kustomization, app, MariaDB, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | **Manifests drafted by qwen + reviewed, PR open (`feat/romm-service`).** No cache workload needed (Valkey embedded). |
+| 2 | ✅ Price prebuilt dumpers + disc-rip kit; produce a buy list | C research → **H** buys | **DONE 2026-07-01 → `docs/dumper-hardware.md`.** Minimal kit ~$350–405 (OSCR HW5 assembled + flashed LG WH16NS40). |
 | 3 | Register metadata provider → creds in 1Password | **H** → C wires ExternalSecret | **ScreenScraper (free acct, no Twitch) = default.** SteamGridDB key for art. IGDB optional (Twitch dev app). |
 | 4 | Define NAS library folder structure (RomM platform slugs) | C spec → Q writes organizer script | `library/roms/<slug>/`; include a rename/organize helper. |
-| 5 | Add ROM library path to restic backup scope | C → CO | The "won't lose them" guarantee. |
+| 5 | Add RomM data to backup scope | C → CO | NOTE: backups are **rsync-over-SSH CronJobs** (not restic) and the local-path jobs are per-node — RomM PVCs land on a Pi 5 worker, so wire a node-independent **mariadb-dump CronJob** + add config PVC to the right worker job post-deploy. ROMs/saves are already NAS-side; decide QNAP-side snapshot/2nd-copy for `/share/cluster/games`. |
 | 6 | First dumps (a few carts) → verify RomM scan + browser play end-to-end | **H** dumps → C verifies | Prove the pipeline on a small batch before bulk. |
 | 7 | EmuDeck on Steam Deck(s), pointed at library | **H** | Play surface #1. |
 | 8 | (Optional) Batocera TV box | **H** buys → C guides | Full-outage-proof couch play. |

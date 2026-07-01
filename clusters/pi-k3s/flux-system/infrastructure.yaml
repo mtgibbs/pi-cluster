@@ -629,3 +629,26 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 30. romm - ROM library manager ("Jellyfin for ROMs"): catalog + metadata scraping
+# + browser play (EmulatorJS) for the game-preservation homestead (docs/game-preservation.md).
+# Library/assets/resources live on the QNAP NFS share /cluster/games; MariaDB companion
+# in-namespace. Needs the romm 1Password item (db-password, db-root-password, auth-secret-key).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: romm
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/romm
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
