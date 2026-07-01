@@ -69,3 +69,39 @@ data:
     nav.smartscreen.microsoft.com  # SmartScreen URL reputation
     df6.cfp.microsoft.com    # Customer Facing Platform services
     browser.events.data.microsoft.com  # Telemetry (required for store to function)
+
+    # ============================================================
+    # Mobile-app blocking-config endpoints
+    # ============================================================
+    # Pattern: some apps make a BLOCKING config/experiment call at launch to an
+    # analytics/CDP domain. When a Firebog list sinkholes it, the app hangs
+    # forever (no timeout fallback) — e.g. MyFitnessPal/Delta-class breakage.
+    # Allow ONLY the config endpoint; event ingestion (e.g. nativesdks.mparticle.com)
+    # stays blocked. Diagnose by catching the GRAVITY hit in the query log while
+    # the app spins.
+    config2.mparticle.com    # Ticketmaster: mParticle SDK startup config fetch (app hangs if blocked, 2026-06-30)
+
+    # ============================================================
+    # Reconciled from live Pi-hole — was UI/API drift (NOT in git
+    # until 2026-06-30). Added ad-hoc over time to fix specific apps;
+    # now under GitOps so a PVC rebuild re-seeds them instead of
+    # silently breaking these apps again.
+    # ============================================================
+
+    # --- Feature-flag / A-B-testing SDKs (block-on-launch config) ---
+    auth.split.io            # Split.io feature-flag auth (added 2026-01-27)
+    sdk.split.io             # Split.io SDK config/treatments (added 2026-01-27)
+
+    # --- Crunchyroll (ad-supported streaming) ---
+    eec.crunchyroll.com      # Crunchyroll app endpoint (added 2026-03-14)
+    imasdk.googleapis.com    # Google IMA ad SDK — required for ad-supported video playback (added 2026-03-16)
+
+    # --- Delta Air Lines app (analytics/experiment endpoints it blocks on) ---
+    tms.delta.com                     # Delta tag-management system (added 2026-04-10)
+    pulse.delta.com                   # Delta pulse/analytics (added 2026-04-10)
+    p11.techlab-cdn.com               # Delta tag CDN (added 2026-04-10)
+    deltaairlines.tt.omtrdc.net       # Adobe Target — A/B testing (added 2026-04-10)
+    dlt-beacon.dynatrace-managed.com  # Dynatrace RUM beacon (added 2026-04-10)
+
+    # --- Shared consent CDN (OneTrust — used by Delta AND Ticketmaster) ---
+    cdn.cookielaw.org        # OneTrust consent management (added 2026-04-10)
