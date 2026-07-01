@@ -15,6 +15,9 @@ spec:
       labels:
         app: romm
     spec:
+      # The Service is named "romm", so k8s service links inject ROMM_PORT=tcp://<ip>:8080,
+      # which RomM's entrypoint reads as its listen-port config and feeds to nginx.
+      enableServiceLinks: false
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
