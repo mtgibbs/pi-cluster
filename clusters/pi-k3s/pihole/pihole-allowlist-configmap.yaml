@@ -29,13 +29,16 @@ data:
     58:ef:68:7b:fc:04   # Julia Macbook M2 (.84)
     64:4b:f0:60:6b:51   # Julia Work Dock + Macbook Pro M5 (.85)
 
-    # --- All active iPhones (MAC-matched) — "exempt all now, subtract kids later" ---
-    # NOTE: iPhone MACs are randomized. If Private Wi-Fi Address is left on
-    # "Rotating," a MAC here can change and that phone loses its exemption
-    # (re-add the new MAC, or set Private Address > Fixed for permanence).
-    # TODO: identify each KID's iPhone and DELETE its line so they get blocked.
-    da:57:f2:ee:c8:8f   # iPhone (active)
-    4e:2b:56:67:b1:68   # iPhone (active)
-    aa:27:4d:5b:13:f8   # iPhone (active)
-    8e:15:e9:d3:e0:cf   # iPhone (active)
-    ae:30:97:b3:a2:e1   # iPhone (seen ~3wk ago)
+    # --- Adult iPhones ONLY (MAC-matched) — kids intentionally EXCLUDED ---
+    # Over IPv6 an iPhone reaches Pi-hole as a LINK-LOCAL, so it's matched by MAC
+    # (its .9x IPv4 alone won't match). iOS randomizes the Wi-Fi MAC: set each adult
+    # phone's Private Wi-Fi Address to "Fixed" (Settings > Wi-Fi > network > Private
+    # Wi-Fi Address) or a rotation silently drops its exemption.
+    4e:2b:56:67:b1:68   # Matt iPhone
+    8e:15:e9:d3:e0:cf   # Julia iPhone (reserved .91)
+    #
+    # KIDS — intentionally NOT exempt (removed 2026-07-01 so the blackout applies).
+    # Do NOT re-add these — that reopens the YouTube/short-form hole:
+    #   aa:27:4d:5b:13:f8   Rory iPhone
+    #   da:57:f2:ee:c8:8f   Ronin iPhone
+    #   ae:30:97:b3:a2:e1   stale/rotated iPhone MAC (offline since 2026-06-03) — dropped
