@@ -169,7 +169,7 @@ Legend — **H**=Human gate · **C**=Claude orchestrates/reviews · **Q**=qwen o
 
 | # | Task | Owner | Notes |
 | :--- | :--- | :--- | :--- |
-| 1 | ✅ Scaffold RomM GitOps service (Kustomization, app, MariaDB, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | **LIVE 2026-07-01.** PR #41 merged; hotfixed `enableServiceLinks: false` (Service name `romm` collided with RomM's `ROMM_PORT` env read, crashed nginx) in `4e5a9f4`. Verified: pod Ready, TLS cert issued, `https://romm.lab.mtgibbs.dev/api/heartbeat` → 200 through real ingress. |
+| 1 | ✅ Scaffold RomM GitOps service (Kustomization, app, MariaDB, PVC, Svc, Ingress, ExternalSecret) | Q drafts → C reviews → CO deploys | **LIVE 2026-07-01.** PR #41 merged; hotfixed `enableServiceLinks: false` (Service name `romm` collided with RomM's `ROMM_PORT` env read, crashed nginx) in `4e5a9f4`. Verified: pod Ready, TLS cert issued, `https://romm.lab.mtgibbs.dev/api/heartbeat` → 200 through real ingress. Homepage tile (REC DECK) + AutoKuma monitor added same day, verified rendering/syncing live. |
 | 2 | ✅ Price prebuilt dumpers + disc-rip kit; produce a buy list | C research → **H** buys | **DONE 2026-07-01 → `docs/dumper-hardware.md`.** Minimal kit ~$350–405 (OSCR HW5 assembled + flashed LG WH16NS40). |
 | 3 | Register metadata provider → creds in 1Password | **H** → C wires ExternalSecret | **ScreenScraper (free acct, no Twitch) = default.** SteamGridDB key for art. IGDB optional (Twitch dev app). |
 | 4 | Define NAS library folder structure (RomM platform slugs) | C spec → Q writes organizer script | `library/roms/<slug>/`; include a rename/organize helper. |
