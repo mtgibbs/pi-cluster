@@ -30,7 +30,7 @@ data:
         icon: mdi-brain
       REC DECK:
         style: row
-        columns: 3
+        columns: 4
         icon: mdi-popcorn
       ACQUISITION:
         style: row
@@ -207,6 +207,11 @@ data:
             href: https://requests.lab.mtgibbs.dev
             description: Media Requests
             siteMonitor: https://requests.lab.mtgibbs.dev
+        - RomM:
+            icon: romm.png
+            href: https://romm.lab.mtgibbs.dev
+            description: ROM Library & Preservation
+            siteMonitor: https://romm.lab.mtgibbs.dev/api/heartbeat
 
     - ACQUISITION:
         - Sonarr:

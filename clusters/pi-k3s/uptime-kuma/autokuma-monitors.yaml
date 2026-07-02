@@ -243,6 +243,16 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  romm.json: |
+    {
+      "notification_name_list": ["discord"],
+      "type": "http",
+      "name": "RomM",
+      "url": "https://romm.lab.mtgibbs.dev/api/heartbeat",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   sonarr.json: |
     {
       "notification_name_list": ["discord"],
