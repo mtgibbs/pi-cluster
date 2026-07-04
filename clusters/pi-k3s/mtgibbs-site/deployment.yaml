@@ -20,7 +20,7 @@ spec:
       # See docs/incidents/2026-05-24-pi3-worker-2-overload.md.
       containers:
         - name: mtgibbs-site
-          image: ghcr.io/mtgibbs/mtgibbs.xyz:20260704175823 # {"$imagepolicy": "flux-system:mtgibbs-site"}
+          image: ghcr.io/mtgibbs/mtgibbs.xyz:20260704181225 # {"$imagepolicy": "flux-system:mtgibbs-site"}
           ports:
             - containerPort: 3000
               name: http
