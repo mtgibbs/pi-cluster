@@ -57,6 +57,13 @@ case "$cmd" in
     # in the container. Goes stale; re-run to refresh. --rsync-path=sudo since
     # the target dir is owned by uid 1001 (container's `agent` user) and the
     # ssh user may not be.
+    #
+    # If the container's ctx is ever newer than the laptop's, this will sync a
+    # DB the container refuses to read ("schema version N is not supported").
+    # Fix: `ctx upgrade` (laptop) then `ctx setup` (migrates in place, safe —
+    # confirmed non-destructive, indexed_items only grows) before re-running
+    # this. See the version-pin comment in beelink-ansible's
+    # coding-harness-claude/Dockerfile.
     ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.ctx"
     rsync -avz --rsync-path="sudo rsync" \
       "$HOME/.ctx/work.sqlite" "$HOST:$CLAUDE_HOME_DIR/.ctx/work.sqlite"
