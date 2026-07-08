@@ -102,8 +102,34 @@ in `beelink-ansible/files/coding-harness-{qwen,claude}/` (separate repo).
 
 | Container | What it is |
 |---|---|
-| `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh` |
-| `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh`, so a Claude session here can delegate to qwen exactly like a laptop session does — just hosted in the lab |
+| `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh`. Single-repo (pi-cluster). |
+| `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh` (delegates to qwen like a laptop session), **plus `ctx`** (local agent-history search) and this laptop's synced Claude memory. **General workstation, not repo-locked** — clone anything under `/Users/mtgibbs/dev/`. |
+
+**General workstation, not pi-cluster-only:** `coding-harness-claude` mounts
+`/Users/mtgibbs/dev` (not just a scratch dir) specifically so it matches the
+laptop's real repo paths — `git clone <url> /Users/mtgibbs/dev/<name>` works
+for any repo the PAT covers, and Claude Code's own project-memory-directory
+naming (a sanitized copy of the absolute cwd path — confirmed via the
+worktree-path example `-Users-mtgibbs-dev-mtgibbs-xyz--claude-worktrees-...`)
+lines up automatically, so a synced copy of that repo's laptop memory (if any)
+is found without extra config. **The GitHub PAT should be scoped to "All
+repositories,"** not just pi-cluster — this is meant to be usable for anything,
+the narrow part is the *permission* set (Contents+PR RW, no admin), not the
+repo list.
+
+**`ctx` (local agent-history search):** stdio-only (no network transport), so
+both the binary (baked into the image, linux_x64, pinned) and its indexed
+SQLite data (`~/.ctx/work.sqlite`) need to physically be in the container.
+The data is a laptop-local point-in-time snapshot shipped via `harness
+sync-ctx` — re-run it to refresh; there's no live sync. Once synced, `ctx
+search`/`ctx mcp serve` work exactly like on the laptop.
+
+**Claude's own memory:** `harness sync-memory` ships this laptop's
+`~/.claude/projects/*/memory/` content (curated summaries only — deliberately
+NOT the raw `.jsonl` session transcripts, since `ctx` already covers full
+history search and there's no need to double-ship the verbose form) to the
+matching path in the container. Works for any project the laptop has memory
+for, not just pi-cluster, because of the path-matching design above.
 
 **Access:** `scripts/harness attach {qwen\|claude}` (or `harness run qwen <spec-dir>`
 to fire a loop and check on it later) — wraps `ssh beelink-ai` + `docker exec -it
@@ -126,14 +152,20 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
   uses on the laptop (`op://pi-cluster/opencode-coder/password`) — one role, one
   credential, whether it's driven from the laptop or this container.
 - git identity: both containers push using a **dedicated fine-grained GitHub PAT**
-  (`op://pi-cluster/coding-harness-github-pat/token`, scoped to specific repos,
-  Contents+PR read/write only, no admin) — **not** your personal `gh` session.
+  (`op://pi-cluster/coding-harness-github-pat/token`, **repository access: All
+  repositories** — this is a general workstation, not one-repo-locked — but
+  **permissions stay narrow**: Contents+PR read/write only, no admin) — **not**
+  your personal `gh` session.
 
 **Required human setup (not yet done as of this writing):**
-1. Mint a fine-grained PAT on GitHub scoped to the repos this should touch
-   (start with just `pi-cluster`) with **Contents: Read/write**, **Pull requests:
-   Read/write**, **Metadata: Read-only** — nothing else. Store it in 1Password as
-   `coding-harness-github-pat` (field `token`), vault `pi-cluster`.
+1. Mint a fine-grained PAT on GitHub (https://github.com/settings/tokens?type=beta):
+   **Resource owner:** your account. **Repository access: All repositories**
+   (broad coverage, since this is a general workstation — the safety boundary
+   is the permission list below, not the repo list). **Permissions:**
+   **Contents: Read and write**, **Pull requests: Read and write**,
+   **Metadata: Read-only** (auto-required) — leave every other permission at
+   "No access." Store it in 1Password as `coding-harness-github-pat`
+   (field `token`), vault `pi-cluster`.
 2. Deploy: `ansible-playbook playbooks/50-ai-stack.yml --extra-vars "harness_github_pat=$(op read 'op://pi-cluster/coding-harness-github-pat/token') harness_litellm_key=$(op read 'op://pi-cluster/opencode-coder/password') ..."`
    (plus all the *existing* ai-stack secrets already required — this doesn't
    replace that invocation, it adds two more `--extra-vars`).
@@ -145,6 +177,10 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
    way this session does) is **not wired up** — deliberately left as an open
    scoping decision (full parity with this session's tools vs. a more
    restricted read-mostly set to start) rather than assumed.
+5. `harness sync-ctx` and `harness sync-memory` (from the laptop, after deploy)
+   ship the local `ctx` index snapshot and this laptop's Claude memory into
+   `coding-harness-claude`. Not automatic/scheduled — re-run either after the
+   laptop's data has moved on meaningfully.
 
 **Known gap, not yet built:** egress isn't restricted to just `ai.lab.mtgibbs.dev`
 + `github.com` — the containers can reach the open internet like any other

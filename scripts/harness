@@ -12,10 +12,16 @@
 #   harness run qwen "specs/foo"     # fire-and-forget: runs run-task.sh in the
 #                                     # SAME session you can later attach to
 #   harness status                   # docker compose ps, filtered to the two
+#   harness sync-ctx                 # ship a snapshot of the laptop's ctx index
+#                                     # (claude container only — re-run to refresh)
+#   harness sync-memory              # ship this laptop's Claude memory (all
+#                                     # projects' memory/ dirs, not raw session
+#                                     # transcripts) — claude container only
 set -euo pipefail
 
 HOST="${HARNESS_SSH_HOST:-beelink-ai}"
-usage() { echo "usage: harness {attach|run|status} [qwen|claude] [args...]" >&2; exit 1; }
+CLAUDE_HOME_DIR="/srv/coding-harness-claude-data/home"
+usage() { echo "usage: harness {attach|run|status|sync-ctx|sync-memory} [qwen|claude] [args...]" >&2; exit 1; }
 
 container_for() {
   case "$1" in
@@ -44,6 +50,29 @@ case "$cmd" in
   status)
     # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
     ssh "$HOST" "cd /opt/ai-stack && docker compose ps coding-harness-qwen coding-harness-claude"
+    ;;
+  sync-ctx)
+    # Point-in-time snapshot of the laptop's local ctx index — ctx's MCP mode
+    # is stdio-only (no network transport), so the data has to physically be
+    # in the container. Goes stale; re-run to refresh. --rsync-path=sudo since
+    # the target dir is owned by uid 1000 and the ssh user may not be.
+    ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.ctx"
+    rsync -avz --rsync-path="sudo rsync" \
+      "$HOME/.ctx/work.sqlite" "$HOST:$CLAUDE_HOME_DIR/.ctx/work.sqlite"
+    ssh "$HOST" "sudo chown -R 1000:1000 $CLAUDE_HOME_DIR/.ctx"
+    echo "harness: ctx index synced. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart coding-harness-claude'"
+    ;;
+  sync-memory)
+    # Only memory/ subdirectories (the curated summaries) — NOT the raw
+    # .jsonl session transcripts (ctx already covers full-history search, no
+    # need to double-ship the verbose form). Matches ANY project the laptop
+    # has memory for, not just pi-cluster — see the repo-mirror path design.
+    ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.claude/projects"
+    rsync -avz --rsync-path="sudo rsync" \
+      --include='*/' --include='*/memory/**' --exclude='*' \
+      "$HOME/.claude/projects/" "$HOST:$CLAUDE_HOME_DIR/.claude/projects/"
+    ssh "$HOST" "sudo chown -R 1000:1000 $CLAUDE_HOME_DIR/.claude"
+    echo "harness: memory synced."
     ;;
   *) usage ;;
 esac
