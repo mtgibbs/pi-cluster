@@ -55,11 +55,23 @@ no laptop needs to stay open, and you can pop in and drive it live or fire off a
 loop and check back later. Full details, security model, and the human setup
 steps: `.claude/skills/coding-agent-ops/SKILL.md` → "Remote harness (Beelink)".
 
+**Bootstrap onto any machine** (same one-time step as `oc` — it's not on `PATH` by default):
+
+```bash
+cp scripts/harness ~/.local/bin/harness && chmod +x ~/.local/bin/harness   # ~/.local/bin must be on PATH
+```
+
+**Use:**
+
 ```bash
 harness attach qwen              # pop in and drive opencode/qwen live
 harness attach claude            # pop in to a real Claude Code session
 harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
 harness status                   # is either container up?
+harness sync-ctx                 # ship a snapshot of the laptop's ctx index (claude only)
+harness sync-memory              # ship this laptop's Claude memory (claude only)
 ```
+
+Requires: `ssh beelink-ai` already configured (see the local-creds model above).
 
 Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude}/`).
