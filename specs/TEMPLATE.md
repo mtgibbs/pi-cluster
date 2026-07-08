@@ -42,7 +42,9 @@
 <!-- The strategy in 2-5 sentences: HOW we intend to meet §1, and crucially WHICH existing
      pattern this mirrors ("same shape as X in path/to/file"). The high-level plan that the
      §9 task breakdown then makes concrete. Note any approach considered and rejected (so a
-     later reader — or a regenerating model — doesn't re-litigate it). -->
+     later reader — or a regenerating model — doesn't re-litigate it). Rejected approaches
+     often live in past agent sessions, not docs — the lifecycle's ctx prior-art pass
+     (`ctx search "<terms>"`) is where to dig them up. -->
 
 ## 5. Scope · [S — Structure: boundary]
 ### In scope
@@ -57,7 +59,10 @@
      - which EXISTING pattern to copy, and the file it lives in ("like X in path/to/file")
      - OPERATIONAL REALITY the model can't infer from code (e.g. "service X is deployed but unused")
      - upstream/downstream dependencies and how this component fits the system
-     - literal values for anything linkable (URLs, UIDs) -->
+     - literal values for anything linkable (URLs, UIDs)
+     - decisions/attempts from prior agent sessions (`ctx search --file <path>` per touched
+       file) — distill the finding into a sentence here; cite the ctx session id so a
+       reviewer can pull the full context with `ctx show session <id>` -->
 
 ## 7. Norms · [N — Norms]
 <!-- Cross-cutting STANDARDS for this task — the stuff a literal executor has no taste for and
@@ -131,7 +136,8 @@
      reproduces the same miss next iteration. "When reality diverges, fix the prompt first." -->
 
 ## Worked-example checklist (before you hand this to an agent)
-<!-- - [ ] Every linkable target is a LITERAL url/uid, not prose.
+<!-- - [ ] ctx prior-art pass run (feature terms + each touched file); findings folded into §4/§6.
+     - [ ] Every linkable target is a LITERAL url/uid, not prose.
      - [ ] §3 Entities pin literal field names/types (or "stateless — n/a").
      - [ ] §4 Approach names the existing pattern being mirrored.
      - [ ] §7 Norms pull the taste/observability rules that apply (don't leave to guess).

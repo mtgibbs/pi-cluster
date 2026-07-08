@@ -21,6 +21,7 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
 | SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
+| History search | `ctx` (`~/.local/bin/ctx`, data `~/.ctx`) | indexes Claude + opencode sessions; **orchestrator-side only** — qwen never calls it. opencode imports are lite fidelity (diffs + timing, no prose); the Claude sessions *about* a run carry the analysis |
 
 ## Day-to-day usage
 
@@ -30,13 +31,22 @@ oc run "do one thing"    # headless one-shot (watchdog: OC_RUN_TIMEOUT, default 
 ```
 
 **The supervised SDD loop** (the intended flow):
-1. Write `specs/<feature>/spec.md` from `specs/TEMPLATE.md` (outcomes, scope, EARS §7 criteria).
-2. Plan: resolve correctness + **granularity** (verify the exact field, not a proxy) + **design**
+1. **Prior-art pass** (Claude, not qwen): `ctx setup` to pick up sessions since the last
+   index, then `ctx search "<feature terms>"` + `ctx search --file <path>` for each path in
+   the spec's Touches. Fold failed attempts / rejected approaches into §4 and prior
+   decisions into §6 — broad single terms beat long phrases. Coverage floor: Claude Code
+   pruned transcripts after 30 days until `cleanupPeriodDays: 365` was set (2026-07-08),
+   so no Claude history exists before ~2026-06-07 — the recaps in `docs/recaps/` are the
+   only record of older work.
+2. Write `specs/<feature>/spec.md` from `specs/TEMPLATE.md` (outcomes, scope, EARS §7 criteria).
+3. Plan: resolve correctness + **granularity** (verify the exact field, not a proxy) + **design**
    (idiomatic/tasteful pattern, per `design-principles.md`) unknowns. Fold answers into §10.
-3. Write `specs/<feature>/verify.sh` — §7 compiled to a deterministic static gate (exit 0 = ok).
-4. Decompose §6 into `tasks.txt`; run on a **git worktree/branch**:
+4. Write `specs/<feature>/verify.sh` — §7 compiled to a deterministic static gate (exit 0 = ok).
+5. Decompose §6 into `tasks.txt`; run on a **git worktree/branch**:
    `scripts/ralph-qwen.sh specs/<feature>`
-5. Review the diff against §7 + eyeball the rendered result (taste); merge via PR.
+6. Review the diff against §7 + eyeball the rendered result (taste); merge via PR. If the
+   loop stopped for a human, `ctx setup` re-indexes the failed run so the re-spec's
+   prior-art pass (step 1) can cite it.
 
 > **Capture quirk:** piping `oc run … | tail` in a *backgrounded* shell can swallow opencode's
 > output (TTY detection). Redirect to a file (`oc run … > out.txt 2>&1`) or run in a real terminal.
@@ -65,6 +75,9 @@ relocate those.
 - **PR-gated:** output is a reviewed diff; Flux applies on merge. Never direct-to-cluster.
 - **The loop runs `verify.sh`; the model never self-certifies "done".**
 - **Bound scope + fresh context per task** (avoids the context bloat that preceded a stall).
+- **ctx stays out of qwen's path** — never in `AGENTS.md` or opencode's toolset. History
+  goes to qwen only as distilled spec text (§4/§6), pre-baked by the orchestrator; a live
+  query would burn prefill on the model's bottleneck and reopen the headless tool-use failure.
 
 ## Known failure modes → fix
 

@@ -79,9 +79,15 @@ templates that make a requirement testable instead of vibey:
 
 ## Lifecycle
 
+0. **Prior-art pass**: `ctx setup && ctx search "<feature terms>"` (+ `--file <path>` per
+   touched file) against indexed agent history. Prior attempts, rejected approaches, and
+   decisions land in §4/§6 *before* drafting — so the spec inherits memory the executor
+   doesn't have. (Orchestrator-side only; qwen never queries ctx.)
 1. Copy [`TEMPLATE.md`](TEMPLATE.md) → `specs/<feature>/spec.md` (Draft). Capture what's known; list unknowns as **Open Questions**.
 2. **Plan**: resolve the open questions, record decisions back into the spec (*living
-   document*). Resolve THREE kinds of unknown, not one:
+   document*). A `ctx search` on each OQ's terms often turns a research task into a
+   lookup — the answer may already exist in a past session. Resolve THREE kinds of
+   unknown, not one:
    - **correctness** — real URLs, ports, exact values;
    - **granularity** — verify the *exact field/value* a criterion needs, not a proxy (an
      item existing ≠ its `api-key` field existing — the prowlarr lesson);
@@ -97,7 +103,7 @@ templates that make a requirement testable instead of vibey:
   (arr status widgets, AI/chat section, Beelink telemetry). *First dogfood artifact; tuned
   through a Round-1 qwen3-coder eval (see its §11).*
 
-### Backlog (ready for qwen3-coder)
-- [`decommission-carl-pi-ollama/`](decommission-carl-pi-ollama/spec.md) — retire CARL and the
+### Done
+- [`decommission-carl-pi-ollama/`](decommission-carl-pi-ollama/spec.md) — retired CARL and the
   Pi-side Ollama (overhead; CARL was Ollama's only consumer, inference moved to the Beelink).
-  Destructive teardown — PR-gated.
+  Executed 2026-05-24, Claude-driven (destructive teardown, kept off the qwen loop).
