@@ -92,6 +92,67 @@ relocate those.
 | Dewey cold after `aimode family` | `aimode warm()` was a no-op (ollama image has no curl) — fixed 2026-05-24 to use `docker exec open-webui curl` + Dewey's real models | redeploy `beelink-ansible/files/aimode.sh`; warm path must hit ollama from a container that *has* curl |
 | Want the loop on the Q8 | `oc` follows `hot-coder` → run `aimode work` (sole-tenant Q8 @ 256k — `-c 262144`, the model's native max; raised from 32k on 2026-06-24). 30B@64k is niche (slow prefill, see research §12) — prefer Q8 + decompose | `aimode work` then `oc`; `aimode family` to restore |
 
+## Remote harness (Beelink) — persistent, sandboxed, tmux-attach sessions
+
+Two containers on the Beelink give the laptop's `oc`/`ralph-qwen.sh` setup a
+persistent, remotely-reachable home — no laptop needs to stay open, and you
+can either let a loop run unattended or pop in and drive it live, same session
+either way. Deployed via `beelink-ansible/playbooks/50-ai-stack.yml`; source
+in `beelink-ansible/files/coding-harness-{qwen,claude}/` (separate repo).
+
+| Container | What it is |
+|---|---|
+| `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh` |
+| `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh`, so a Claude session here can delegate to qwen exactly like a laptop session does — just hosted in the lab |
+
+**Access:** `scripts/harness attach {qwen\|claude}` (or `harness run qwen <spec-dir>`
+to fire a loop and check on it later) — wraps `ssh beelink-ai` + `docker exec -it
+<container> tmux attach -t main`. Zero new exposed ports: reachability is entirely
+inherited from the existing Tailscale SSH access to the box (see tailscale-ops
+SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
+
+**Sandboxing (why this is low blast radius):**
+- No Docker socket, no kubeconfig, no 1Password service token, no NAS mount.
+- Root filesystem `read_only: true`; the only writable path is the bind-mounted
+  `/home/agent` workspace (`/srv/coding-harness-{qwen,claude}-data` on the host) +
+  a `/tmp` tmpfs. Everything else — including `entrypoint.sh`/`run-task.sh`
+  themselves — lives outside `$HOME` specifically so the empty bind mount can
+  never shadow them on first boot.
+- `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, non-root (uid 1000),
+  `mem_limit`/`cpus` caps.
+- Model access: `http://litellm:4000`, model alias `hot-coder` — same
+  family-vs-work-mode-following alias every other Beelink consumer uses (see
+  `aimode.sh` in beelink-ansible), reused via the SAME LiteLLM key `oc` already
+  uses on the laptop (`op://pi-cluster/opencode-coder/password`) — one role, one
+  credential, whether it's driven from the laptop or this container.
+- git identity: both containers push using a **dedicated fine-grained GitHub PAT**
+  (`op://pi-cluster/coding-harness-github-pat/token`, scoped to specific repos,
+  Contents+PR read/write only, no admin) — **not** your personal `gh` session.
+
+**Required human setup (not yet done as of this writing):**
+1. Mint a fine-grained PAT on GitHub scoped to the repos this should touch
+   (start with just `pi-cluster`) with **Contents: Read/write**, **Pull requests:
+   Read/write**, **Metadata: Read-only** — nothing else. Store it in 1Password as
+   `coding-harness-github-pat` (field `token`), vault `pi-cluster`.
+2. Deploy: `ansible-playbook playbooks/50-ai-stack.yml --extra-vars "harness_github_pat=$(op read 'op://pi-cluster/coding-harness-github-pat/token') harness_litellm_key=$(op read 'op://pi-cluster/opencode-coder/password') ..."`
+   (plus all the *existing* ai-stack secrets already required — this doesn't
+   replace that invocation, it adds two more `--extra-vars`).
+3. First attach to `coding-harness-claude` needs a one-time interactive Claude
+   login (`claude` prompts for OAuth device-code, or set `ANTHROPIC_API_KEY`
+   first if you'd rather bill via API than subscription — **your call, not
+   decided yet**) — session state persists in the bind-mounted volume after that.
+4. MCP tool access for `coding-harness-claude` (reaching `mcp-homelab` etc. the
+   way this session does) is **not wired up** — deliberately left as an open
+   scoping decision (full parity with this session's tools vs. a more
+   restricted read-mostly set to start) rather than assumed.
+
+**Known gap, not yet built:** egress isn't restricted to just `ai.lab.mtgibbs.dev`
++ `github.com` — the containers can reach the open internet like any other
+Docker container on this host. Would need an egress proxy/firewall rule to
+tighten further; noted as a possible future hardening step, not done because
+it's meaningfully more complexity than the current risk (a PR-gated coding
+loop, not an untrusted-code sandbox) warrants today.
+
 ## Pointers
 
 - Research log (findings, gaps, open decisions): `docs/research/local-coding-agent-sdd.md`

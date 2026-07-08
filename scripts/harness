@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# harness — attach to / fire commands into the persistent coding-agent
+# containers on the Beelink (coding-harness-qwen, coding-harness-claude).
+#
+# Both containers run a detached tmux session named "main" with zero exposed
+# ports — the only way in is `ssh beelink-ai` (already-established alias, see
+# scripts/README.md) + `docker exec`. This wrapper is just that two-step hop
+# collapsed into one command; it grants no new access on its own.
+#
+#   harness attach qwen              # pop in and drive it live
+#   harness attach claude
+#   harness run qwen "specs/foo"     # fire-and-forget: runs run-task.sh in the
+#                                     # SAME session you can later attach to
+#   harness status                   # docker compose ps, filtered to the two
+set -euo pipefail
+
+HOST="${HARNESS_SSH_HOST:-beelink-ai}"
+usage() { echo "usage: harness {attach|run|status} [qwen|claude] [args...]" >&2; exit 1; }
+
+container_for() {
+  case "$1" in
+    qwen)   echo "coding-harness-qwen" ;;
+    claude) echo "coding-harness-claude" ;;
+    *) echo "harness: unknown target '$1' (expected qwen or claude)" >&2; exit 1 ;;
+  esac
+}
+
+cmd="${1:-}"; shift || usage
+case "$cmd" in
+  attach)
+    target="${1:?usage: harness attach {qwen|claude}}"
+    c="$(container_for "$target")"
+    exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
+    ;;
+  run)
+    target="${1:?usage: harness run {qwen|claude} <spec-dir>}"
+    spec="${2:?usage: harness run {qwen|claude} <spec-dir>}"
+    c="$(container_for "$target")"
+    # Injects into the SAME tmux session `attach` lands in — nothing hidden,
+    # you can pop in mid-run and watch (or take over) at any time.
+    ssh "$HOST" "docker exec $c tmux send-keys -t main '/usr/local/bin/run-task.sh $spec' Enter"
+    echo "harness: sent. Watch it with: harness attach $target"
+    ;;
+  status)
+    # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
+    ssh "$HOST" "cd /opt/ai-stack && docker compose ps coding-harness-qwen coding-harness-claude"
+    ;;
+  *) usage ;;
+esac

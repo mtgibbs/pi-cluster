@@ -46,3 +46,20 @@ OC_KEY_REF="op://work-vault/opencode/key" oc
 
 Requires: `op` (1Password CLI, signed in or desktop-integration enabled), `opencode`,
 and a project `opencode.json` whose provider reads `{env:OPENCODE_QWEN_KEY}`.
+
+## `harness` — remote coding-agent containers (Beelink)
+
+Two persistent, sandboxed containers on the Beelink give you the laptop's `oc`/
+`ralph-qwen.sh` setup as a remote session reachable from anywhere over Tailscale —
+no laptop needs to stay open, and you can pop in and drive it live or fire off a
+loop and check back later. Full details, security model, and the human setup
+steps: `.claude/skills/coding-agent-ops/SKILL.md` → "Remote harness (Beelink)".
+
+```bash
+harness attach qwen              # pop in and drive opencode/qwen live
+harness attach claude            # pop in to a real Claude Code session
+harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
+harness status                   # is either container up?
+```
+
+Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude}/`).
