@@ -34,13 +34,13 @@ container_for() {
 cmd="${1:-}"; shift || usage
 case "$cmd" in
   attach)
-    target="${1:?usage: harness attach {qwen|claude}}"
+    target="${1:?usage: harness attach qwen-or-claude}"
     c="$(container_for "$target")"
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
-    target="${1:?usage: harness run {qwen|claude} <spec-dir>}"
-    spec="${2:?usage: harness run {qwen|claude} <spec-dir>}"
+    target="${1:?usage: harness run qwen-or-claude spec-dir}"
+    spec="${2:?usage: harness run qwen-or-claude spec-dir}"
     c="$(container_for "$target")"
     # Injects into the SAME tmux session `attach` lands in — nothing hidden,
     # you can pop in mid-run and watch (or take over) at any time.
@@ -55,11 +55,12 @@ case "$cmd" in
     # Point-in-time snapshot of the laptop's local ctx index — ctx's MCP mode
     # is stdio-only (no network transport), so the data has to physically be
     # in the container. Goes stale; re-run to refresh. --rsync-path=sudo since
-    # the target dir is owned by uid 1000 and the ssh user may not be.
+    # the target dir is owned by uid 1001 (container's `agent` user) and the
+    # ssh user may not be.
     ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.ctx"
     rsync -avz --rsync-path="sudo rsync" \
       "$HOME/.ctx/work.sqlite" "$HOST:$CLAUDE_HOME_DIR/.ctx/work.sqlite"
-    ssh "$HOST" "sudo chown -R 1000:1000 $CLAUDE_HOME_DIR/.ctx"
+    ssh "$HOST" "sudo chown -R 1001:1001 $CLAUDE_HOME_DIR/.ctx"
     echo "harness: ctx index synced. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart coding-harness-claude'"
     ;;
   sync-memory)
@@ -71,7 +72,7 @@ case "$cmd" in
     rsync -avz --rsync-path="sudo rsync" \
       --include='*/' --include='*/memory/**' --exclude='*' \
       "$HOME/.claude/projects/" "$HOST:$CLAUDE_HOME_DIR/.claude/projects/"
-    ssh "$HOST" "sudo chown -R 1000:1000 $CLAUDE_HOME_DIR/.claude"
+    ssh "$HOST" "sudo chown -R 1001:1001 $CLAUDE_HOME_DIR/.claude"
     echo "harness: memory synced."
     ;;
   *) usage ;;
