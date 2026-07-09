@@ -51,7 +51,7 @@ Destination base: `/share/cluster/backups/`
 - **Schedule**: Sundays 3:00 AM
 - **Node**: `pi5-worker-1`
 - **Scope**: All media service config PVCs on worker 1
-- **PVCs**: `media_prowlarr-config`, `media_sonarr-config`, `media_radarr-config`, `media_qbittorrent-config`, `media_jellyseerr-config`, `media_lazylibrarian-config`, `media_calibre-web-config`, `media_readarr-config`, `media_lidarr-config`
+- **PVCs**: `media_prowlarr-config`, `media_sonarr-config`, `media_radarr-config`, `media_qbittorrent-config`, `media_jellyseerr-config`, `media_lazylibrarian-config`, `media_calibre-web-config`, `media_readarr-config`, `media_lidarr-config`, `romm_romm-config`
 - **Destination**: `/share/cluster/backups/{date}/media/{pvc_name}/`
 
 ### 5. `git-mirror-backup` — GitHub Repository Mirrors
@@ -61,6 +61,15 @@ Destination base: `/share/cluster/backups/`
 - **Destination**: `/share/cluster/backups/git-mirrors/`
 - **Secret**: `github-mirror-token` (from 1Password via ExternalSecret)
 - **Note**: Incremental — pulls existing mirrors from NAS before updating
+
+### 6. `mariadb-backup` — RomM Database
+- **Schedule**: Sundays 3:45 AM
+- **Node**: Any (connects to DB service — deliberately node-independent, unlike the per-node PVC jobs)
+- **Scope**: RomM MariaDB (`romm` db on `romm-mariadb.romm.svc.cluster.local`, as the `romm` app user)
+- **Format**: `mariadb-dump --single-transaction --routines --triggers` (consistent online InnoDB dump), gzipped
+- **Destination**: `/share/cluster/backups/{date}/romm/romm-mariadb-{date}.sql.gz`
+- **Secret**: `romm-db-password` (from 1Password `romm/db-password` via ExternalSecret)
+- **Note**: single-target job — unreachable DB = FAILED Job (no soft-skip like postgres-backup's multi-target pattern). The rest of RomM's state: `romm-config` PVC rides `media-backup` (pi5-worker-1), `romm-redis-data` is regenerable cache (not backed up), ROMs/saves/assets live on the QNAP NFS share directly (`/share/cluster/games`).
 
 ## Beelink AI-stack Backup (OFF-CLUSTER — not a Kubernetes CronJob)
 
@@ -106,6 +115,7 @@ trigger_backup(namespace="backup-jobs", cronjob="media-backup")
 trigger_backup(namespace="backup-jobs", cronjob="worker2-backup")
 trigger_backup(namespace="backup-jobs", cronjob="postgres-backup")
 trigger_backup(namespace="backup-jobs", cronjob="git-mirror-backup")
+trigger_backup(namespace="backup-jobs", cronjob="mariadb-backup")
 ```
 
 **kubectl fallback (cluster-ops):**
@@ -221,3 +231,14 @@ identify the backup, scale the workload down, rsync the dated dir back to the no
 3. Drop and recreate database
 4. Restore: `pg_restore -U immich -d immich -v /path/to/backup.dump`
 5. Scale Immich back up
+
+### Restore Procedure (RomM MariaDB)
+1. Scale RomM app down (DB stays up): `kubectl -n romm scale deploy/romm --replicas=0`
+2. Pull the dump from the NAS: `scp cluster-backup@storage.lab.mtgibbs.dev:/share/cluster/backups/{date}/romm/romm-mariadb-{date}.sql.gz /tmp/`
+3. Restore into the running MariaDB pod (plain SQL dump — tables are recreated by the DROP/CREATE statements in it):
+   ```bash
+   gunzip -c /tmp/romm-mariadb-{date}.sql.gz | \
+     kubectl -n romm exec -i deploy/romm-mariadb -- \
+       sh -c 'mariadb -u romm -p"$MARIADB_PASSWORD" romm'
+   ```
+4. Scale RomM back up and verify: library visible, login works (`romm-config` PVC holds the auth assets — restore it from `media/romm_romm-config` via the media restore template if it's also lost).
