@@ -14,14 +14,18 @@
 #   harness status                   # docker compose ps, filtered to the two
 #   harness sync-ctx                 # ship a snapshot of the laptop's ctx index
 #                                     # (claude container only — re-run to refresh)
-#   harness sync-memory              # ship this laptop's Claude memory (all
-#                                     # projects' memory/ dirs, not raw session
-#                                     # transcripts) — claude container only
+#   harness prompt claude "<text>"   # one-shot headless prompt, waits for the
+#                                     # answer (claude -p --output-format json)
+#   harness push-memory               # laptop main -> GitHub -> container fetch
+#   harness pull-memory               # container branch -> GitHub -> laptop
+#                                     # fetch + diff (YOU merge by hand)
 set -euo pipefail
 
 HOST="${HARNESS_SSH_HOST:-beelink-ai}"
 CLAUDE_HOME_DIR="/srv/coding-harness-claude-data/home"
-usage() { echo "usage: harness {attach|run|status|sync-ctx|sync-memory} [qwen|claude] [args...]" >&2; exit 1; }
+MEMORY_REPO_LAPTOP="$HOME/.claude/projects"
+MEMORY_REPO_CONTAINER="/home/agent/.claude/projects"
+usage() { echo "usage: harness {attach|run|status|sync-ctx|prompt|push-memory|pull-memory} [qwen|claude] [args...]" >&2; exit 1; }
 
 container_for() {
   case "$1" in
@@ -70,17 +74,39 @@ case "$cmd" in
     ssh "$HOST" "sudo chown -R 1001:1001 $CLAUDE_HOME_DIR/.ctx"
     echo "harness: ctx index synced. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart coding-harness-claude'"
     ;;
-  sync-memory)
-    # Only memory/ subdirectories (the curated summaries) — NOT the raw
-    # .jsonl session transcripts (ctx already covers full-history search, no
-    # need to double-ship the verbose form). Matches ANY project the laptop
-    # has memory for, not just pi-cluster — see the repo-mirror path design.
-    ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.claude/projects"
-    rsync -avz --rsync-path="sudo rsync" \
-      --include='*/' --include='*/memory/**' --exclude='*' \
-      "$HOME/.claude/projects/" "$HOST:$CLAUDE_HOME_DIR/.claude/projects/"
-    ssh "$HOST" "sudo chown -R 1001:1001 $CLAUDE_HOME_DIR/.claude"
-    echo "harness: memory synced."
+  prompt)
+    target="${1:?usage: harness prompt qwen-or-claude \"text\"}"
+    text="${2:?usage: harness prompt qwen-or-claude \"text\"}"
+    c="$(container_for "$target")"
+    # One-shot, not tmux send-keys: this WAITS for and returns the answer,
+    # unlike `run` which fires into a live session you check on later.
+    # claude -p / --print: headless, no TTY needed, exits when done.
+    result_json="$(ssh "$HOST" "docker exec $c claude -p $(printf '%q' "$text") --output-format json")"
+    echo "$result_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result', sys.stdin.read()))" 2>/dev/null \
+      || echo "$result_json"
+    ;;
+  push-memory)
+    # Laptop main -> GitHub -> container fetch (NOT auto-merged there).
+    # Replaces the old blind-rsync memory sync: real git history now, no
+    # risk of clobbering anything the container committed on its own branch.
+    git -C "$MEMORY_REPO_LAPTOP" push origin main
+    ssh "$HOST" "docker exec coding-harness-claude git -C $MEMORY_REPO_CONTAINER fetch origin"
+    echo "harness: pushed laptop main to GitHub, container fetched it onto origin/main."
+    echo "  Review/merge inside the container yourself (harness attach claude), e.g.:"
+    echo "    git -C $MEMORY_REPO_CONTAINER log main..origin/main"
+    echo "    git -C $MEMORY_REPO_CONTAINER merge origin/main"
+    ;;
+  pull-memory)
+    # Container's own branch -> GitHub -> laptop fetch + diff. Stops there —
+    # the actual merge is a deliberate step you run by hand after reading it.
+    ssh "$HOST" "docker exec coding-harness-claude git -C $MEMORY_REPO_CONTAINER push origin container"
+    git -C "$MEMORY_REPO_LAPTOP" fetch origin
+    echo "=== container's new commits (main..origin/container) ==="
+    git -C "$MEMORY_REPO_LAPTOP" log main..origin/container --oneline -- '*/memory/*'
+    echo "=== full diff ==="
+    git -C "$MEMORY_REPO_LAPTOP" diff main origin/container
+    echo "harness: fetched. Review the above, then merge by hand if it looks right:"
+    echo "  git -C $MEMORY_REPO_LAPTOP merge origin/container"
     ;;
   *) usage ;;
 esac
