@@ -53,7 +53,8 @@ case "$cmd" in
     ;;
   status)
     # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
-    ssh "$HOST" "cd /opt/ai-stack && docker compose ps coding-harness-qwen coding-harness-claude"
+    # sudo required: .env is 0600 root:root (same reason every other subcommand needs it).
+    ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude"
     ;;
   sync-ctx)
     # Point-in-time snapshot of the laptop's local ctx index — ctx's MCP mode
