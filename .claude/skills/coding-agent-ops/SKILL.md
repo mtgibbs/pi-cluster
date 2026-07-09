@@ -188,6 +188,21 @@ tighten further; noted as a possible future hardening step, not done because
 it's meaningfully more complexity than the current risk (a PR-gated coding
 loop, not an untrusted-code sandbox) warrants today.
 
+**Queued for the laptop agent (beelink-ansible image bakes):**
+- **tmux `allow-passthrough on`** — add `set -g allow-passthrough on` to a
+  system-wide `/etc/tmux.conf` in BOTH harness container images (NOT under
+  `/home/agent` — the first-boot bind mount shadows `$HOME`, same gotcha as
+  entrypoint.sh). Why: enables OSC 9 labeled macOS notifications through the
+  container-tmux → ssh → iTerm2 chain, verified working 2026-07-09 with a
+  runtime toggle (which dies with the tmux server, hence the bake). Plain-BEL
+  notifications already work — `preferredNotifChannel: terminal_bell` is set in
+  the claude container's persistent settings.json. Once baked,
+  coding-harness-claude wires a Notification/Stop hook emitting the wrapped
+  OSC 9 (`\ePtmux;\e\e]9;<msg>\a\e\\` → pane tty) for labeled loop events.
+  Filed-as-issue attempt failed: the harness PAT lacks the Issues permission
+  (Contents+PR only) — consider adding Issues RW to the fine-grained PAT if
+  GH issues should become the harness→laptop queue channel.
+
 ### Memory protection — git-tracked, hooked, GitHub-hub backed up
 
 Both the laptop and `coding-harness-claude` run real Claude Code sessions with
