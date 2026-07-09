@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "homelab": {
+      "type": "http",
+      "url": "https://mcp.lab.mtgibbs.dev/mcp",
+      "headers": {
+        "X-API-Key": "${MCP_HOMELAB_KEY}"
+      }
+    },
+    "kiwix": {
+      "type": "http",
+      "url": "https://kiwix-mcp.lab.mtgibbs.dev/mcp",
+      "headers": {
+        "X-API-Key": "${KIWIX_MCP_KEY}"
+      }
+    },
+    "local-llm": {
+      "type": "http",
+      "url": "https://local-llm-mcp.lab.mtgibbs.dev/mcp",
+      "headers": {
+        "X-API-Key": "${LOCAL_LLM_MCP_KEY}"
+      }
+    }
+  }
+}

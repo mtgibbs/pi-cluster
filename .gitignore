@@ -22,6 +22,13 @@ clusters/pi-k3s/monitoring/kube-prometheus-values.yaml
 __pycache__/
 *.pyc
 
-# Local MCP config (contains API keys)
-.mcp.json
+# Local opencode config (per-machine provider/model settings — not a secret,
+# but genuinely differs per machine; see ~/.config/opencode/opencode.jsonc).
 opencode.json
+
+# NOTE: .mcp.json is deliberately NOT ignored (see below, tracked at repo
+# root) — it holds ONLY network-HTTP MCP servers referenced via ${ENV_VAR},
+# no literal secrets, no machine-specific stdio launchers. If you need a
+# personal/local-only MCP server (a stdio launcher, a laptop-only binary
+# path), configure that at user scope (~/.claude.json) instead — don't add
+# it here, or a future untracking pass will just re-exclude the whole file.
