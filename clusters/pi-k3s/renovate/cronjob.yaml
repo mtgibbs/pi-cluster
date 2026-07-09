@@ -33,7 +33,15 @@ spec:
                 - name: RENOVATE_AUTODISCOVER
                   value: "false"
                 - name: RENOVATE_REPOSITORIES
-                  value: "[\"mtgibbs/pi-cluster\"]"
+                  # beelink-ansible added 2026-07-09 for the coding-harness
+                  # containers' pinned CLI versions (see its renovate.json).
+                  # HUMAN GATE: the renovate/github-token PAT (fine-grained,
+                  # op://pi-cluster/renovate/github-token) does NOT yet have
+                  # beelink-ansible in its repository access list (confirmed:
+                  # 200 on pi-cluster, 404 on beelink-ansible) — this entry is
+                  # a no-op until that's added at
+                  # https://github.com/settings/tokens?type=beta.
+                  value: "[\"mtgibbs/pi-cluster\", \"mtgibbs/beelink-ansible\"]"
               resources:
                 requests:
                   cpu: 100m
