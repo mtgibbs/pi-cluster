@@ -29,6 +29,14 @@ spec:
 
                   apk add --no-cache git curl jq
 
+                  # Mirrors are rsync'd down from the NAS into a fresh container
+                  # each run — git 2.35.2+'s "dubious ownership" check (CVE-2022-24765
+                  # mitigation) flags them since the synced-down dirs' ownership
+                  # doesn't match this run's UID. Safe to trust globally here: the
+                  # only content in this workspace is our own repos, in an ephemeral
+                  # emptyDir, in a job whose only job is mirroring them.
+                  git config --global --add safe.directory '*'
+
                   GITHUB_USER="mtgibbs"
                   GITHUB_TOKEN=$(cat /github/token)
                   export GIT_TERMINAL_PROMPT=0
