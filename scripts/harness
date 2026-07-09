@@ -43,13 +43,24 @@ case "$cmd" in
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
-    target="${1:?usage: harness run qwen-or-claude spec-dir}"
-    spec="${2:?usage: harness run qwen-or-claude spec-dir}"
+    target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
+    spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
+    base_branch="${3:-main}"
     c="$(container_for "$target")"
+    branch="ralph/$(basename "$spec")-$(date +%s)"
     # Injects into the SAME tmux session `attach` lands in — nothing hidden,
-    # you can pop in mid-run and watch (or take over) at any time.
-    ssh "$HOST" "docker exec $c tmux send-keys -t main '/usr/local/bin/run-task.sh $spec' Enter"
-    echo "harness: sent. Watch it with: harness attach $target"
+    # you can pop in mid-run and watch (or take over) at any time. Branch name
+    # is generated here (rather than left to run-task.sh's own default) so
+    # every positional arg is a plain token — sidesteps nested-quoting through
+    # ssh + tmux send-keys, and papers over qwen vs. claude run-task.sh having
+    # different arg counts (claude's takes an extra repo-name in position 2).
+    if [ "$target" = "claude" ]; then
+      task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
+    else
+      task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
+    fi
+    ssh "$HOST" "docker exec $c tmux send-keys -t main '$task_cmd' Enter"
+    echo "harness: sent (branch $branch, off $base_branch). Watch it with: harness attach $target"
     ;;
   status)
     # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
