@@ -1,0 +1,105 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mariadb-backup
+  namespace: backup-jobs
+spec:
+  schedule: "45 3 * * 0"  # Every Sunday at 3:45 AM (after git-mirror starts at 3:30)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: mariadb-backup
+          containers:
+            - name: backup
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # pipefail: without it, `mariadb-dump | gzip` reports gzip's exit
+                  # code and a failed dump would look like success
+                  set -o pipefail
+
+                  # Install MariaDB client
+                  apk add --no-cache mariadb-client
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  NAS_USER="cluster-backup"
+                  NAS_HOST="storage.lab.mtgibbs.dev"
+                  NAS_PATH="/share/cluster/backups"
+                  SSH_KEY="/ssh/id_ed25519"
+                  DB_HOST="romm-mariadb.romm.svc.cluster.local"
+
+                  echo "=== RomM MariaDB Backup ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo ""
+
+                  # Fix SSH key permissions
+                  cp ${SSH_KEY} /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+
+                  # Password via env, not -p on the command line (visible in ps)
+                  export MYSQL_PWD="${DB_PASSWORD}"
+
+                  # Single target: unreachable = job failure (unlike the multi-target
+                  # postgres job's soft-skip), so a dead DB shows up as a failed Job.
+                  if ! mariadb-admin ping -h "${DB_HOST}" -u romm \
+                    --connect-timeout=10 >/dev/null 2>&1; then
+                    echo "FAILED: ${DB_HOST} unreachable"
+                    exit 1
+                  fi
+
+                  # Consistent online dump (InnoDB): --single-transaction takes no locks
+                  if ! mariadb-dump -h "${DB_HOST}" -u romm \
+                    --single-transaction --routines --triggers romm \
+                    | gzip > "/tmp/romm-mariadb-${BACKUP_DATE}.sql.gz"; then
+                    echo "FAILED: mariadb-dump failed"
+                    exit 1
+                  fi
+
+                  # Create backup directory on NAS
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/romm"
+
+                  if ! rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                    "/tmp/romm-mariadb-${BACKUP_DATE}.sql.gz" \
+                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/romm/"; then
+                    echo "FAILED: rsync failed"
+                    exit 1
+                  fi
+
+                  echo "--- Backup Summary ---"
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -lh ${NAS_PATH}/${BACKUP_DATE}/romm/"
+
+                  rm -f /tmp/id_ed25519 "/tmp/romm-mariadb-${BACKUP_DATE}.sql.gz"
+                  echo "Backup complete"
+                  exit 0
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: romm-db-password
+                      key: password
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400
