@@ -169,18 +169,17 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
 2. Deploy: `ansible-playbook playbooks/50-ai-stack.yml --extra-vars "harness_github_pat=$(op read 'op://pi-cluster/coding-harness-github-pat/token') harness_litellm_key=$(op read 'op://pi-cluster/opencode-coder/password') ..."`
    (plus all the *existing* ai-stack secrets already required — this doesn't
    replace that invocation, it adds two more `--extra-vars`).
-3. First attach to `coding-harness-claude` needs a one-time interactive Claude
-   login (`claude` prompts for OAuth device-code, or set `ANTHROPIC_API_KEY`
-   first if you'd rather bill via API than subscription — **your call, not
-   decided yet**) — session state persists in the bind-mounted volume after that.
+3. **DONE.** First attach to `coding-harness-claude` did the one-time interactive
+   Claude login (subscription OAuth device-code — not API key) — session state
+   persists in the bind-mounted volume across restarts.
 4. MCP tool access for `coding-harness-claude` (reaching `mcp-homelab` etc. the
    way this session does) is **not wired up** — deliberately left as an open
    scoping decision (full parity with this session's tools vs. a more
    restricted read-mostly set to start) rather than assumed.
-5. `harness sync-ctx` and `harness sync-memory` (from the laptop, after deploy)
-   ship the local `ctx` index snapshot and this laptop's Claude memory into
-   `coding-harness-claude`. Not automatic/scheduled — re-run either after the
-   laptop's data has moved on meaningfully.
+5. `harness sync-ctx` (from the laptop, after deploy) ships the local `ctx`
+   index snapshot into `coding-harness-claude`. Not automatic/scheduled —
+   re-run after the laptop's index has moved on meaningfully. (Memory sync no
+   longer uses rsync — see "Memory protection" below.)
 
 **Known gap, not yet built:** egress isn't restricted to just `ai.lab.mtgibbs.dev`
 + `github.com` — the containers can reach the open internet like any other
@@ -188,6 +187,58 @@ Docker container on this host. Would need an egress proxy/firewall rule to
 tighten further; noted as a possible future hardening step, not done because
 it's meaningfully more complexity than the current risk (a PR-gated coding
 loop, not an untrusted-code sandbox) warrants today.
+
+### Memory protection — git-tracked, hooked, GitHub-hub backed up
+
+Both the laptop and `coding-harness-claude` run real Claude Code sessions with
+the same auto-memory instructions — the container will save its own memories
+as it works, so a blind rsync overwrite (the old `sync-memory`) would silently
+destroy them. Fixed 2026-07-08/09 with:
+
+- **Git-track `~/.claude/projects/`** (laptop) and `/home/agent/.claude/projects/`
+  (container) independently. Whitelist `.gitignore` on both — tracks ONLY
+  `*/memory/**`, never raw `.jsonl` session transcripts.
+- **A `Stop` hook** (`~/.claude/hooks/memory-autocommit.sh` / the container's
+  copy at the same path under its own `$HOME`) auto-commits any memory changes
+  at the end of each turn — atomic (whole-turn, not per-Write/Edit, so a
+  `MEMORY.md` + topic-file pair never lands as a torn half-commit), portable
+  (an `mkdir`-based lock, since `flock` isn't on macOS by default), and
+  self-protecting (refuses + resets if anything outside `*/memory/*` gets
+  staged, rather than trusting the `.gitignore` alone).
+- **GitHub as the sync hub, not a live remote or bundle transport**:
+  `mtgibbs/claude-memory-vault` (private). Laptop owns `main`, the container
+  owns its own `container` branch — neither ever pushes to the other's, so
+  merges are always a deliberate, reviewed `git diff`-then-`merge`, never a
+  blind overwrite. This also gets offsite backup for free: the existing weekly
+  `git-mirror-backup` CronJob already mirrors every GitHub repo `mtgibbs` owns
+  to the QNAP, no new cluster infra needed.
+- `harness push-memory` (laptop `main` → GitHub → container `fetch`, no
+  auto-merge) and `harness pull-memory` (container's branch → GitHub → laptop
+  `fetch` + diff, you merge by hand) replace the memory half of the old
+  `sync-memory`. `sync-ctx` is untouched (unrelated, still a single-file
+  rsync).
+- **Dogfooded, not pre-scripted**: the container set up its OWN half of this
+  (git init, hook, initial commit, push to `container`) by being *prompted*
+  the spec and executing it itself — proving the harness can do real
+  infrastructure work on itself, not just respond to questions.
+
+**Gotcha for next time — drive setup/config tasks like this interactively,
+not via `claude -p`.** A first attempt tried dispatching the dogfood prompt
+headlessly (`claude -p`); it correctly self-documented every mutating
+operation being auto-denied (no TTY = no way to clear a permission prompt) and
+made zero progress. Attaching to the container's live tmux session
+(`harness attach claude`) and pasting the same prompt by hand worked cleanly
+end to end — git init, remote+branch setup, hook install, and two verified
+pipe-tests (no-op case + real-change case, including a deletion).
+
+**A stale memory can outlive the problem it describes.** The killed headless
+attempt left behind a memory file honestly reporting "fully blocked" — which
+went stale the moment the interactive retry succeeded. Caught during the
+`harness pull-memory` review (not blindly merged) and corrected before it
+reached the laptop's canonical history. The lesson generalizes: a "reviewed
+merge, not blind auto-sync" design earns its keep exactly in moments like
+this — a mechanical sync would have merged the stale claim without anyone
+noticing.
 
 ## Pointers
 
