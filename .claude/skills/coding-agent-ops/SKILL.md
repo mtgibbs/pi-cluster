@@ -91,6 +91,7 @@ relocate those.
 | Biometric lockout mid-session | a cluster-gated cred crept onto the hot path | hot-path creds belong in Keychain/on-disk (above); crown jewels stay biometric |
 | Dewey cold after `aimode family` | `aimode warm()` was a no-op (ollama image has no curl) — fixed 2026-05-24 to use `docker exec open-webui curl` + Dewey's real models | redeploy `beelink-ansible/files/aimode.sh`; warm path must hit ollama from a container that *has* curl |
 | Want the loop on the Q8 | `oc` follows `hot-coder` → run `aimode work` (sole-tenant Q8 @ 256k — `-c 262144`, the model's native max; raised from 32k on 2026-06-24). 30B@64k is niche (slow prefill, see research §12) — prefer Q8 + decompose | `aimode work` then `oc`; `aimode family` to restore |
+| Headless `opencode run` in a **repo opencode hasn't met** auto-rejects every Read/Grep (`permission requested: external_directory … auto-rejecting`) — model answers blind or wanders | opencode grants per-project directory trust (`project.sandboxes` in `~/.local/share/opencode/opencode.db`) only via an **interactive** approval; a fresh headless project has `sandboxes: []` (found 2026-07-10 — contaminated 91 token-bench trials on mtgibbs.xyz) | one-time per new repo: attach interactively and approve, **or** seed the trust row: `update project set sandboxes='["<dir>"]' where worktree='<dir>'` (exact shape the TUI approval writes). Verify with a trivial `opencode run "read <file>"` before trusting any batch run |
 
 ## Remote harness (Beelink) — persistent, sandboxed, tmux-attach sessions
 
