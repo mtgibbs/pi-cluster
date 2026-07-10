@@ -215,6 +215,45 @@ instruction**:
    session DB; `backfill-tokens.mjs`). Token counts are the reliable metric;
    wall time on a shared GPU is noisy.
 
+### Generalization round: mtgibbs.xyz (2026-07-10 evening, `questions-site.jsonl`)
+
+Same ladder on an unfamiliar TypeScript/Next.js codebase (55 source files, never
+seen by this harness before). Tooling generalized first: repo-map describes TS
+exported symbols; edge index extracts the **import graph** (incl. barrel
+re-exports) + internal `/api/` fetches, identity = exported symbols. Took THREE
+rounds to get valid data — rounds 1-2 (181 trials) quarantined after a
+session-directory audit showed opencode roots its project from **$PWD, not
+process cwd** (fix + audit now built into run-bench; full gotcha in
+`coding-agent-ops/SKILL.md`). Round 3: audit 0/90 wrong-rooted.
+
+| mtgibbs.xyz | pass | ctx (mean) | dur (med) |
+| :--- | :--- | :--- | :--- |
+| A baseline · single | 12/12 | 41,395 | 15s |
+| A baseline · multi | 18/18 | **80,529** | 30s |
+| B repo-map · single | 12/12 | 20,513 | 10s |
+| B repo-map · multi | 17/18 | 43,642 | 15s |
+| **G map+edges · single** | **12/12** | **21,720** | 12s |
+| **G map+edges · multi** | **18/18** | **35,650** | 16s |
+
+Findings:
+1. **The benefit GROWS with unfamiliarity.** On home turf (pi-cluster) the edge
+   index saved 30%; on a codebase the model had never seen it saved **56% on
+   multi-hop (80.5k → 35.7k) and 48% on single-hop**, at half the wall time,
+   with zero accuracy loss (G 30/30). Baseline stayed accurate but paid ~2×
+   pi-cluster's cost per chain — unfamiliarity taxes tokens, and the index
+   refunds it.
+2. **Import edges cured the barrel-file chain** (ms5: B failed it, G 3/3 — the
+   `data/index.ts -> import:project-*.constants` lines ARE the answer). The
+   only failure in 90 trials was map-only B on that same question.
+3. **Blind-arm resilience (from the quarantined rounds, replicated 2×):** when
+   the model couldn't read files at all, G still ranked first and map-only B
+   ranked BELOW baseline — an edge index contains answers and degrades
+   gracefully; a bare map offers confidence without substance. Corroborates the
+   v1 authority-citing failure from the pi-cluster rounds.
+4. **Methodology lesson: audit provenance, don't trust green PASSes.** Two
+   plausible-looking datasets died on a `session.directory` join. The audit is
+   now part of the run command.
+
 ## Open Questions
 
 1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)
