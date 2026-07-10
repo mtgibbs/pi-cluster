@@ -1,0 +1,8 @@
+{"id":"q1","q":"What cron schedule (the five-field cron expression) does the git-mirror-backup CronJob use?","grade":"30 3 \\* \\* 0"}
+{"id":"q2","q":"Which YAML file (give the filename) defines Pi-hole's custom local DNS records?","grade":"pihole-custom-dns\\.yaml"}
+{"id":"q3","q":"What Kubernetes namespace do the cluster's backup CronJobs run in?","grade":"backup-jobs"}
+{"id":"q4","q":"What NFS server hostname do RomM's PersistentVolumes mount from?","grade":"storage\\.lab\\.mtgibbs\\.dev"}
+{"id":"q5","q":"What cron schedule (the five-field cron expression) does the mariadb-backup CronJob use?","grade":"45 3 \\* \\* 0"}
+{"id":"q6","q":"One deployment manifest in this repo sets enableServiceLinks: false. Which service is it for?","grade":"[Rr]om[Mm]"}
+{"id":"q7","q":"What container image (registry path, ignoring the tag) does the mtgibbs-site deployment run?","grade":"ghcr\\.io/mtgibbs/mtgibbs\\.xyz"}
+{"id":"q8","q":"At what day and time does the weekly PVC backup CronJob run?","grade":"(0 2 \\* \\* 0)|(2(:00)?\\s*[AaPp]?\\.?[Mm]?\\.?.{0,40}[Ss]unday)|([Ss]unday.{0,40}2(:00)?\\s*[Aa])"}

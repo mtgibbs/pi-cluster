@@ -1,0 +1,48 @@
+# token-bench — repo-map token-efficiency analytics for the local coding agent
+
+Measures whether the **passive repo-map pattern** actually saves tokens / improves
+answer quality for qwen3-coder at 32k context, per the recommendation in
+`docs/research/codemap-serena-token-efficiency.md` (no tool in that space publishes
+measured savings — this collects our own).
+
+## Design
+
+Repo-navigation Q&A: 8 questions (`questions.jsonl`) whose answers are literal,
+grep-verified values in this repo (cron expressions, filenames, namespaces, images).
+Each trial is one headless `oc run`; the grader regex-checks the model's answer;
+token counts come from opencode's session DB (`~/.local/share/opencode/opencode.db`
+`session` table — input/output/reasoning/cache per session), which is why this needs
+no LiteLLM admin access.
+
+**Arms:**
+- **A — baseline**: question only; model navigates with its normal tools.
+- **B — repo-map**: `gen-repomap.mjs` output (token-budgeted structural map:
+  yaml kind/name, md headings, script comments; auto-degrades detail to fit
+  `--budget`, default 2000 tokens (soft target — collapsed-dir summaries can overshoot slightly)) prepended as a navigation index.
+- **C — serena**: reserved. Blocked on uv+python in the harness image
+  (container config comes from outside — needs an image bake, see
+  `beelink-ansible`).
+
+## Usage (inside a coding-harness container or anywhere `oc` works)
+
+```sh
+node scripts/token-bench/run-bench.mjs --arm A --reps 3   # baseline
+node scripts/token-bench/run-bench.mjs --arm B --reps 3   # repo-map
+node scripts/token-bench/report.mjs                        # aggregate tables
+node scripts/token-bench/gen-repomap.mjs . --budget 2000   # inspect the map
+```
+
+Results append to `results/results.jsonl` (one JSON line per trial; committed —
+it IS the analytics). Key metric: `ctx = tokens_input + tokens_cache_read`
+(total context occupancy) alongside pass rate and wall time. Cache-read is
+nearly free in *latency* on the Beelink (prefix caching) but still occupies
+context — report both before declaring victory.
+
+## Caveats
+
+- Q&A navigation is a proxy for the real SDD workload (edit tasks); it isolates
+  the navigation cost repo-maps target. An edit-task bench needs worktree
+  reset between trials — future work.
+- Session attribution assumes no concurrent opencode sessions in this container
+  during a run.
+- Grade regexes are answer-literals that do not appear in the question text.
