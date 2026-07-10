@@ -35,6 +35,7 @@ const ONLY = opt("only", "").split(",").filter(Boolean);
 const TIMEOUT = Number(opt("timeout", 300));
 const BUDGET = Number(opt("budget", 2000));
 const QFILE = opt("qfile", "questions.jsonl");
+const TAG = opt("tag", ""); // free-form variant label (e.g. edge-index v2) recorded per row
 if (!["A", "B", "G"].includes(ARM)) {
   console.error("usage: run-bench.mjs --arm A|B|G [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
   console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph); C/serena reserved until uv+python are baked into the harness image");
@@ -153,7 +154,7 @@ for (const q of questions) {
     const pass = grades.every((g) => new RegExp(g).test(out));
 
     const row = {
-      ts: new Date().toISOString(), arm: ARM, qid: q.id, rep, pass, rc, killed, dur_ms, dur_active_ms,
+      ts: new Date().toISOString(), arm: ARM, tag: TAG || undefined, qid: q.id, rep, pass, rc, killed, dur_ms, dur_active_ms,
       tokens_input: ses?.tokens_input ?? null, tokens_output: ses?.tokens_output ?? null,
       tokens_reasoning: ses?.tokens_reasoning ?? null,
       tokens_cache_read: ses?.tokens_cache_read ?? null,

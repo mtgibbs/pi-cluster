@@ -51,11 +51,37 @@ const RULES = [
   ["route", /advertiseRoutes:\s*\n((?:\s+-\s+[\d./]+\s*(?:#[^\n]*)?\n?)+)/g],
 ];
 
-const edges = []; // {src, type, target}
-const add = (src, type, target) => {
+const edges = []; // {src, via, type, target} — via = "Kind/name" of the yaml doc holding the ref
+const add = (src, via, type, target) => {
   target = target.trim();
-  if (target) edges.push({ src, type, target });
+  if (target) edges.push({ src, via, type, target });
 };
+
+// v2: process yaml PER DOCUMENT and label every edge with the doc's Kind/name.
+// v1 labeled edges by filename only; arm G's m4 failure showed the model then
+// answers with the filename ("backup-cronjob") instead of the resource's real
+// name (CronJob/pvc-backup), citing the index as if it were the repo.
+function docIdentity(doc) {
+  const kind = doc.match(/^kind:\s*(\S+)/m)?.[1];
+  const name = doc.match(/^metadata:\s*\n(?:.*\n)*?\s+name:\s*(\S+)/m)?.[1];
+  return kind ? `${kind}/${name ?? "?"}` : null;
+}
+
+function extract(rel, via, chunk) {
+  for (const [type, re] of RULES) {
+    for (const m of chunk.matchAll(re)) {
+      if (type === "dependsOn" || type === "route") {
+        for (const item of m[1].matchAll(/-\s+(?:name:\s*)?([\w.\/-]+)/g)) add(rel, via, type, item[1]);
+      } else if (type === "backs-up") {
+        for (const pvc of m[1].split(/\s+/)) add(rel, via, type, pvc);
+      } else if (type === "nfs") {
+        add(rel, via, type, `${m[1]}:${m[2]}`);
+      } else {
+        add(rel, via, type, m[1]);
+      }
+    }
+  }
+}
 
 for (const file of walk(root)) {
   const rel = relative(root, file);
@@ -65,22 +91,11 @@ for (const file of walk(root)) {
   if (/\.md$/.test(rel)) {
     // docs edge: any repo file path mentioned in a markdown doc
     for (const m of text.matchAll(/\b((?:clusters|scripts|specs|docs|\.claude)\/[\w./-]+\.\w+)/g))
-      add(rel, "doc", m[1]);
-    continue;
-  }
-
-  for (const [type, re] of RULES) {
-    for (const m of text.matchAll(re)) {
-      if (type === "dependsOn" || type === "route") {
-        for (const item of m[1].matchAll(/-\s+(?:name:\s*)?([\w.\/-]+)/g)) add(rel, type, item[1]);
-      } else if (type === "backs-up") {
-        for (const pvc of m[1].split(/\s+/)) add(rel, type, pvc);
-      } else if (type === "nfs") {
-        add(rel, type, `${m[1]}:${m[2]}`);
-      } else {
-        add(rel, type, m[1]);
-      }
-    }
+      add(rel, null, "doc", m[1]);
+  } else if (/\.ya?ml$/.test(rel)) {
+    for (const doc of text.split(/^---\s*$/m)) extract(rel, docIdentity(doc), doc);
+  } else {
+    extract(rel, null, text);
   }
 }
 
@@ -88,7 +103,7 @@ for (const file of walk(root)) {
 const seen = new Set();
 const clean = edges.filter((e) => {
   if (e.type === "doc" && (e.target === e.src || !/\.(ya?ml|sh|mjs|js|md)$/.test(e.target))) return false;
-  const k = `${e.src}|${e.type}|${e.target}`;
+  const k = `${e.src}|${e.via}|${e.type}|${e.target}`;
   if (seen.has(k)) return false;
   seen.add(k);
   return true;
@@ -101,10 +116,21 @@ function renderEdges(list) {
   const bySrc = new Map();
   for (const e of list) {
     if (!bySrc.has(e.src)) bySrc.set(e.src, []);
-    bySrc.get(e.src).push(`${e.type}:${e.target}`);
+    bySrc.get(e.src).push(e);
   }
   return [...bySrc].sort(([a], [b]) => a.localeCompare(b))
-    .map(([src, es]) => `${src} -> ${es.join(" ")}`).join("\n");
+    .map(([src, es]) => {
+      // inline (Kind/name) label whenever the doc identity changes, so the
+      // resource's REAL name is on the sheet next to its edges
+      const parts = [];
+      let lastVia;
+      for (const e of es) {
+        if (e.via && e.via !== lastVia) parts.push(`(${e.via})`);
+        if (e.via) lastVia = e.via;
+        parts.push(`${e.type}:${e.target}`);
+      }
+      return `${src} -> ${parts.join(" ")}`;
+    }).join("\n");
 }
 const tok = (s) => Math.ceil(s.length / 4);
 let kept = clean;

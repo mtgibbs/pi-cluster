@@ -31,8 +31,9 @@ function summarize(group) {
 }
 
 const tier = (r) => (r.qid.startsWith("m") ? "multi" : "single");
+const armKey = (r) => `arm ${r.arm}${r.tag ? "." + r.tag : ""}`;
 console.log("\n== By arm x tier ==");
-console.table(summarize(rows.map((r) => ({ ...r, key: `arm ${r.arm} (${tier(r)}-hop)` }))));
+console.table(summarize(rows.map((r) => ({ ...r, key: `${armKey(r)} (${tier(r)}-hop)` }))));
 console.log("== By question x arm ==");
 console.table(summarize(rows.map((r) => ({ ...r, key: `${r.qid}/${r.arm}` }))));
 const fails = rows.filter((r) => !r.pass);
