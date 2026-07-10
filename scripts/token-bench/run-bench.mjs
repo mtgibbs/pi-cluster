@@ -14,7 +14,7 @@
 //   {ts, arm, qid, rep, pass, rc, dur_ms, tokens_{input,output,reasoning,
 //    cache_read,cache_write}, model, session_id, map_tokens, out_tail}
 import { execFileSync, execSync, spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,9 +102,24 @@ function runOnce(prompt) {
     child.stderr.on("data", (d) => { out += d; bump(); });
     child.on("close", (code) => {
       clearTimeout(idleTimer); clearTimeout(hardTimer);
+      cleanBunLitter();
       resolve({ out, rc: code ?? 0, killed, dur_ms: Date.now() - t0, dur_active_ms: lastOut - t0 });
     });
   });
+}
+
+// opencode is a Bun binary: every spawn extracts a ~5.4MB native .so into /tmp
+// under a random hidden name and never removes it. 48 trials filled the harness
+// container's 256M tmpfs — sweep the litter after each trial. Safe because the
+// bench requires no concurrent opencode sessions (see README).
+function cleanBunLitter() {
+  try {
+    for (const f of readdirSync("/tmp")) {
+      if (/^\.[0-9a-f]{16}-\d{8}\.(so|node)$/.test(f)) {
+        try { unlinkSync(`/tmp/${f}`); } catch {}
+      }
+    }
+  } catch {}
 }
 
 for (const q of questions) {

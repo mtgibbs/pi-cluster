@@ -114,6 +114,33 @@ are better than it suggests. Nobody has published a 30B-model-drives-Serena test
    extraction. The document-map → section retrieval pattern from
    obsidian-mcp-server is the interface to imitate.
 
+## First Local Measurements (2026-07-10, token-bench v1)
+
+`scripts/token-bench/` ran the 8-question repo-navigation bench, 3 reps × 2 arms,
+qwen3-coder via `hot-coder` (48 trials, `results/results.jsonl`):
+
+| | pass | in (med) | cache-read (med) | out (med) | ctx=in+cache (mean) | dur (med) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **A baseline** | 24/24 | 2,129 | 42,527 | 149 | 47,128 | 18s |
+| **B repo-map** | 25/25 | 1,502 | 32,946 | 80 | 41,775 | 16s |
+
+Takeaways:
+1. **No accuracy gap on single-hop questions** — qwen with grep alone went 24/24.
+   The model was never the bottleneck at this difficulty; harder multi-hop
+   questions (or edit tasks) are needed to differentiate quality.
+2. **The map pays for itself**: arm B carries a ~2k-token map yet still lands
+   ~30% lower fresh-input, ~23% lower cumulative cache traffic (fewer tool
+   round-trips), and ~46% lower output. Modest, real, not transformative.
+3. **Prefix caching makes a static map nearly free after first use** (identical
+   map prefix cache-hits across runs — q2/B repeats cost 4 input tokens total).
+   Operationally this favors injecting one *stable* map over dynamic context.
+4. A cold-cache smoke trial showed a 4× input gap (18.6k vs 4.4k) — cache state
+   dominates single-trial comparisons; only aggregate reps are meaningful.
+5. Ops gotcha: opencode (a Bun binary) leaks a ~5.4MB `.so` into `/tmp` per
+   headless run — 48 trials filled the harness container's 256M tmpfs. The
+   bench now sweeps the litter per-trial; long-lived harness containers should
+   watch for it generally.
+
 ## Open Questions
 
 1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)
