@@ -112,8 +112,13 @@ const IDLE_SECS = Number(process.env.BENCH_IDLE_SECS ?? 120);
 function runOnce(prompt) {
   return new Promise((resolve) => {
     const t0 = Date.now();
+    // cwd alone is NOT enough: opencode resolves its project from $PWD, which
+    // spawn() does not update (a shell `cd` does). Without this, every session
+    // roots in the launcher's directory — found 2026-07-10 after two invalid
+    // site rounds. Audit trials via session.directory in opencode.db.
     const child = spawn("opencode", ["run", prompt], {
       cwd: ROOT, stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PWD: ROOT },
     });
     let out = "", killed = null, lastOut = Date.now(), idleTimer, hardTimer;
     const kill = (why) => {
