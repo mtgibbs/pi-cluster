@@ -34,13 +34,14 @@ const REPS = Number(opt("reps", 1));
 const ONLY = opt("only", "").split(",").filter(Boolean);
 const TIMEOUT = Number(opt("timeout", 300));
 const BUDGET = Number(opt("budget", 2000));
+const QFILE = opt("qfile", "questions.jsonl");
 if (!["A", "B"].includes(ARM)) {
-  console.error("usage: run-bench.mjs --arm A|B [--reps N] [--only q1,q2] [--timeout secs] [--budget tokens]");
+  console.error("usage: run-bench.mjs --arm A|B [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
   console.error("(arm C / serena is reserved until uv+python are baked into the harness image)");
   process.exit(2);
 }
 
-const questions = readFileSync(join(HERE, "questions.jsonl"), "utf8")
+const questions = readFileSync(join(HERE, QFILE), "utf8")
   .split("\n").filter(Boolean).map((l) => JSON.parse(l))
   .filter((q) => !ONLY.length || ONLY.includes(q.id));
 
@@ -131,7 +132,10 @@ for (const q of questions) {
     let ses = null;
     for (let i = 0; i < 10 && !ses; i++) { ses = sessionAfter(before); if (!ses) await sleep(500); }
     const model = ses?.model ? JSON.parse(ses.model).id : null;
-    const pass = new RegExp(q.grade).test(out);
+    // grade may be a single regex or an array (multi-hop: ALL must match, so a
+    // lucky endpoint guess without the traversed chain still fails)
+    const grades = Array.isArray(q.grade) ? q.grade : [q.grade];
+    const pass = grades.every((g) => new RegExp(g).test(out));
 
     const row = {
       ts: new Date().toISOString(), arm: ARM, qid: q.id, rep, pass, rc, killed, dur_ms, dur_active_ms,

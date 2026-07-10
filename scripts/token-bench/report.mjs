@@ -30,8 +30,9 @@ function summarize(group) {
   }));
 }
 
-console.log("\n== By arm ==");
-console.table(summarize(rows.map((r) => ({ ...r, key: `arm ${r.arm}` }))));
+const tier = (r) => (r.qid.startsWith("m") ? "multi" : "single");
+console.log("\n== By arm x tier ==");
+console.table(summarize(rows.map((r) => ({ ...r, key: `arm ${r.arm} (${tier(r)}-hop)` }))));
 console.log("== By question x arm ==");
 console.table(summarize(rows.map((r) => ({ ...r, key: `${r.qid}/${r.arm}` }))));
 const fails = rows.filter((r) => !r.pass);
