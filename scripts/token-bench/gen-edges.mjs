@@ -19,7 +19,7 @@
 //   route:<cidr>        Tailscale advertiseRoutes
 //   doc:<path>          repo file paths mentioned in markdown docs
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, dirname } from "node:path";
 
 const args = process.argv.slice(2);
 const root = args.find((a) => !a.startsWith("--")) ?? process.cwd();
@@ -28,11 +28,11 @@ const jsonOut = jsonIdx >= 0 ? args[jsonIdx + 1] : null;
 const budgetIdx = args.indexOf("--budget");
 const BUDGET = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 2500; // tokens; manifest edges are never pruned
 
-const SKIP_DIRS = new Set([".git", "node_modules", "results", ".worktrees"]);
+const SKIP_DIRS = new Set([".git", "node_modules", "results", ".worktrees", ".next", "public"]);
 function walk(dir, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(join(dir, e.name), out); }
-    else if (/\.(ya?ml|md|sh|mjs|js)$/.test(e.name)) out.push(join(dir, e.name));
+    else if (/\.(ya?ml|md|sh|mjs|js|ts|tsx|jsx)$/.test(e.name)) out.push(join(dir, e.name));
   }
   return out;
 }
@@ -67,6 +67,15 @@ function docIdentity(doc) {
   return kind ? `${kind}/${name ?? "?"}` : null;
 }
 
+// Identity for a code file: its main exported symbols (same lesson as v2's
+// (Kind/name) — put the real names ON the sheet, next to the edges).
+function tsIdentity(text) {
+  const names = [...text.matchAll(
+    /export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|interface|type|enum)\s+(\w+)/g
+  )].map((m) => m[1]);
+  return names.length ? `exports ${[...new Set(names)].slice(0, 4).join(",")}` : null;
+}
+
 function extract(rel, via, chunk) {
   for (const [type, re] of RULES) {
     for (const m of chunk.matchAll(re)) {
@@ -90,10 +99,20 @@ for (const file of walk(root)) {
 
   if (/\.md$/.test(rel)) {
     // docs edge: any repo file path mentioned in a markdown doc
-    for (const m of text.matchAll(/\b((?:clusters|scripts|specs|docs|\.claude)\/[\w./-]+\.\w+)/g))
+    for (const m of text.matchAll(/\b((?:clusters|scripts|specs|docs|components|pages|hooks|lib|\.claude)\/[\w./-]+\.\w+)/g))
       add(rel, null, "doc", m[1]);
   } else if (/\.ya?ml$/.test(rel)) {
     for (const doc of text.split(/^---\s*$/m)) extract(rel, docIdentity(doc), doc);
+  } else if (/\.(ts|tsx|jsx|js|mjs)$/.test(rel)) {
+    // code edges: the import graph (relative imports resolved to repo paths,
+    // barrel re-exports included) + internal API endpoints fetched at runtime
+    const via = tsIdentity(text);
+    for (const m of text.matchAll(/(?:import|export)\s+[^'"]*?from\s+['"](\.[^'"]+)['"]/g)) {
+      const target = relative(root, join(dirname(join(root, rel)), m[1]));
+      add(rel, via, "import", target);
+    }
+    for (const m of text.matchAll(/['"](\/api\/[\w/-]+)['"]/g)) add(rel, via, "api", m[1]);
+    extract(rel, via, text); // svc/nfs rules still apply (harmless elsewhere)
   } else {
     extract(rel, null, text);
   }

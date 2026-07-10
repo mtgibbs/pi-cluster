@@ -20,7 +20,11 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = execSync("git rev-parse --show-toplevel", { cwd: HERE, encoding: "utf8" }).trim();
+const rootIdx = process.argv.indexOf("--root");
+const ROOT = rootIdx >= 0
+  ? process.argv[rootIdx + 1]
+  : execSync("git rev-parse --show-toplevel", { cwd: HERE, encoding: "utf8" }).trim();
+const REPO = ROOT.split("/").filter(Boolean).pop();
 const DB_PATH = join(process.env.HOME, ".local/share/opencode/opencode.db");
 const RESULTS = join(HERE, "results/results.jsonl");
 
@@ -173,7 +177,7 @@ for (const q of questions) {
     const pass = grades.every((g) => new RegExp(g).test(out));
 
     const row = {
-      ts: new Date().toISOString(), arm: ARM, tag: TAG || undefined, qid: q.id, rep, pass, rc, killed, dur_ms, dur_active_ms,
+      ts: new Date().toISOString(), repo: REPO, arm: ARM, tag: TAG || undefined, qid: q.id, rep, pass, rc, killed, dur_ms, dur_active_ms,
       tokens_input: ses?.tokens_input ?? null, tokens_output: ses?.tokens_output ?? null,
       tokens_reasoning: ses?.tokens_reasoning ?? null,
       tokens_cache_read: ses?.tokens_cache_read ?? null,

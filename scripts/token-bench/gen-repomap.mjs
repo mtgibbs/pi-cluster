@@ -22,8 +22,8 @@ const flag = (name, dflt) => {
 const BUDGET = flag("budget", 2000); // approx tokens; chars/4 heuristic
 const FORCE_LEVEL = flag("level", -1);
 
-const SKIP_DIRS = new Set([".git", "node_modules", "results", ".worktrees"]);
-const SKIP_FILES = /\.(png|jpg|jpeg|gif|ico|woff2?|ttf|zip|gz|db)$/i;
+const SKIP_DIRS = new Set([".git", "node_modules", "results", ".worktrees", ".next", "public"]);
+const SKIP_FILES = /\.(png|jpg|jpeg|gif|ico|woff2?|ttf|zip|gz|db|svg|lock)$|package-lock\.json$/i;
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -78,11 +78,22 @@ function describeScript(file) {
   return "";
 }
 
+function describeTs(file, level) {
+  const head = readHead(file, 32768);
+  const names = [...head.matchAll(
+    /export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|interface|type|enum)\s+(\w+)/g
+  )].map((m) => m[1]);
+  if (!names.length && /export\s+default/.test(head)) names.push("(default)");
+  const max = level >= 3 ? 8 : 3;
+  return names.length ? `exports: ${[...new Set(names)].slice(0, max).join(", ")}` : "";
+}
+
 function describe(file, level) {
   if (level <= 1) return "";
   if (/\.ya?ml$/.test(file)) return describeYaml(file, level);
   if (/\.md$/.test(file)) return describeMd(file, level);
-  if (/\.(sh|mjs|js|py)$/.test(file)) return describeScript(file);
+  if (/\.(ts|tsx|jsx)$/.test(file)) return describeTs(file, level);
+  if (/\.(sh|mjs|js|py)$/.test(file)) return describeScript(file) || describeTs(file, level);
   return "";
 }
 
@@ -149,7 +160,9 @@ if (FORCE_LEVEL < 0) {
   // Phase 2: still over? Collapse whole directories to a count line —
   // low-navigation-value dirs (recaps, specs, skills) first, manifests last.
   const keepValue = (dir) =>
-    /^clusters\//.test(dir) ? 3 : /^(scripts|docs\/adr)/.test(dir) ? 2 : /^docs/.test(dir) ? 1 : 0;
+    /^(clusters|components|pages|hooks|lib|context|src)\b/.test(dir) ? 3
+    : /^(scripts|data|docs\/adr)/.test(dir) ? 2
+    : /^docs/.test(dir) ? 1 : 0;
   while (tokens() > BUDGET) {
     const cand = [...dirs()]
       .filter(([, es]) => !es[0].collapsed && es.length > 1)

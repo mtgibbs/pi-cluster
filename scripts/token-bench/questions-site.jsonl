@@ -1,0 +1,10 @@
+{"id":"s1","q":"Which hook file implements the Konami-code key listener?","grade":"use-konami"}
+{"id":"s2","q":"What external URL does the StarChart component fetch repository data from?","grade":"api\\.github\\.com/users/mtgibbs/repos"}
+{"id":"s3","q":"Which API route file serves the Spotify audio analysis data?","grade":"spotify-analysis"}
+{"id":"s4","q":"Which CSS module file styles the project deck component?","grade":"ProjectDeck\\.module\\.css"}
+{"id":"ms1","q":"Entering the Konami code on the site activates a hidden feature — which component wires that up?","grade":["[Pp]hosphor.?[Tt]uner"],"hops":"hooks/use-konami.ts -> grep consumers -> components/phosphor-tuner/phosphor-tuner.tsx useKonami(open)"}
+{"id":"ms2","q":"The Spotify now-playing card fetches an internal API route. Which lib function does that route's handler call?","grade":["getNowPlaying"],"hops":"spotify-card.tsx useSWR /api/spotify -> pages/api/spotify.ts -> import { getNowPlaying } from lib/spotify; distractor: spotify-analysis route"}
+{"id":"ms3","q":"Which two components consume the GPU context (directly or via its hook)?","grade":["[Ff]ooter","[Vv]isualizer"],"hops":"context/GPUContext -> hooks/use-gpu -> footer.tsx + spotify/visualizer.tsx; _app.tsx is the provider, not a consumer"}
+{"id":"ms4","q":"Besides the toggle component itself, which two components read the VHS mode context?","grade":["[Ss]ystem.?[Ll]ogs","[Cc]ode.?[Hh]ero"],"hops":"context/VhsContext consumers = vhs-toggle (excluded by question), system-logs.tsx, code-hero.tsx; _app is provider"}
+{"id":"ms5","q":"The StarChart's overlay data comes through the data barrel file — which two constants files actually define it?","grade":["project-relations","project-factions"],"hops":"StarChart.tsx imports PROJECT_RELATIONS, PROJECT_FACTIONS from ../../data -> data/index.ts re-exports -> data/project-relations.constants.ts + data/project-factions.constants.ts"}
+{"id":"ms6","q":"One component fetches /api/config at runtime — which component, and what third-party service does it configure?","grade":["[Uu]mami"],"hops":"grep /api/config -> components/analytics/UmamiScript.tsx (Umami analytics)"}
