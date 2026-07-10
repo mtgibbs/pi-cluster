@@ -66,11 +66,24 @@ const PREAMBLE =
 const MAP_BLOCK = (m) =>
   "Below is a compact map of this repository. Use it to open the right files directly " +
   "instead of searching broadly.\n<repo-map>\n" + m + "</repo-map>\n\n";
+// Two instruction variants for the edge index (--edge-instr):
+//   follow  (v1/v2 default) — "follow chains directly instead of opening each
+//           link". This wording CAUSED the m4 failure class: the model quoted
+//           the index as an authority and never verified in the source.
+//   verify  — index is a pointer, not a source; verify literals before answering.
+const EDGE_INSTR = {
+  follow:
+    "Use it to follow cross-file chains directly instead of opening each link in the chain.",
+  verify:
+    "Use it to decide which file(s) to open. The index is derived and abbreviated — verify any " +
+    "literal you report (names, values, schedules) by reading the source file before answering.",
+};
+const EDGE_INSTR_KEY = opt("edge-instr", "follow");
 const EDGE_BLOCK = (e) =>
   "Below is a reference index of this repository: for each file, the secrets, 1Password items " +
   "(1p:item/field), PVCs, in-cluster services, Flux dependencies, image policies, NFS paths, and " +
-  "backup targets it references. Use it to follow cross-file chains directly instead of opening " +
-  "each link in the chain.\n<edge-index>\n" + e + "</edge-index>\n\n";
+  "backup targets it references. " + EDGE_INSTR[EDGE_INSTR_KEY] +
+  "\n<edge-index>\n" + e + "</edge-index>\n\n";
 
 const db = new DatabaseSync(DB_PATH, { readOnly: true });
 const maxCreated = () =>
@@ -145,8 +158,14 @@ for (const q of questions) {
       "Question: " + q.q;
     const { out, rc, killed, dur_ms, dur_active_ms } = await runOnce(prompt);
 
+    // Wait for the session row AND for its token totals to flush — an idle-kill
+    // can land before opencode persists token accounting (rows with tokens=0).
     let ses = null;
-    for (let i = 0; i < 10 && !ses; i++) { ses = sessionAfter(before); if (!ses) await sleep(500); }
+    for (let i = 0; i < 30; i++) {
+      ses = sessionAfter(before);
+      if (ses && (ses.tokens_input > 0 || ses.tokens_cache_read > 0)) break;
+      await sleep(500);
+    }
     const model = ses?.model ? JSON.parse(ses.model).id : null;
     // grade may be a single regex or an array (multi-hop: ALL must match, so a
     // lucky endpoint guess without the traversed chain still fails)

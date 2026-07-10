@@ -175,6 +175,46 @@ Takeaways:
    is exactly what would shortcut hops. Concrete target for that build: beat
    arm A's ~55k mean ctx on the m-set while holding 100% pass.
 
+### Knowledge-cloud edge index round (same day, `gen-edges.mjs`, arm G)
+
+Built the edge index (695 edges: secretName, 1P remoteRef, PVC claims, svc
+calls, Flux dependsOn, $imagepolicy, NFS, backup lists, doc mentions; `--json`
+emits the full graph for the future viz). Three variants on the m-set:
+
+| multi-hop arm | pass | ctx (mean) | dur (med) |
+| :--- | :--- | :--- | :--- |
+| A baseline | 25/25 | 54,938 | 24s |
+| B repo-map | 26/27\* | 53,977 | 24s |
+| G v1: edges by filename | 22/25 | 49,606 | 25s |
+| **G v2: + (Kind/name) per doc** | **23/24** | **38,614** | 48s |
+| G v2i: v2 + "verify before answering" instruction | 23/24 | 50,142 | 53s |
+
+Verdict — **the edge index works, and the data fix was the lever, not the
+instruction**:
+1. **v2 hit the target minus one question**: −30% ctx vs baseline at 23/24.
+   Cache traffic median halved (23k vs 43k) — genuinely fewer round trips.
+2. **v1's failure mode is the field note that matters**: with edges labeled
+   only by filename, the model answered m4 with the *filename* off the sheet
+   (`backup-cronjob`) instead of the resource's metadata name (`pvc-backup`),
+   and even cited the index's invented vocabulary ("the `backs_up` annotation")
+   as if it were repo content — the index became an authority to cite, not a
+   pointer to verify. Worse, the injected instruction *told it to* ("follow
+   chains directly instead of opening each link"). m4 by variant: v1 0/3,
+   v2 2/3, v2i 2/3.
+3. **The "verify literals in the source" instruction (v2i) bought nothing and
+   cost everything**: same 23/24, m4 still 2/3, and ctx gave back the entire
+   v2 saving (+30%) to verification reads. For this executor, putting correct
+   identities IN the data beats telling the model to double-check — consistent
+   with the SDD lesson that the fixture carries the rigor, not the model.
+4. Residual m4 miss both v2 variants: filename still sometimes outranks the
+   `(Kind/name)` label. Future tweak: lead lines with the resource identity,
+   file path second.
+5. Wall time roughly doubles under G on multi-hop (24s→48s median) even as
+   tokens drop — big uncached index prefills are slow on the Beelink and some
+   idle-kill races inflate durations (8 rows needed token backfill from the
+   session DB; `backfill-tokens.mjs`). Token counts are the reliable metric;
+   wall time on a shared GPU is noisy.
+
 ## Open Questions
 
 1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)
