@@ -141,6 +141,40 @@ Takeaways:
    bench now sweeps the litter per-trial; long-lived harness containers should
    watch for it generally.
 
+### Multi-hop round (same day, `questions-multihop.jsonl` m1-m8)
+
+8 chain-traversal questions (secret chains, Flux dependsOn, image-automation,
+backup-target triage) — answer literal and question keywords verified to live in
+different files; `grade[]` requires all regexes so endpoint guessing fails:
+
+| | pass | in (med) | cache (med) | out (med) | ctx (mean) | dur (med) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| A single-hop | 24/24 | 2,129 | 42,527 | 149 | 47,128 | 18s |
+| B single-hop | 25/25 | 1,502 | 32,946 | 80 | 41,775 | 16s |
+| **A multi-hop** | **25/25** | 3,063 | 43,376 | 252 | 54,938 | 24s |
+| **B multi-hop** | **24/24**\* | 2,933 | 49,666 | 206 | 54,046 | 24s |
+
+\* recorded 23/24; the one FAIL was a **grader false-negative** (model answered
+"item `pihole`, field `api-key`" correctly; the v1 grade demanded the slash
+literal). Grade fixed to a proximity regex; lesson: grade on *content proximity*,
+never on answer formatting.
+
+Takeaways:
+1. **No accuracy gap, even multi-hop — a valuable negative result.** qwen3-coder
+   went effectively 49/49 on chain traversal with or without the map. The
+   2025-era "weak models flail at navigation" lore does not apply to read-side
+   work on a repo this size. Multi-hop cost shows up as tokens (ctx 55k vs 47k
+   single-hop, +40% output, +33% wall), not as errors.
+2. **The map's token savings evaporate at multi-hop** (ctx 54.0k vs 54.9k — a
+   wash). Expected in hindsight: the map encodes *structure* (which files exist,
+   what kinds they hold), but chains are *references* (secretName → ExternalSecret
+   → 1P item), which the map doesn't carry. Each hop still costs search-read
+   round trips.
+3. **This is the measurable case for the knowledge-cloud indexer**: an edge
+   index (secretName refs, dependsOn, $imagepolicy annotations, doc mentions)
+   is exactly what would shortcut hops. Concrete target for that build: beat
+   arm A's ~55k mean ctx on the m-set while holding 100% pass.
+
 ## Open Questions
 
 1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)
