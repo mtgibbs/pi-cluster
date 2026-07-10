@@ -35,9 +35,9 @@ const ONLY = opt("only", "").split(",").filter(Boolean);
 const TIMEOUT = Number(opt("timeout", 300));
 const BUDGET = Number(opt("budget", 2000));
 const QFILE = opt("qfile", "questions.jsonl");
-if (!["A", "B"].includes(ARM)) {
-  console.error("usage: run-bench.mjs --arm A|B [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
-  console.error("(arm C / serena is reserved until uv+python are baked into the harness image)");
+if (!["A", "B", "G"].includes(ARM)) {
+  console.error("usage: run-bench.mjs --arm A|B|G [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
+  console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph); C/serena reserved until uv+python are baked into the harness image");
   process.exit(2);
 }
 
@@ -45,12 +45,18 @@ const questions = readFileSync(join(HERE, QFILE), "utf8")
   .split("\n").filter(Boolean).map((l) => JSON.parse(l))
   .filter((q) => !ONLY.length || ONLY.includes(q.id));
 
-let map = "", mapTokens = 0;
-if (ARM === "B") {
+let map = "", mapTokens = 0, edgeIndex = "", edgeTokens = 0;
+if (ARM === "B" || ARM === "G") {
   map = execFileSync("node", [join(HERE, "gen-repomap.mjs"), ROOT, "--budget", String(BUDGET)], {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   mapTokens = Math.ceil(map.length / 4);
+}
+if (ARM === "G") {
+  edgeIndex = execFileSync("node", [join(HERE, "gen-edges.mjs"), ROOT], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
+  });
+  edgeTokens = Math.ceil(edgeIndex.length / 4);
 }
 
 const PREAMBLE =
@@ -59,6 +65,11 @@ const PREAMBLE =
 const MAP_BLOCK = (m) =>
   "Below is a compact map of this repository. Use it to open the right files directly " +
   "instead of searching broadly.\n<repo-map>\n" + m + "</repo-map>\n\n";
+const EDGE_BLOCK = (e) =>
+  "Below is a reference index of this repository: for each file, the secrets, 1Password items " +
+  "(1p:item/field), PVCs, in-cluster services, Flux dependencies, image policies, NFS paths, and " +
+  "backup targets it references. Use it to follow cross-file chains directly instead of opening " +
+  "each link in the chain.\n<edge-index>\n" + e + "</edge-index>\n\n";
 
 const db = new DatabaseSync(DB_PATH, { readOnly: true });
 const maxCreated = () =>
@@ -126,7 +137,11 @@ function cleanBunLitter() {
 for (const q of questions) {
   for (let rep = 1; rep <= REPS; rep++) {
     const before = maxCreated();
-    const prompt = PREAMBLE + "\n\n" + (ARM === "B" ? MAP_BLOCK(map) : "") + "Question: " + q.q;
+    const prompt =
+      PREAMBLE + "\n\n" +
+      (map ? MAP_BLOCK(map) : "") +
+      (edgeIndex ? EDGE_BLOCK(edgeIndex) : "") +
+      "Question: " + q.q;
     const { out, rc, killed, dur_ms, dur_active_ms } = await runOnce(prompt);
 
     let ses = null;
@@ -143,7 +158,7 @@ for (const q of questions) {
       tokens_reasoning: ses?.tokens_reasoning ?? null,
       tokens_cache_read: ses?.tokens_cache_read ?? null,
       tokens_cache_write: ses?.tokens_cache_write ?? null,
-      model, session_id: ses?.id ?? null, map_tokens: ARM === "B" ? mapTokens : 0,
+      model, session_id: ses?.id ?? null, map_tokens: mapTokens, edge_tokens: edgeTokens,
       out_tail: out.trim().slice(-300),
     };
     appendFileSync(RESULTS, JSON.stringify(row) + "\n");
