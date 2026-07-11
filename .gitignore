@@ -32,3 +32,4 @@ opencode.json
 # personal/local-only MCP server (a stdio launcher, a laptop-only binary
 # path), configure that at user scope (~/.claude.json) instead — don't add
 # it here, or a future untracking pass will just re-exclude the whole file.
+.serena/
