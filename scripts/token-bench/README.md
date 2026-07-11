@@ -19,6 +19,15 @@ no LiteLLM admin access.
 - **B — repo-map**: `gen-repomap.mjs` output (token-budgeted structural map:
   yaml kind/name, md headings, script comments; auto-degrades detail to fit
   `--budget`, default 2000 tokens (soft target — collapsed-dir summaries can overshoot slightly)) prepended as a navigation index.
+- **G — repo-map + edge index**: adds `gen-edges.mjs` (file-level reference
+  graph: secrets, PVCs, Flux dependsOn, TS imports, /api/ fetches — the
+  "knowledge cloud").
+- **S — repo-map + symbol graph**: adds `gen-symbols.mjs` instead — a
+  symbol-level component graph for TS/TSX (which component renders which,
+  provider vs consumer, custom-hook origins through barrels, props-type
+  extends, per-symbol imports). Subsumes G's import edges on code repos;
+  targets "how do classes/components compose" questions
+  (`questions-site-components.jsonl`).
 - **C — serena**: reserved. Blocked on uv+python in the harness image
   (container config comes from outside — needs an image bake, see
   `beelink-ansible`).

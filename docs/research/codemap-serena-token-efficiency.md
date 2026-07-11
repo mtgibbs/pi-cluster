@@ -254,6 +254,58 @@ Findings:
    plausible-looking datasets died on a `session.directory` join. The audit is
    now part of the run command.
 
+### Symbol-graph round: component composition (2026-07-11, arm S, `gen-symbols.mjs`)
+
+The next granularity down: G's edge index knows *file→file* imports; arm S
+replaces it with a **symbol-level component graph** — which component renders
+which (`Component<-defining/file`), context Provider mounts vs consumers,
+custom-hook origins resolved through barrels, props-type `extends` chains,
+per-symbol imports, and unexported local symbols. ~2.1k tokens for the whole
+site (vs ~1.2k for G's edge index). New question set
+(`questions-site-components.jsonl`, c1-c9) targets composition: render fan-in,
+fan-out enumeration, provider-vs-consumer, props inheritance, barrel-resolved
+hook origin, transitive render chains, local-hook identity. 111 trials, audit
+0/111 wrong-rooted.
+
+| mtgibbs.xyz | pass | ctx (mean) | dur (med) |
+| :--- | :--- | :--- | :--- |
+| A baseline · comp | 25/27 | 45,950 | 19s |
+| G map+edges · comp | 26/27 | 28,108 | 13s |
+| **S map+symbols · comp** | **27/27** | **26,173** | 14s |
+| A baseline · multi (prior round) | 18/18 | 80,529 | 30s |
+| G map+edges · multi (prior round) | 18/18 | 35,650 | 16s |
+| **S map+symbols · multi** | **18/18** | **25,762** | 12s |
+| S map+symbols · single | 12/12 | 24,779 | 12s |
+
+Findings:
+1. **The site bench finally produced real accuracy failures, and they're
+   composition-shaped.** Baseline failed c1 (fan-in: "which two files render
+   SectionTitle?") 1/3 — it grepped, got all 10 matches, and still reported
+   the definition file instead of the second renderer. G failed c8 1/3: the
+   unexported `useLiveCatalog` hook lives *inside* StarChart.tsx and never
+   crosses a file boundary, so a file-level import index is structurally blind
+   to it. S carries both answers on the sheet and went 27/27 — plus 30/30 on
+   the prior round's s/ms sets (57/57 overall).
+2. **Symbol edges beat file edges on the original multi-hop set too: −28% ctx
+   vs G (35.7k → 25.8k), −68% vs baseline (80.5k).** In hindsight the ms
+   questions were always symbol questions (context consumers, barrel
+   constants) — G answered them by opening the files its edges pointed at; S
+   answers most hops from the sheet and spends one read verifying. S's median
+   cache-read is flat ~17.5k across all tiers — the sheet, the map, and one
+   verification read is the whole workload.
+3. **The bigger sheet has a real cost on single-hop lookups**: S 24.8k vs G
+   21.7k / B 20.5k ctx (+14% vs G). "Where is X?" questions are answered by
+   the repo map alone; the extra ~900 tokens of symbol edges ride along
+   unused. Same story on fan-out enumeration (c9: baseline's single grep was
+   the *cheapest* correct strategy, 28.5k vs S's 35.5k).
+4. **Layer selection, not layer stacking, is the emerging design**: map for
+   location, symbol graph for code composition, edge index for cross-domain
+   references (secrets/PVCs/Flux — things symbols don't cover). Stacking all
+   three pays two prefixes everywhere; the right index per question class is
+   strictly better. A future "arm GS" (edges for manifests + symbols for code,
+   one merged sheet) is the obvious pi-cluster test, where YAML dominates and
+   the two indexes don't overlap.
+
 ## Open Questions
 
 1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)

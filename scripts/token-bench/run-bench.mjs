@@ -40,9 +40,9 @@ const TIMEOUT = Number(opt("timeout", 300));
 const BUDGET = Number(opt("budget", 2000));
 const QFILE = opt("qfile", "questions.jsonl");
 const TAG = opt("tag", ""); // free-form variant label (e.g. edge-index v2) recorded per row
-if (!["A", "B", "G"].includes(ARM)) {
-  console.error("usage: run-bench.mjs --arm A|B|G [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
-  console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph); C/serena reserved until uv+python are baked into the harness image");
+if (!["A", "B", "G", "S"].includes(ARM)) {
+  console.error("usage: run-bench.mjs --arm A|B|G|S [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens]");
+  console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph), S repo-map + symbol/component graph (gen-symbols.mjs); C/serena reserved until uv+python are baked into the harness image");
   process.exit(2);
 }
 
@@ -50,8 +50,8 @@ const questions = readFileSync(join(HERE, QFILE), "utf8")
   .split("\n").filter(Boolean).map((l) => JSON.parse(l))
   .filter((q) => !ONLY.length || ONLY.includes(q.id));
 
-let map = "", mapTokens = 0, edgeIndex = "", edgeTokens = 0;
-if (ARM === "B" || ARM === "G") {
+let map = "", mapTokens = 0, edgeIndex = "", edgeTokens = 0, symbolMap = "", symbolTokens = 0;
+if (ARM === "B" || ARM === "G" || ARM === "S") {
   map = execFileSync("node", [join(HERE, "gen-repomap.mjs"), ROOT, "--budget", String(BUDGET)], {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
@@ -62,6 +62,12 @@ if (ARM === "G") {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   edgeTokens = Math.ceil(edgeIndex.length / 4);
+}
+if (ARM === "S") {
+  symbolMap = execFileSync("node", [join(HERE, "gen-symbols.mjs"), ROOT], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
+  });
+  symbolTokens = Math.ceil(symbolMap.length / 4);
 }
 
 const PREAMBLE =
@@ -88,6 +94,16 @@ const EDGE_BLOCK = (e) =>
   "(1p:item/field), PVCs, in-cluster services, Flux dependencies, image policies, NFS paths, and " +
   "backup targets it references. " + EDGE_INSTR[EDGE_INSTR_KEY] +
   "\n<edge-index>\n" + e + "</edge-index>\n\n";
+// Arm S: symbol/component graph — same default "follow" stance as G for a fair
+// comparison (the v2 lesson holds: correct identities in the data, not verify
+// instructions, are what prevent authority-citing failures).
+const SYMBOL_BLOCK = (s) =>
+  "Below is a symbol-level component graph of this repository. Per file: its exported symbols " +
+  "(kind; props types incl. extends), which components it renders (Component<-defining/file), " +
+  "context Providers it mounts (provides:), custom hooks it calls (hook<-defining/file), " +
+  "non-rendered symbols it uses ({names}<-file), barrel re-exports (reexports:), and internal " +
+  "API endpoints it fetches. " + EDGE_INSTR[EDGE_INSTR_KEY] +
+  "\n<symbol-graph>\n" + s + "</symbol-graph>\n\n";
 
 const db = new DatabaseSync(DB_PATH, { readOnly: true });
 const maxCreated = () =>
@@ -164,6 +180,7 @@ for (const q of questions) {
       PREAMBLE + "\n\n" +
       (map ? MAP_BLOCK(map) : "") +
       (edgeIndex ? EDGE_BLOCK(edgeIndex) : "") +
+      (symbolMap ? SYMBOL_BLOCK(symbolMap) : "") +
       "Question: " + q.q;
     const { out, rc, killed, dur_ms, dur_active_ms } = await runOnce(prompt);
 
@@ -188,6 +205,7 @@ for (const q of questions) {
       tokens_cache_read: ses?.tokens_cache_read ?? null,
       tokens_cache_write: ses?.tokens_cache_write ?? null,
       model, session_id: ses?.id ?? null, map_tokens: mapTokens, edge_tokens: edgeTokens,
+      symbol_tokens: symbolTokens || undefined,
       out_tail: out.trim().slice(-300),
     };
     appendFileSync(RESULTS, JSON.stringify(row) + "\n");

@@ -30,7 +30,7 @@ function summarize(group) {
   }));
 }
 
-const tier = (r) => (r.qid.startsWith("m") ? "multi" : "single");
+const tier = (r) => (r.qid.startsWith("m") ? "multi" : r.qid.startsWith("c") ? "comp" : "single");
 const repos = new Set(rows.map((r) => r.repo ?? "pi-cluster"));
 const armKey = (r) =>
   `${repos.size > 1 ? (r.repo ?? "pi-cluster") + " · " : ""}arm ${r.arm}${r.tag ? "." + r.tag : ""}`;
