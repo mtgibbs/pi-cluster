@@ -27,6 +27,11 @@ const jsonIdx = args.indexOf("--json");
 const jsonOut = jsonIdx >= 0 ? args[jsonIdx + 1] : null;
 const budgetIdx = args.indexOf("--budget");
 const BUDGET = budgetIdx >= 0 ? Number(args[budgetIdx + 1]) : 2500; // tokens; manifest edges are never pruned
+// --no-code-imports: skip TS/JS import+api edges (for stacking with the symbol
+// graph, which carries them at symbol granularity — two sheets restating the
+// same relations in different vocabularies made the model fabricate hybrid
+// lines: GS ms3 0/3, 2026-07-11 late)
+const NO_CODE_IMPORTS = args.includes("--no-code-imports");
 
 const SKIP_DIRS = new Set([".git", "node_modules", "results", ".worktrees", ".next", "public"]);
 function walk(dir, out = []) {
@@ -107,11 +112,13 @@ for (const file of walk(root)) {
     // code edges: the import graph (relative imports resolved to repo paths,
     // barrel re-exports included) + internal API endpoints fetched at runtime
     const via = tsIdentity(text);
-    for (const m of text.matchAll(/(?:import|export)\s+[^'"]*?from\s+['"](\.[^'"]+)['"]/g)) {
-      const target = relative(root, join(dirname(join(root, rel)), m[1]));
-      add(rel, via, "import", target);
+    if (!NO_CODE_IMPORTS) {
+      for (const m of text.matchAll(/(?:import|export)\s+[^'"]*?from\s+['"](\.[^'"]+)['"]/g)) {
+        const target = relative(root, join(dirname(join(root, rel)), m[1]));
+        add(rel, via, "import", target);
+      }
+      for (const m of text.matchAll(/['"](\/api\/[\w/-]+)['"]/g)) add(rel, via, "api", m[1]);
     }
-    for (const m of text.matchAll(/['"](\/api\/[\w/-]+)['"]/g)) add(rel, via, "api", m[1]);
     extract(rel, via, text); // svc/nfs rules still apply (harmless elsewhere)
   } else {
     extract(rel, null, text);

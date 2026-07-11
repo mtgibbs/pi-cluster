@@ -59,7 +59,12 @@ if (ARM === "B" || ARM === "G" || ARM === "S" || ARM === "GS") {
   mapTokens = Math.ceil(map.length / 4);
 }
 if (ARM === "G" || ARM === "GS") {
-  edgeIndex = execFileSync("node", [join(HERE, "gen-edges.mjs"), ROOT], {
+  // GS stacks the symbol graph on top, so the edge index drops its code-import
+  // edges — stacking two vocabularies for the SAME relations made the model
+  // fabricate hybrid sheet lines (ms3 0/3). Layers must be domain-disjoint.
+  const edgeArgs = [join(HERE, "gen-edges.mjs"), ROOT];
+  if (ARM === "GS") edgeArgs.push("--no-code-imports");
+  edgeIndex = execFileSync("node", edgeArgs, {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   edgeTokens = Math.ceil(edgeIndex.length / 4);
