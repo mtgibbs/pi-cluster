@@ -35,6 +35,26 @@ if [ -z "$KEY" ]; then
 fi
 export OPENCODE_QWEN_KEY="$KEY"
 
+# Homelab MCP key (the `ops` diagnostician agent — .opencode/agents/ops.md).
+# Keychain hit is free on any launch; only `oc ops` REQUIRES the key and falls back
+# to 1Password (Touch ID) — plain coding sessions never prompt for it. Optional seed:
+#   security add-generic-password -U -s mcp-homelab -a oc -T /usr/bin/security \
+#     -w "$(op read 'op://pi-cluster/mcp-homelab/api-key')"
+MCP_KEY="$(security find-generic-password -s mcp-homelab -w 2>/dev/null || true)"
+if [ "${1:-}" = "ops" ]; then
+  shift
+  if [ -z "$MCP_KEY" ]; then
+    MCP_KEY="$(op read "${OC_MCP_KEY_REF:-op://pi-cluster/mcp-homelab/api-key}" 2>/dev/null || true)"
+  fi
+  if [ -z "$MCP_KEY" ]; then
+    echo "oc ops: no mcp-homelab key — not in the Keychain (service 'mcp-homelab') nor 1Password." >&2
+    exit 1
+  fi
+  export MCP_HOMELAB_KEY="$MCP_KEY"
+  exec opencode --agent ops "$@"
+fi
+if [ -n "$MCP_KEY" ]; then export MCP_HOMELAB_KEY="$MCP_KEY"; fi
+
 # Interactive TUI (no `run` subcommand) → hand off directly, no timeout.
 if [ "${1:-}" != "run" ]; then
   exec opencode "$@"

@@ -32,6 +32,60 @@ opencode export <ses_id> # full session as clean markdown — the way to hand a 
                          # transcript to Claude (TUI copy-paste mangles; ctx import is lite)
 ```
 
+## Ops mode — `oc ops` (local-model homelab diagnostician)
+
+Self-sustainability requires the local model to diagnose the lab without Claude — the
+role the §16 baseline (research log) showed unscaffolded qwen flailing at. The fix is a
+dedicated opencode **agent**, not more coding-brief prose:
+
+- **Agent definition (repo-tracked):** `.opencode/agents/ops.md` — its own system prompt
+  (world model + media pipeline + diagnostic discipline), a **curated 23-tool subset** of
+  mcp-homelab (reads + 4 bounded mutations, mutations set to `ask`), `edit: deny`,
+  `kubectl`/`op` denied, other bash `ask`. Rides into any checkout automatically.
+- **Launcher:** `oc ops` (in `scripts/oc`) — loads `MCP_HOMELAB_KEY` (Keychain service
+  `mcp-homelab` first, else `op://pi-cluster/mcp-homelab/api-key` with Touch ID) and
+  execs `opencode --agent ops`. Plain `oc` never prompts for the ops key. **Tier
+  decision:** the MCP key is cluster-acting (restarts, exec-in-jellyfin) — leaving it
+  1Password-only (one Touch ID per ops session) respects the crown-jewel rule; seed the
+  Keychain only if you decide it's medium-tier.
+- **Machine-local wiring (NOT in git — merge into the repo-root `opencode.json` on each
+  machine; while there, DELETE any `mcpServers` key, that's Claude's schema and throws
+  `ConfigInvalidError`):**
+
+  ```jsonc
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+      "homelab": {
+        "type": "remote",
+        "url": "https://mcp.lab.mtgibbs.dev/mcp",
+        "enabled": true,
+        "headers": { "X-API-Key": "{env:MCP_HOMELAB_KEY}" }
+      }
+    },
+    "tools": { "homelab_*": false },
+    "permission": { "bash": { "kubectl *": "deny", "op *": "deny", "*": "allow" } }
+  }
+  ```
+
+  `"homelab_*": false` hides the ~50 tool schemas from the build/coding agents (context
+  budget, §12 of the research log); `ops.md` re-enables its subset. The `permission`
+  block is the binding enforcement for the §16 secret-extraction failure — AGENTS.md
+  rules alone don't bind a 30B.
+- **Smoke test:** `oc ops` → the TUI should show the ops agent with only homelab tools;
+  ask "what's the cluster health?" and confirm it calls `homelab_get_cluster_health`
+  instead of shelling out. Known wrinkle: in plain `oc` sessions with no
+  `MCP_HOMELAB_KEY`, opencode still connects to the MCP server at startup and may log an
+  auth warning — harmless (tools are globally disabled); seed the Keychain to silence it.
+- **Eval:** rerun the §16 baseline prompt verbatim ("check on a download of 'seeking
+  persophone' and then make sure it's imported into our jellyfin") in `oc ops`; correct
+  behavior is 2-3 queue/history calls → "never grabbed; want me to add it?". Log the
+  after-result in research log §16. Ops quality is meaningfully better on the Q8
+  (`aimode work`) — prefer it for nontrivial debugging.
+- **Container follow-up (not done):** `coding-harness-qwen` gets `ops.md` via the repo
+  but needs `MCP_HOMELAB_KEY` in its env (beelink-ansible, laptop-side change) before
+  `oc ops` works there.
+
 **The supervised SDD loop** (the intended flow):
 1. **Prior-art pass** (Claude, not qwen): `ctx setup` to pick up sessions since the last
    index, then `ctx search "<feature terms>"` + `ctx search --file <path>` for each path in
