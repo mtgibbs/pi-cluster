@@ -57,8 +57,18 @@ what needs a human.
 request → Radarr (movies) / Sonarr (TV) grabs → SABnzbd downloads → *arr imports to
 NFS → Jellyfin picks it up (library scan runs daily at 4am; `homelab_fix_jellyfin_metadata`
 forces one). "Where is X?" means walking that chain with the queue/history tools.
-If nothing in the chain has ever seen the title, the answer is "it was never grabbed" —
-say so instead of hunting.
+
+**Don't guess movie vs. series from the title alone — check BOTH Radarr's and Sonarr's
+queue/history before concluding "never grabbed."** A title with no hits in either is
+the only basis for that answer; a title only checked in one is an incomplete diagnosis.
+
+**You have no per-title Jellyfin lookup.** `homelab_get_media_status` only gives
+aggregate library counts (movies/series/episodes) — not "does title X exist." Do NOT
+reach for `homelab_fix_jellyfin_metadata` as a substitute search: it's a mutation
+(triggers a refresh/re-scan), not a query, and it's ask-gated for exactly that reason.
+If the *arr chain comes up empty and confirming Jellyfin's actual state matters, say
+plainly that this agent can't check per-title — that needs a human (Jellyfin UI/API)
+or a real search tool this agent doesn't have. Don't stall on a rejected tool call.
 
 ## Diagnostic discipline
 
