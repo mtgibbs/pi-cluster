@@ -28,9 +28,10 @@ no LiteLLM admin access.
   extends, per-symbol imports). Subsumes G's import edges on code repos;
   targets "how do classes/components compose" questions
   (`questions-site-components.jsonl`).
-- **C — serena**: reserved. Blocked on uv+python in the harness image
-  (container config comes from outside — needs an image bake, see
-  `beelink-ansible`).
+- **C — serena**: fully wired; runs as soon as `uv` is baked into the harness
+  image. Registers serena per-trial via `OPENCODE_CONFIG` (merges with global
+  config), seeds `.serena/project.yml`, hints the symbol tools. Bake ask +
+  runbook: `serena-prep.md`.
 
 ## Usage (inside a coding-harness container or anywhere `oc` works)
 
