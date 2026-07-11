@@ -25,19 +25,36 @@ SPEC="$SPEC_DIR/spec.md"; VERIFY="$SPEC_DIR/verify.sh"; TASKS="$SPEC_DIR/tasks.t
 for f in "$SPEC" "$VERIFY" "$TASKS"; do [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 ROOT="$(git rev-parse --show-toplevel)"
 
+# Navigation codesheet (repo map + shape-appropriate reference sheet), generated
+# ONCE for the whole loop: byte-stable across every task and retry, so after the
+# first attempt it rides the Beelink's prefix cache for ~free. Deliberately not
+# regenerated after commits — stability beats freshness for caching, and each
+# task is bounded anyway. Measured: 20-56% less context at equal-or-better
+# accuracy (docs/research/codemap-serena-token-efficiency.md). RALPH_SHEET=off
+# disables. oc gets OC_SHEET=off below so the sheet isn't injected twice.
+SHEET=""
+SHEET_GEN="$(dirname "$0")/gen-codesheet.mjs"
+if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/dev/null 2>&1; then
+  SHEET="$(node "$SHEET_GEN" "$ROOT" 2>/dev/null || true)"
+  [ -n "$SHEET" ] && echo "codesheet: injected (~$(( ${#SHEET} / 4 )) tokens, stable for the whole loop)"
+fi
+
 while IFS= read -r task || [ -n "$task" ]; do
   [ -z "${task// }" ] && continue
   echo "════════ TASK: $task ════════"
   feedback=""; passed=0
   for attempt in $(seq 1 $((RETRIES + 1))); do
-    prompt="Read $SPEC. Implement ONLY this one task, nothing else: ${task}
+    prompt="${SHEET:+$SHEET
+
+}Read $SPEC. Implement ONLY this one task, nothing else: ${task}
 Follow the spec's section 10 reference and section 7 acceptance criteria EXACTLY.
 Do not touch anything outside this task's scope. Reuse existing patterns; never invent
 URLs/UIDs. When done, stop.${feedback}"
 
     # Fresh session each attempt (no -c/--continue) = no context bloat. oc adds the
     # 1Password key + a watchdog timeout so a stalled stream can't hang for hours.
-    OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" >/dev/null 2>&1 || true
+    # OC_SHEET=off: the sheet is already in the prompt (once, loop-stable) above.
+    OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" >/dev/null 2>&1 || true
 
     # The gate: deterministic, external. The model does NOT get to say "done".
     if out="$(cd "$ROOT" && bash "$VERIFY" 2>&1)"; then

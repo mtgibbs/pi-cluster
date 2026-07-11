@@ -32,6 +32,31 @@ opencode export <ses_id> # full session as clean markdown — the way to hand a 
                          # transcript to Claude (TUI copy-paste mangles; ctx import is lite)
 ```
 
+### Codesheet injection (default ON for `oc run` and ralph)
+
+Every headless `oc run` prepends a **navigation codesheet** to the prompt:
+repo map + the reference sheet the repo's shape calls for (symbol graph for
+code, edge index for manifests, both — domain-disjoint — for mixed). Measured
+on 783 trials: **20–56% less context at equal-or-better accuracy**, ~free
+after first use via prefix caching. Full evidence:
+`docs/research/codemap-serena-token-efficiency.md`.
+
+- Generator: `scripts/gen-codesheet.mjs` (wraps `scripts/token-bench/gen-*.mjs`;
+  picks layers from the data — pi-cluster→G, mtgibbs.xyz→S, pi-cluster-mcp→GS).
+- Resolution order: `$OC_SHEET_GEN` → `<target-repo>/scripts/gen-codesheet.mjs`
+  → the canonical pi-cluster checkout (`$HOME/dev/…` on the laptop, literal
+  `/Users/mtgibbs/dev/…` in the harness containers). No generator → silent
+  passthrough, `oc run` works anywhere.
+- `OC_SHEET=off oc run …` disables. `ralph-qwen.sh` generates the sheet ONCE
+  per loop (byte-stable → cached across every task/retry) and sets
+  `OC_SHEET=off` on its own oc calls so it never double-injects;
+  `RALPH_SHEET=off` disables the loop's copy.
+- Interactive `oc` (TUI) is NOT injected — sheets are a headless-prompt
+  mechanism; the TUI user navigates personally.
+- Gotcha class to watch: never add a second sheet describing the same
+  relations in a different vocabulary — that exact overlap made qwen fabricate
+  index lines (bench ms3 0/3). One vocabulary per relation.
+
 ## Ops mode — `oc ops` (local-model homelab diagnostician)
 
 Self-sustainability requires the local model to diagnose the lab without Claude — the

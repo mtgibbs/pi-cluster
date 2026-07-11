@@ -60,7 +60,55 @@ if [ "${1:-}" != "run" ]; then
   exec opencode "$@"
 fi
 
-# Headless `run` → guard with a watchdog so a stalled stream can't hang for hours
+# Headless `run` → prepend the navigation codesheet (repo map + the sheet the
+# repo's shape calls for) to the prompt. Measured on 783 trials: 20-56% less
+# context at equal-or-better accuracy, ~free after first use via prefix cache
+# (docs/research/codemap-serena-token-efficiency.md). OC_SHEET=off disables;
+# OC_SHEET_GEN overrides the generator path. Silently skipped when no
+# generator is reachable, so `oc run` keeps working on any machine.
+if [ "${OC_SHEET:-on}" = "on" ]; then
+  # Target repo = --dir's value if present, else cwd.
+  sheet_dir="$PWD"
+  _prev=""
+  for _a in "$@"; do
+    [ "$_prev" = "--dir" ] && sheet_dir="$_a"
+    _prev="$_a"
+  done
+  SHEET_GEN="${OC_SHEET_GEN:-}"
+  if [ -z "$SHEET_GEN" ] && [ -f "$sheet_dir/scripts/gen-codesheet.mjs" ]; then
+    SHEET_GEN="$sheet_dir/scripts/gen-codesheet.mjs"
+  fi
+  # Canonical checkout: $HOME/dev on the laptop; the harness containers clone
+  # at the literal laptop path (that's what makes memory-dir slugs match).
+  for _cand in "$HOME/dev/pi-cluster" "/Users/mtgibbs/dev/pi-cluster"; do
+    if [ -z "$SHEET_GEN" ] && [ -f "$_cand/scripts/gen-codesheet.mjs" ]; then
+      SHEET_GEN="$_cand/scripts/gen-codesheet.mjs"
+    fi
+  done
+  if [ -n "$SHEET_GEN" ] && command -v node >/dev/null 2>&1; then
+    sheet="$(node "$SHEET_GEN" "$sheet_dir" 2>/dev/null || true)"
+    if [ -n "$sheet" ]; then
+      # Prepend to the FIRST message word (args after `run` that aren't flags
+      # or a value of a value-taking flag) — the sheet must precede the
+      # question, matching the measured prompt shape.
+      args=("$@"); _prev=""; injected=0
+      for i in "${!args[@]}"; do
+        if [ "$i" = 0 ]; then continue; fi             # the `run` word itself
+        case "$_prev" in --dir|--agent|--model|-m|--session|-s) _prev="${args[$i]}"; continue;; esac
+        _prev="${args[$i]}"
+        case "${args[$i]}" in -*) continue;; esac
+        args[$i]="${sheet}
+
+${args[$i]}"
+        injected=1
+        break
+      done
+      if [ "$injected" = 1 ]; then set -- "${args[@]}"; fi
+    fi
+  fi
+fi
+
+# Guard with a watchdog so a stalled stream can't hang for hours
 # (a local agentic session stalled for 2h once with no timeout — never again).
 opencode "$@" &
 oc_pid=$!
