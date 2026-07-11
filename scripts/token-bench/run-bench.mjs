@@ -41,9 +41,9 @@ const TIMEOUT = Number(opt("timeout", 300));
 const BUDGET = Number(opt("budget", 2000));
 const QFILE = opt("qfile", "questions.jsonl");
 const TAG = opt("tag", ""); // free-form variant label (e.g. edge-index v2) recorded per row
-if (!["A", "B", "G", "S", "C"].includes(ARM)) {
-  console.error("usage: run-bench.mjs --arm A|B|G|S|C [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens] [--serena-ref vX.Y.Z]");
-  console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph), S repo-map + symbol/component graph (gen-symbols.mjs), C serena MCP symbol tools (needs uvx in the image — see serena-prep.md)");
+if (!["A", "B", "G", "S", "GS", "C"].includes(ARM)) {
+  console.error("usage: run-bench.mjs --arm A|B|G|S|GS|C [--reps N] [--only q1,q2] [--qfile questions-multihop.jsonl] [--timeout secs] [--budget tokens] [--serena-ref vX.Y.Z]");
+  console.error("arms: A baseline, B repo-map, G repo-map + edge index (knowledge graph), S repo-map + symbol/component graph (gen-symbols.mjs), GS merged sheet (edges + symbols — layer per domain), C serena MCP symbol tools (needs uvx in the image — see serena-prep.md)");
   process.exit(2);
 }
 
@@ -52,19 +52,19 @@ const questions = readFileSync(join(HERE, QFILE), "utf8")
   .filter((q) => !ONLY.length || ONLY.includes(q.id));
 
 let map = "", mapTokens = 0, edgeIndex = "", edgeTokens = 0, symbolMap = "", symbolTokens = 0;
-if (ARM === "B" || ARM === "G" || ARM === "S") {
+if (ARM === "B" || ARM === "G" || ARM === "S" || ARM === "GS") {
   map = execFileSync("node", [join(HERE, "gen-repomap.mjs"), ROOT, "--budget", String(BUDGET)], {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   mapTokens = Math.ceil(map.length / 4);
 }
-if (ARM === "G") {
+if (ARM === "G" || ARM === "GS") {
   edgeIndex = execFileSync("node", [join(HERE, "gen-edges.mjs"), ROOT], {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });
   edgeTokens = Math.ceil(edgeIndex.length / 4);
 }
-if (ARM === "S") {
+if (ARM === "S" || ARM === "GS") {
   symbolMap = execFileSync("node", [join(HERE, "gen-symbols.mjs"), ROOT], {
     encoding: "utf8", stdio: ["ignore", "pipe", "inherit"],
   });

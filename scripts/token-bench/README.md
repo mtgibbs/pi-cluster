@@ -28,6 +28,8 @@ no LiteLLM admin access.
   extends, per-symbol imports). Subsumes G's import edges on code repos;
   targets "how do classes/components compose" questions
   (`questions-site-components.jsonl`).
+- **GS — merged sheet**: edge index + symbol graph stacked. Null-tested on
+  pi-cluster (empty symbol layer): GS ≈ G, safe to inject unconditionally.
 - **C — serena**: MCP symbol tools, registered per-trial via `OPENCODE_CONFIG`
   (merges with global config), `.serena/project.yml` seeded, symbol-tool hint.
   Setup details: `serena-prep.md`. **Benchmarked 2026-07-11: 57/57 but

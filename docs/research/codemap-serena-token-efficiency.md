@@ -345,6 +345,39 @@ Verdict — **both open questions answered, and the recommendation stands**:
    same accuracy, ¼ the tokens, ½ the wall time, no python/uv dependency at
    inference time.
 
+### Merged-sheet (GS) null test on pi-cluster (2026-07-11 late)
+
+Arm GS = map + edge index + symbol graph stacked. Running it on pi-cluster
+surfaced a structural fact first: **this repo has no symbol graph.** Family
+Board is a single-file `index.html` app, the n8n `src/*.js` are standalone
+Code-node snippets composed by workflow JSON (zero imports between them), and
+the bench scripts are self-contained — pi-cluster's composition lives
+entirely in YAML. gen-symbols.mjs correctly emits a ~142-token near-empty
+sheet. So the GS round became a null test: does stacking an empty layer hurt?
+
+| m-set, pi-cluster | pass | ctx (med) | ctx (mean) | notes |
+| :--- | :--- | :--- | :--- | :--- |
+| G v2 (2026-07-10) | 23/24 | 23,189 | 38,614 | |
+| **G recheck (same night as GS)** | 23/24 | 47,427 | 43,568 | |
+| **GS (same night)** | 23/24 | 48,022 | 61,424 | mean inflated by one 273k outlier |
+
+1. **Null test PASSES**: same-night GS ≈ G (median 48.0k vs 47.4k, identical
+   23/24 with the same flaky-m4 residual, 47/48 across both GS sets). The
+   empty symbol layer costs its 142 tokens and nothing else — the merged
+   sheet is safe to inject unconditionally; layer relevance falls out of the
+   data, not config.
+2. **Methodology lesson worth the round it cost**: tonight's *G alone* also
+   ran ~2× yesterday's median (47.4k vs 23.2k — two round trips where
+   yesterday took one, at half the wall time per trip). First read looked
+   like "the empty block causes verification reads"; the G recheck proved it
+   environmental (hot-coder is aimode-following 30B/Q8, plus Beelink cache
+   regime). **Cross-day absolute numbers are invalid; only same-window arm
+   pairs count.** The site rounds (A/B/G/S/C) all ran same-window and are
+   unaffected.
+3. Watch item: one GS trial (m7) thrashed to 273k ctx / 234s before
+   answering correctly — sheet arms are not immune to occasional tool loops;
+   medians over means for this bench.
+
 ## Open Questions
 
 1. ~~Does qwen3-coder Q8 actually drive symbol tools productively?~~
@@ -360,9 +393,10 @@ Verdict — **both open questions answered, and the recommendation stands**:
    32k?~~ **MEASURED via arm C floor: serena's registration costs ~3.5×
    standing cache occupancy on trivial questions (62k vs 17.5k) — schemas +
    tool transcript ride in every request.**
-5. NEW: merged GS sheet (edge index for manifests + symbol graph for code) on
-   pi-cluster — the two indexes don't overlap there; does the combination hold
-   both wins?
+5. ~~Merged GS sheet on pi-cluster~~ **ANSWERED (null test): GS ≈ G when the
+   symbol layer is empty — safe to stack unconditionally.** The positive case
+   (a repo with BOTH manifests and real code, e.g. pi-cluster-mcp) remains
+   untested; pi-cluster itself turned out to have no symbol graph.
 
 ## Refuted During Verification
 
