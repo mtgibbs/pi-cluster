@@ -28,10 +28,11 @@ no LiteLLM admin access.
   extends, per-symbol imports). Subsumes G's import edges on code repos;
   targets "how do classes/components compose" questions
   (`questions-site-components.jsonl`).
-- **C — serena**: fully wired; runs as soon as `uv` is baked into the harness
-  image. Registers serena per-trial via `OPENCODE_CONFIG` (merges with global
-  config), seeds `.serena/project.yml`, hints the symbol tools. Bake ask +
-  runbook: `serena-prep.md`.
+- **C — serena**: MCP symbol tools, registered per-trial via `OPENCODE_CONFIG`
+  (merges with global config), `.serena/project.yml` seeded, symbol-tool hint.
+  Setup details: `serena-prep.md`. **Benchmarked 2026-07-11: 57/57 but
+  2.8–4.5× arm S's context — see the research doc; kept for editing-task
+  benches, not recommended for navigation.**
 
 ## Usage (inside a coding-harness container or anywhere `oc` works)
 

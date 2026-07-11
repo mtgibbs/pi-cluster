@@ -306,15 +306,63 @@ Findings:
    one merged sheet) is the obvious pi-cluster test, where YAML dominates and
    the two indexes don't overlap.
 
+### Serena round: arm C head-to-head (2026-07-11 evening, uv baked into harness image)
+
+Serena v1.5.3 registered per-trial via `OPENCODE_CONFIG` (merges with global
+config — identical environment to other arms plus serena), ide-assistant
+context, read-only project seed, symbol-tool hint in the prompt. 57 trials +
+1 discarded warm-up; audit 0/57 wrong-rooted, zero idle-kills.
+
+| mtgibbs.xyz | pass | ctx (mean) | dur (med) |
+| :--- | :--- | :--- | :--- |
+| **C serena · comp** | **27/27** | 73,439 | 24s |
+| **C serena · multi** | **18/18** | 115,648 | 35s |
+| **C serena · single** | **12/12** | 67,941 | 22s |
+| S map+symbols · comp | 27/27 | 26,173 | 14s |
+| S map+symbols · multi | 18/18 | 25,762 | 12s |
+| A baseline · multi | 18/18 | 80,529 | 30s |
+
+Verdict — **both open questions answered, and the recommendation stands**:
+1. **qwen3-coder CAN drive serena — the 2025 weak-model lore is refuted on
+   accuracy.** 57/57 including every chain question, zero tool-use failures
+   in ~250 tool calls. The capability concern that shaped the original
+   recommendation is dead; the *cost* concern is not.
+2. **Serena costs 2.8–4.5× arm S's context for identical accuracy** — and on
+   multi-hop (115.6k vs baseline's 80.5k) it is more expensive than *no
+   tooling at all*. Symbol tools replace grep round-trips with symbol
+   round-trips, but every request re-carries ~20 tool schemas plus the
+   accumulated tool transcript; the sheet arms answer from a one-shot prefix
+   the cache makes nearly free. Worst case ms5 (barrel chain): 186k cache /
+   119s for one answer arm S delivers at ~36k / 16s.
+3. **The schema tax is visible in the floor**: serena's cheapest single-hop
+   trials still occupy ~62k cumulative cache vs 17.5k for S — a ~3.5×
+   standing overhead before any navigation happens. Wall time ~2× across all
+   tiers (tool latency + bigger prefills on the Beelink).
+4. Where serena would still win: **symbol-level *editing*** (rename,
+   replace_symbol_body) and polyglot repos where a generator like
+   gen-symbols.mjs doesn't exist — neither is exercised by a read-side Q&A
+   bench. For navigation on our stack, the passive sheet is strictly better:
+   same accuracy, ¼ the tokens, ½ the wall time, no python/uv dependency at
+   inference time.
+
 ## Open Questions
 
-1. Does qwen3-coder Q8 actually drive symbol tools productively? (Dogfood test.)
+1. ~~Does qwen3-coder Q8 actually drive symbol tools productively?~~
+   **ANSWERED 2026-07-11 (arm C): yes on accuracy (57/57), no on economics
+   (2.8–4.5× arm S's context, 2× wall).** Untested remainder: symbol-level
+   *editing* tools on real SDD tasks.
 2. How do repo-map tools handle k8s YAML/Kustomizations? All evaluated mappers
    are code-symbol oriented; none verified on manifest-heavy repos — most of
-   this one.
+   this one. (Our own gen-edges covers it; the question is now moot for
+   adoption, open only as a market observation.)
 3. Can Obsidian's official CLI enable truly headless section-level retrieval?
-4. What is opencode's real token overhead per registered MCP server at 32k —
-   Serena's ~20 schemas vs RepoMapper's one?
+4. ~~What is opencode's real token overhead per registered MCP server at
+   32k?~~ **MEASURED via arm C floor: serena's registration costs ~3.5×
+   standing cache occupancy on trivial questions (62k vs 17.5k) — schemas +
+   tool transcript ride in every request.**
+5. NEW: merged GS sheet (edge index for manifests + symbol graph for code) on
+   pi-cluster — the two indexes don't overlap there; does the combination hold
+   both wins?
 
 ## Refuted During Verification
 
