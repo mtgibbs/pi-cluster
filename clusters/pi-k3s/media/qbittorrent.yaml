@@ -93,7 +93,7 @@ spec:
               cpu: "200m"
         # qBittorrent
         - name: qbittorrent
-          image: linuxserver/qbittorrent:5.2.2
+          image: linuxserver/qbittorrent:5.2.3
           env:
             - name: PUID
               value: "1029"
