@@ -195,6 +195,66 @@ servarr_call radarr POST /api/v3/release -d "{\"guid\":\"$GUID\",\"indexerId\":$
 
 Sonarr has the same pattern with `/api/v3/release?episodeId=...` + manual ID-based grab.
 
+## Recipe: orphaned download diagnostic (safe/unsafe verdict, never deletes)
+
+SABnzbd's own "Orphaned jobs" UI just means "I don't recognize this folder in my
+queue/history" — it says nothing about whether the content is safe to delete.
+Built + proven live 2026-07-11: 45 real orphaned folders (17 from SABnzbd's own
+tab in `/downloads/incomplete/`, ~28 more stale `_UNPACK_`/`_FAILED_` dirs in
+`/downloads/complete/usenet/` that SABnzbd doesn't flag but the orphan-sweep
+CronJob's age-based scan does) — 45/45 resolved to a confident verdict, 0
+ambiguous.
+
+**The deterministic check, in order:**
+1. Both Radarr and Sonarr here have `copyUsingHardlinks: true` (verify via
+   `GET /api/v3/config/mediamanagement`) — confirmed via `stat` that
+   `/downloads` and the library root folders share the same NFS device number,
+   so successful imports really are zero-extra-space hardlinks, not silent
+   copies. This matters for reasoning about "wasted space," but is NOT itself
+   the safety check — a folder that was never the source of an import has no
+   hardlink relationship to lose either way.
+2. Cross-reference the folder's release name against Radarr/Sonarr's own
+   history (**any** event type — `downloadFailed` entries don't get a separate
+   `grabbed` record) and current `hasFile` state:
+   - Exact release WAS imported (`downloadFolderImported` for the same
+     `downloadId`) → safe, it's a dup or a stale post-import leftover.
+   - Never imported, but the movie/episode's `hasFile: true` via a **different**
+     release → safe, this was a superseded/abandoned grab attempt.
+   - `hasFile: false` → **do not touch**, may be the only copy.
+   - No history record at all (seen with older/manually-added NZBs) → fall
+     back to parsing `SxxEyy` straight from the folder name and checking that
+     specific episode's `hasFile` directly — still deterministic, just a
+     different path to the same evidence.
+3. Never trust folder-name pattern matching alone (age, `_UNPACK_` prefix,
+   `.N` collision suffix) as a safety proof — it tells you something's stale,
+   not that it's safe. The `orphan-sweep` CronJob (`clusters/pi-k3s/media/
+   orphan-sweep-cronjob.yaml`) uses exactly that kind of heuristic and is
+   explicitly report-only for this reason.
+
+**Run it:** `.claude/skills/servarr-ops/diagnose-orphans.sh` (sibling script) —
+read-only, fetches + caches Radarr/Sonarr history and library state to `/tmp`
+on first run. Feed it folder names one per line:
+
+```sh
+kubectl exec -n media deployment/sabnzbd -- sh -c \
+  'ls -1 /downloads/incomplete/; ls -1 /downloads/complete/usenet/' \
+  | grep -v '^books$' \
+  | bash .claude/skills/servarr-ops/diagnose-orphans.sh
+```
+
+**The actual deletion is deliberately not part of this script.** Verdicts here
+inform a human decision (SABnzbd's own "delete (including files)" button) —
+they don't trigger one. Matches how `ops.md` already treats anything beyond
+its four gated mutations: diagnose and hand off, don't self-execute real data
+deletion.
+
+**Known gap: `oc ops` cannot run this itself yet.** It needs `kubectl` (no MCP
+equivalent for listing NFS download-dir contents) and Radarr/Sonarr's raw
+history/movie/episode REST endpoints (the mcp-homelab tools it has only
+expose queue/history summaries, not this level of cross-referencing). This is
+a Claude/cluster-ops-tier diagnostic for now — revisit if mcp-homelab grows
+the right primitives.
+
 ## Recipe: subtitle pipeline order
 
 Bazarr only sees files **after** Sonarr/Radarr import them. If subtitles aren't being downloaded:

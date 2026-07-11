@@ -1,7 +1,12 @@
-# Weekly orphan reporter for /downloads/complete/usenet/.
+# Weekly orphan reporter for /downloads/complete/usenet/ AND /downloads/incomplete/.
 #
 # What it does:
-#   - Finds _UNPACK_* dirs and .[0-9]+ suffix dirs older than 14 days
+#   - complete/usenet: finds _UNPACK_* dirs and .[0-9]+ suffix dirs older than 14 days
+#   - incomplete: finds ANY dir untouched (mtime) for 14+ days — a stalled/abandoned
+#     grab (SABnzbd continuously writes to an active download, so a frozen mtime
+#     means downloading stopped, not that it's slow). Found for real 2026-07-11:
+#     a stalled Schindler's List grab sat in incomplete/ for months (~23 GiB) —
+#     this cronjob never looked there before, only complete/usenet/.
 #   - Reports them (size, age) to stdout — captured by Loki
 #   - PHASE 1: report-only, no deletion. Once we trust the heuristic,
 #     we can add a --delete flag (or a separate CronJob).
@@ -10,6 +15,9 @@
 #   Earlier audits showed many "orphans" still contained un-imported content.
 #   The import-resolver CronJob should be doing 80% of that work now, but
 #   we want visibility into what's left before automating destructive ops.
+#   See .claude/skills/servarr-ops/SKILL.md "orphaned download diagnostic" recipe
+#   for the deterministic (not just age-based) verdict: cross-reference against
+#   Radarr/Sonarr history + hasFile before ever deleting anything found here.
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -81,10 +89,36 @@ spec:
                   echo "  total: $dup_count dirs"
 
                   echo ""
+                  echo "--- /downloads/incomplete: dirs untouched ${THRESHOLD_DAYS}+ days (stalled/abandoned grabs) ---"
+                  cd /downloads/incomplete
+                  stale_count=0
+                  stale_bytes=0
+                  for d in */; do
+                    d="${d%/}"
+                    [ -d "$d" ] || continue
+                    if [ "$(find "$d" -maxdepth 0 -mtime +$THRESHOLD_DAYS 2>/dev/null)" ]; then
+                      size_bytes=$(du -sb "$d" 2>/dev/null | cut -f1)
+                      size_human=$(du -sh "$d" 2>/dev/null | cut -f1)
+                      mtime=$(stat -c '%y' "$d" 2>/dev/null | cut -d. -f1)
+                      printf "  %-8s  %s  %s\n" "$size_human" "$mtime" "$d"
+                      stale_count=$((stale_count + 1))
+                      stale_bytes=$((stale_bytes + size_bytes))
+                    fi
+                  done
+                  echo "  total: $stale_count dirs"
+                  if [ "$stale_count" -gt 0 ]; then
+                    printf "  reclaimable: %.1f GB\n" "$(echo "scale=2; $stale_bytes / 1073741824" | awk -v b="$stale_bytes" 'BEGIN{print b/1073741824}')"
+                  fi
+
+                  echo ""
                   echo "=== Summary ==="
-                  echo "  _UNPACK_ orphans: $found_count dirs"
-                  echo "  .N retries:       $dup_count dirs"
-                  echo "  report-only mode (no deletions)"
+                  echo "  _UNPACK_ orphans (complete/usenet):   $found_count dirs"
+                  echo "  .N retries (complete/usenet):         $dup_count dirs"
+                  echo "  stalled grabs (incomplete):           $stale_count dirs"
+                  echo "  report-only mode (no deletions) — verdicts here are AGE-based only,"
+                  echo "  not a safety proof. Before deleting anything, run the deterministic"
+                  echo "  diagnostic (servarr-ops SKILL.md) to confirm each title's library"
+                  echo "  copy independently, then delete via SABnzbd's own UI."
               volumeMounts:
                 - name: downloads
                   mountPath: /downloads
