@@ -1,7 +1,7 @@
 # Codemap, Serena & the Knowledge Cloud — Token Efficiency for the Local Coding Agent
 
 **Date:** 2026-07-10
-**Status:** Research complete — recommendation pending local dogfood test
+**Status:** Measurement complete (783 trials, 0 wrong-rooted) — production guidance issued 2026-07-11: inject map + domain-appropriate sheet (symbols for code, edges for manifests, both disjoint for mixed repos); no serena for navigation
 **Method:** Deep-research workflow (103 agents: 5-angle search fan-out → 15-source fetch → 3-vote adversarial claim verification → synthesis). Claims below carry their verification votes.
 **Related:** `local-coding-agent-sdd.md` (the qwen/opencode harness this is meant to serve)
 
