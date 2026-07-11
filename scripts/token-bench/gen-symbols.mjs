@@ -40,10 +40,12 @@ function walk(dir, out = []) {
 function resolveImport(fromFile, spec) {
   if (!spec.startsWith(".")) return null; // package import
   const base = resolve(dirname(fromFile), spec);
-  for (const cand of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`,
-                      join(base, "index.ts"), join(base, "index.tsx")]) {
+  const cands = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`,
+                 join(base, "index.ts"), join(base, "index.tsx")];
+  // TS NodeNext style: `./x.js` in source actually names `./x.ts(x)` on disk
+  if (/\.js$/.test(base)) cands.push(base.replace(/\.js$/, ".ts"), base.replace(/\.js$/, ".tsx"));
+  for (const cand of cands)
     if (existsSync(cand) && statSync(cand).isFile()) return relative(root, cand);
-  }
   return relative(root, base); // unresolved: keep the path anyway
 }
 
@@ -79,6 +81,13 @@ for (const abs of walk(root).sort()) {
     const target = resolveImport(abs, m[2]);
     for (const n of parseClause(m[1]))
       importOf.set(n, target ? { path: target } : { pkg: m[2] });
+  }
+  // dynamic imports: const { fn } = await import('./x.js') — lazy-loaded deps
+  // are still composition edges (found via pi-cluster-mcp's touch_nas_path)
+  const dynImports = new Map(); // resolved path -> true
+  for (const m of text.matchAll(/import\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
+    const target = resolveImport(abs, m[1]);
+    if (target) dynImports.set(target, true);
   }
 
   // --- exported symbols with kind ---
@@ -172,6 +181,10 @@ for (const abs of walk(root).sort()) {
     used.get(key).push(name);
   }
 
+  for (const [path] of dynImports) {
+    if (!used.has(path)) used.set(path, []);
+    used.get(path).push("(dynamic)");
+  }
   files.push({ rel, exports, props, extend, renders, provides, hooks, reexports, api, used, importOf });
 }
 
