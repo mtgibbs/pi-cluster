@@ -378,6 +378,64 @@ sheet. So the GS round became a null test: does stacking an empty layer hurt?
    answering correctly — sheet arms are not immune to occasional tool loops;
    medians over means for this bench.
 
+### Completion rounds (2026-07-11 overnight — full matrix closed)
+
+Three batches finished every remaining cell: site gaps (B on the comp set,
+GS on everything, S re-run as same-window anchor), serena on pi-cluster, and
+the positive merged-sheet case on **pi-cluster-mcp** (37 TS files + k8s
+manifests; new x-set of 8 grep-verified cross-domain chains — yaml→code
+env-var plumbing, code→yaml secret refs, RBAC verb → code guard, and a
+dynamic-import chain). 351 trials; 783 total now audited 0 wrong-rooted.
+
+**x-set, pi-cluster-mcp, one window — all four arms 24/24:**
+
+| arm | ctx (med) | vs baseline |
+| :--- | :--- | :--- |
+| A baseline | 56,809 | — |
+| G map+edges | 44,121 | −22% |
+| S map+symbols | 45,018 | −21% |
+| GS disjoint | 45,765 | −19% |
+
+**Site same-window rounds:** S anchor 26/27 @ 17.6k med (identical cost to
+the afternoon run — the site never showed pi-cluster's window drift);
+B comp 25/27 @ 31.9k (the c4 barrel-origin trap took both misses — a bare
+map contains no re-export edges); GS-overlap comp 27/27, site-single 12/12,
+**site-multi 15/18** — every miss was ms3 (see below).
+
+**Serena on pi-cluster (manifest repo): 48/48** — it answers YAML questions
+competently via its pattern-search tools — **at med 84–91k ctx vs the
+same-night G recheck's 47.4k (~1.9×)**. Across the whole campaign serena
+finished **105/105 with the worst economics on every tier it ran** (1.9× on
+manifests, 2.8–4.5× on code).
+
+Findings:
+1. **The overlap hazard is the headline**: stacking two sheets that describe
+   the *same relations in different vocabularies* (file-level import edges +
+   symbol edges) made the model fabricate hybrid index lines — GS-overlap
+   answered ms3 with `phosphor-tuner -> hooks:useGPU`, a line in *neither*
+   sheet, 0/3, pure sheet-reading with zero verification reads. The same
+   merged sheet with disjoint layers (`gen-edges --no-code-imports`, now
+   automatic for arm GS) went 24/24 on the cross-domain x-set. Rule:
+   **one vocabulary per relation; stack only across domains.**
+2. **Cross-domain chains don't need a cross-domain sheet on a small repo**:
+   on 37 files, G, S, and GS-disjoint converge (~44–46k, all perfect) —
+   yaml→code hops are cheap when the map alone locates both ends. The
+   merged sheet's value should grow with repo size; on this evidence it's
+   *safe* (no regression) rather than *necessary*.
+3. **The bare map (B) is now the weakest sheet arm**: it repeatedly falls
+   into the barrel-origin trap (c4: "where is useGPU implemented" →
+   answers the re-export file) — structure without reference edges invites
+   confident wrong answers, consistent with the earlier blind-arm finding.
+4. **Accuracy saturates; tokens discriminate.** Across 351 completion
+   trials the only failures were the three predicted trap classes (barrel
+   origin, local symbol, sheet fabrication). At this repo scale, arm choice
+   is a cost/safety decision, not an accuracy one.
+
+**Final production guidance for the qwen harness**: inject map + the
+domain-appropriate sheet (symbols for code repos, edges for manifest repos,
+both — disjoint — for mixed repos). Do not register serena for navigation;
+revisit only for a symbol-*editing* bench.
+
 ## Open Questions
 
 1. ~~Does qwen3-coder Q8 actually drive symbol tools productively?~~
