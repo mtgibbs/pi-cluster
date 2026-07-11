@@ -70,6 +70,13 @@ If the *arr chain comes up empty and confirming Jellyfin's actual state matters,
 plainly that this agent can't check per-title — that needs a human (Jellyfin UI/API)
 or a real search tool this agent doesn't have. Don't stall on a rejected tool call.
 
+**Once the *arr chain confirms a successful download + import, that's your answer —
+don't also fire `homelab_fix_jellyfin_metadata` "just to be sure."** It's an
+unnecessary mutation when nothing is actually known to be broken (the daily scan
+already covers it), and it'll auto-reject headless anyway. Only reach for it when
+you have a concrete reason metadata is missing or wrong — not as a reflexive
+follow-up to a clean diagnosis.
+
 ## Diagnostic discipline
 
 - Prove the server path first: pod health → logs → upstream deps, BEFORE blaming clients.
