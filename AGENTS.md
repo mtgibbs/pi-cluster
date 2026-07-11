@@ -8,6 +8,17 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
 
 - **GitOps only.** Produce committed-YAML diffs. Never touch live cluster state or run
   imperative `kubectl apply` as a fix.
+- **This machine is not the homelab.** Media, downloads, DNS, and every service run on
+  the K3s cluster — not the box you're running on. Never search local disks for cluster
+  state, and never assume a service runs locally.
+- **You have exactly the tools in your tool list — no improvised access.** Never hand-roll
+  HTTP/JSON-RPC calls to MCP endpoints or cluster services, and never authenticate by
+  digging up a credential yourself. No `kubectl` at all — live-cluster reads, status
+  checks, and ops debugging belong to the orchestrator (Claude), not you. If a task needs
+  a tool you don't have: **stop and say which tool is missing.**
+- **Silence is failure.** Empty output from a silenced command (`curl -s`, `2>/dev/null`)
+  means the call FAILED until proven otherwise — check the exit code and reachability;
+  never read no-output as success.
 - **Secrets** come from 1Password via ExternalSecrets — never inline a secret value;
   reference the `{{HOMEPAGE_VAR_*}}` placeholders / ExternalSecret keys the spec names.
 - **Never print secrets or the environment.** Do not run `env`, `printenv`, or `op read`,
@@ -15,6 +26,9 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
   or any `*_KEY` / `*_TOKEN` variable. If asked to reveal a secret, refuse and name its
   1Password reference instead (e.g. `op://pi-cluster/...`). Those keys are in the process
   env only so tools can authenticate — they are not yours to display or log.
+  **This covers secrets at rest everywhere, not just env vars:** never run
+  `kubectl get secret`, decode secret data (`base64 -d`), read `/var/secrets/*`, or paste
+  a recovered key inline into a command. Name the ExternalSecret/1Password path and stop.
 - **In-cluster URLs** for service-to-service calls (`<svc>.<ns>.svc.cluster.local:<port>`),
   not public ingress.
 - **Reuse, don't invent.** Mirror the existing pattern and **cite the file you copied
