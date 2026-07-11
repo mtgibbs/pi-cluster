@@ -28,6 +28,8 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 ```bash
 oc                       # interactive TUI (qwen3-coder)
 oc run "do one thing"    # headless one-shot (watchdog: OC_RUN_TIMEOUT, default 600s)
+opencode export <ses_id> # full session as clean markdown — the way to hand a qwen
+                         # transcript to Claude (TUI copy-paste mangles; ctx import is lite)
 ```
 
 **The supervised SDD loop** (the intended flow):

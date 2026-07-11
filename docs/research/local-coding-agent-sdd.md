@@ -379,3 +379,49 @@ the network."
 > Rejected (per existing norms): GLM-4.6/4.7 (don't fit); host-exposing Ollama/LiteLLM; autonomous
 > closed-loop remediation. GLM-4.5-Air kept as an optional A/B challenger only if the tool-calling
 > quality justifies the 12B-active speed hit.
+
+## 16. Ops-debugging baseline — unscaffolded qwen as a homelab helper (2026-07-10)
+
+A natural-use data point for §15's "ops harness" thread: Matt opened a stale laptop `oc`
+session (opencode 1.17.10, hot-coder) and asked it, conversationally, to *"check on a
+download of 'seeking persophone' and then make sure it's imported into our jellyfin."*
+Full transcript: opencode session `ses_0c336c21effespTcakl1Q50t7Y` (export with
+`opencode export <session-id>` — far cleaner than copying from the TUI).
+
+**Ground truth (checked via mcp-homelab the same night):** no such download exists
+anywhere in the chain — Radarr queue empty, no match in Radarr history, SABnzbd idle with
+no history match. ("Seeking Persephone" is a Sarah M. Eden novel, not a film.) The correct
+answer was *"there's nothing to check on — did you mean a book, or should I add it?"*,
+reachable in two read-only tool calls.
+
+**Failure taxonomy (what actually happened):**
+1. **Wrong world-model** — searched the *laptop's* filesystem (`~/Downloads`, `~/Movies`,
+   `/Volumes`) for a cluster download. AGENTS.md is a coding-loop brief; qwen has no ops
+   context and didn't go looking for any until nudged.
+2. **No tool self-awareness** — when told "use the MCP tool," it read *Claude's* `.mcp.json`,
+   then hand-rolled a raw JSON-RPC curl to the MCP endpoint with an **invented method**
+   (`jellyfin/scan-media`). It can't distinguish its own toolset from the orchestrator's.
+3. **Silent-failure blindness** — curled `jellyfin.jellyfin.svc.cluster.local` *from the
+   laptop* (in-cluster DNS, unreachable) with `curl -s`; treated empty output as ambiguous
+   progress and iterated variations instead of diagnosing reachability. Also wrong Jellyfin
+   auth syntax (`MediaBrowser token='…'`; should be `Token="…"` or `X-Emby-Token`). This is
+   the inverse of CLAUDE.md's "prove the server path first" discipline.
+4. **Secret-hygiene violation** — extracted `mcp-homelab-secrets/jellyfin-api-key` via
+   kubectl + `base64 -d` and printed it into the transcript, then pasted it inline in
+   later commands. AGENTS.md's "never print secrets" rule didn't generalize from env vars
+   to k8s secrets.
+5. **Hallucinated question UI** — asked the user to pick among three "MCP tools"
+   (ScanMedia/RefreshItem/UpdateLibrary) that don't exist as such.
+
+**What it did right:** asked genuine clarifying questions when the filesystem search dried
+up; once pointed at the repo it found `kubeconfig`, located the Jellyfin pod, and read the
+right manifests. The recovery moves were sensible — the priors and the verification loop
+were what failed.
+
+**Reading:** this is mostly a *harness* gap, not purely a model gap — no MCP tools wired
+into opencode, no ops brief, no deterministic gate — i.e. exactly the conditions the
+SDD/ralph architecture was built to avoid for coding. It validates §15's conclusion
+(local model executes, orchestration + tools carry the rigor) and gives us a **before**
+measurement: if we ever wire mcp-homelab into opencode (`mcp` key in opencode.json — NOT
+`mcpServers`, which is Claude's schema and throws `ConfigInvalidError` on 1.17.x) plus a
+lean ops section in AGENTS.md, rerun this exact prompt as the **after**.
