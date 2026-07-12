@@ -94,7 +94,7 @@ Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansib
 Runs the bounded SDD loop (one task per fresh session, deterministic verify.sh gate, retry
 with failure feedback). Generates the codesheet **ONCE per loop** so the identical bytes
 ride the prefix cache across every task and retry, and sets `OC_SHEET=off` on its own `oc`
-calls so the sheet is never injected twice. `ralph-qwen.sh` is mentioned (its sheet is
-generated once per loop).
+calls so the sheet is never injected twice.
 
+- **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
 - **Opt-out:** `RALPH_SHEET=off`.
