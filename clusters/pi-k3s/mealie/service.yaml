@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mealie
+  namespace: mealie
+spec:
+  type: ClusterIP
+  selector:
+    app: mealie
+  ports:
+    - port: 9000
+      targetPort: http

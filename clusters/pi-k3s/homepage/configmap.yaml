@@ -258,6 +258,11 @@ data:
             href: https://lazylibrarian.lab.mtgibbs.dev
             description: eBook Search & Management
             siteMonitor: https://lazylibrarian.lab.mtgibbs.dev
+        - Mealie:
+            icon: mealie.png
+            href: https://recipes.lab.mtgibbs.dev
+            description: Recipe Library
+            siteMonitor: https://recipes.lab.mtgibbs.dev/api/app/about
         - Kiwix:
             icon: mdi-bookshelf
             href: https://kiwix.lab.mtgibbs.dev

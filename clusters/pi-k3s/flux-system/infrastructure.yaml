@@ -652,3 +652,25 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 31. mealie - Self-hosted recipe manager for the recipe homestead (docs/recipecate.md).
+# URL import via recipe-scrapers; Instagram capture via AI provider (Phase 3, Beelink LiteLLM).
+# Postgres companion in-namespace. Needs the mealie 1Password item (db-password).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: mealie
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/mealie
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
