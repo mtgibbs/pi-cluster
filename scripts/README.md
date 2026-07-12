@@ -44,8 +44,21 @@ oc run "do thing"  # headless one-shot
 OC_KEY_REF="op://work-vault/opencode/key" oc
 ```
 
-Requires: `op` (1Password CLI, signed in or desktop-integration enabled), `opencode`,
-and a project `opencode.json` whose provider reads `{env:OPENCODE_QWEN_KEY}`.
+### Codesheet injection
+
+Every headless `oc run` prepends a navigation codesheet to the prompt: a repo map plus the
+reference sheet the repo's shape calls for. Layer selection is automatic, from the repo's
+contents: **symbol graph** for code repos, **edge index** for manifest repos, both
+(domain-disjoint) for mixed repos.
+
+- **Generator:** `scripts/gen-codesheet.mjs`. Resolution order: `$OC_SHEET_GEN` env var,
+  then `<target repo>/scripts/gen-codesheet.mjs`, then the canonical pi-cluster checkout.
+  If none is found, `oc run` works unchanged (silent passthrough).
+- **Opt-out:** `OC_SHEET=off oc run "..."`.
+- **Interactive `oc` (TUI) sessions are not injected.**
+
+Measured basis: 20-56% less context at equal-or-better accuracy across 783 trials —
+`docs/research/codemap-serena-token-efficiency.md`.
 
 ## `harness` — remote coding-agent containers (Beelink)
 
@@ -75,3 +88,13 @@ harness sync-memory              # ship this laptop's Claude memory (claude only
 Requires: `ssh beelink-ai` already configured (see the local-creds model above).
 
 Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude}/`).
+
+## `ralph-qwen.sh` — bounded SDD loop
+
+Runs the bounded SDD loop (one task per fresh session, deterministic verify.sh gate, retry
+with failure feedback). Generates the codesheet **ONCE per loop** so the identical bytes
+ride the prefix cache across every task and retry, and sets `OC_SHEET=off` on its own `oc`
+calls so the sheet is never injected twice. `ralph-qwen.sh` is mentioned (its sheet is
+generated once per loop).
+
+- **Opt-out:** `RALPH_SHEET=off`.
