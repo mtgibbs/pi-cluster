@@ -151,3 +151,5 @@ once the sheet wiring lands.
 | pi-cluster | `378dda4` | feat(token-bench): x-set (pi-cluster-mcp cross-domain questions) + extractor fixes |
 | pi-cluster | `bb70fc2` | fix(token-bench): GS layers must be domain-disjoint — overlap made the model fabricate sheet lines |
 | pi-cluster | `9bdb122` | feat(token-bench): completion rounds — full matrix closed, 351 trials, overlap hazard confirmed |
+
+**Continued:** production wiring and the first ralph run under sheet injection — `docs/recaps/2026-07-12-codesheet-production-wiring.md`.
