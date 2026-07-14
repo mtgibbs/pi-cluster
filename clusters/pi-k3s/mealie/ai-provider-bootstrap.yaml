@@ -1,0 +1,147 @@
+# Mealie AI provider bootstrap — config-as-code for DB-resident provider rows.
+#
+# Mealie v3 stores AI providers in Postgres (per-group, managed via
+# /api/groups/ai-providers), so a plain manifest can't declare them. This Job
+# is the committed, rerunnable equivalent: it create-or-updates the Beelink
+# LiteLLM provider by name and binds it to the group's `default` (text) slot,
+# preserving any audio/image slot bindings. Re-run on change: bump the Job
+# name suffix (Jobs are immutable) — Flux prunes the old one.
+#
+# Requires (human gates, in 1Password):
+#   - mealie/litellm-key        — LiteLLM virtual key scoped to the text model
+#   - mcp-homelab/mealie-api-token — the shared Mealie automation token
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mealie-ai-secret
+  namespace: mealie
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    name: onepassword
+    kind: ClusterSecretStore
+  target:
+    name: mealie-ai-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: litellm-key
+      remoteRef:
+        key: mealie/litellm-key
+    - secretKey: mealie-api-token
+      remoteRef:
+        key: mcp-homelab/mealie-api-token
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mealie-ai-provider-bootstrap
+  namespace: mealie
+data:
+  bootstrap.py: |
+    import json
+    import os
+    import urllib.request
+
+    MEALIE = os.environ.get("MEALIE_URL", "http://mealie.mealie.svc.cluster.local:9000")
+    TOKEN = os.environ["MEALIE_API_TOKEN"]
+    KEY = os.environ["LITELLM_API_KEY"]
+    NAME = os.environ.get("PROVIDER_NAME", "beelink-litellm")
+    BASE_URL = os.environ.get("PROVIDER_BASE_URL", "https://ai.lab.mtgibbs.dev/v1")
+    MODEL = os.environ.get("PROVIDER_MODEL", "qwen3-30b-instruct")
+    TIMEOUT = int(os.environ.get("PROVIDER_TIMEOUT", "300"))
+
+
+    def req(method, path, body=None):
+        request = urllib.request.Request(
+            f"{MEALIE}/api{path}",
+            method=method,
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(body).encode() if body is not None else None,
+        )
+        with urllib.request.urlopen(request, timeout=30) as resp:
+            return json.load(resp)
+
+
+    settings = req("GET", "/groups/ai-providers/settings")
+    payload = {
+        "name": NAME,
+        "baseUrl": BASE_URL,
+        "apiKey": KEY,
+        "model": MODEL,
+        "timeout": TIMEOUT,
+        "requestHeaders": {},
+        "requestParams": {},
+    }
+
+    existing = next((p for p in settings["providers"] if p["name"] == NAME), None)
+    if existing:
+        provider = req("PUT", f"/groups/ai-providers/providers/{existing['id']}", payload)
+        action = "updated"
+    else:
+        provider = req("POST", "/groups/ai-providers/providers", payload)
+        action = "created"
+
+    # Bind as the default (text) provider; leave audio/image slots untouched
+    # (Phase 3 later steps: vision model, whisper endpoint).
+    result = req(
+        "PUT",
+        "/groups/ai-providers/settings",
+        {
+            "defaultProviderId": provider["id"],
+            "audioProviderId": settings.get("audioProviderId"),
+            "imageProviderId": settings.get("imageProviderId"),
+        },
+    )
+
+    print(f"{action} provider '{NAME}' ({provider['id']}) model={MODEL} base={BASE_URL}")
+    print(f"aiEnabled={result.get('aiEnabled')} default={result.get('defaultProviderId')}")
+    if not result.get("aiEnabled"):
+        raise SystemExit("bootstrap completed but aiEnabled is still false")
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mealie-ai-provider-bootstrap-v1
+  namespace: mealie
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: mealie-ai-provider-bootstrap
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bootstrap
+          image: python:3.12-alpine
+          command: ["python", "/scripts/bootstrap.py"]
+          env:
+            - name: MEALIE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mealie-ai-secret
+                  key: mealie-api-token
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mealie-ai-secret
+                  key: litellm-key
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: scripts
+          configMap:
+            name: mealie-ai-provider-bootstrap
