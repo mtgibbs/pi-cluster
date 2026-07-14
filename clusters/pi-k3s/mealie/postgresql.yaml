@@ -1,0 +1,107 @@
+---
+# Dedicated Postgres for Mealie.
+# Plain single-instance Deployment (matches the n8n/Immich pattern; no CNPG operator here).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mealie-postgresql-data
+  namespace: mealie
+  annotations:
+    # Prevent Flux from deleting this PVC (protects data)
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mealie-postgresql
+  namespace: mealie
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mealie-postgresql
+  template:
+    metadata:
+      labels:
+        app: mealie-postgresql
+    spec:
+      # Keep the DB on a Pi 5 (8GB) worker, not the 1GB Pi 3.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+                      - pi5-worker-2
+      containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: mealie
+            - name: POSTGRES_USER
+              value: mealie
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mealie-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "-c"
+            - "shared_buffers=128MB"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "mealie"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "mealie"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mealie-postgresql-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mealie-postgresql
+  namespace: mealie
+spec:
+  selector:
+    app: mealie-postgresql
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

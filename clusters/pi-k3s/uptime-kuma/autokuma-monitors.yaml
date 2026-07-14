@@ -253,6 +253,16 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  mealie.json: |
+    {
+      "notification_name_list": ["discord"],
+      "type": "http",
+      "name": "Mealie",
+      "url": "https://recipes.lab.mtgibbs.dev/api/app/about",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   sonarr.json: |
     {
       "notification_name_list": ["discord"],
