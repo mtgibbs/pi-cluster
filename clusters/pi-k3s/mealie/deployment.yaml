@@ -49,9 +49,15 @@ spec:
                 secretKeyRef:
                   name: mealie-secret
                   key: POSTGRES_URL_OVERRIDE
+            # Custom AI prompts (qwen-tuned) — see ai-prompts.yaml
+            - name: OPENAI_CUSTOM_PROMPT_DIR
+              value: /prompts
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: ai-prompts
+              mountPath: /prompts/recipes
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -83,3 +89,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: mealie-data
+        - name: ai-prompts
+          configMap:
+            name: mealie-ai-prompts
