@@ -54,6 +54,15 @@ spec:
                 secretKeyRef:
                   name: mealie-secret
                   key: POSTGRES_PASSWORD
+            - name: OPENAI_BASE_URL
+              value: https://ai.lab.mtgibbs.dev/v1
+            - name: OPENAI_MODEL
+              value: mealie-extract
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mealie-secret
+                  key: OPENAI_API_KEY
           volumeMounts:
             - name: data
               mountPath: /app/data
