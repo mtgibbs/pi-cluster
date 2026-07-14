@@ -50,6 +50,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 - **Infrastructure**: `get_certificate_status`, `get_ingress_status`, `get_tailscale_status`, `get_backup_status`, `trigger_backup`
 - **Media**: `get_media_status`, `fix_jellyfin_metadata`, `touch_nas_path`, `get_subtitle_status`, `get_subtitle_history`, `search_subtitles`
 - **Sonarr/Radarr/SABnzbd**: `get_sonarr_queue`, `get_sonarr_history`, `search_sonarr_episode`, `get_radarr_queue`, `get_radarr_history`, `search_radarr_movie`, `get_sabnzbd_queue`, `get_sabnzbd_history`, `retry_sabnzbd_download`, `pause_resume_sabnzbd`, `get_quality_profile`, `reject_and_search`
+- **Recipes (Mealie)**: `get_mealie_status`, `search_mealie_recipes`, `get_mealie_recipe`, `import_mealie_recipe_url`
 - **Network**: `get_node_networking`, `get_iptables_rules`, `get_conntrack_entries`, `curl_ingress`, `test_pod_connectivity`
 - **UniFi Network** (local stdio): `tool_index`, `execute`, `batch` (go-unifi-mcp, lazy mode)
 
@@ -70,6 +71,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Sonarr / Radarr / Bazarr / SAB API** | `.claude/skills/servarr-ops/SKILL.md` | direct API via helper |
 | **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
+| **Mealie / Recipes** | `docs/recipecate.md` (build plan + AI-provider mechanics) | MCP direct; `cluster-ops` for manifests |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
