@@ -41,19 +41,14 @@ spec:
               value: "false"
             - name: DB_ENGINE
               value: postgres
-            - name: POSTGRES_SERVER
-              value: mealie-postgresql
-            - name: POSTGRES_PORT
-              value: "5432"
-            - name: POSTGRES_DB
-              value: mealie
-            - name: POSTGRES_USER
-              value: mealie
-            - name: POSTGRES_PASSWORD
+            # Full DSN templated by the ExternalSecret; Mealie URL-encodes
+            # the password portion itself (safe=''), unlike the discrete
+            # POSTGRES_* path which chokes on '/' in passwords.
+            - name: POSTGRES_URL_OVERRIDE
               valueFrom:
                 secretKeyRef:
                   name: mealie-secret
-                  key: POSTGRES_PASSWORD
+                  key: POSTGRES_URL_OVERRIDE
           volumeMounts:
             - name: data
               mountPath: /app/data
