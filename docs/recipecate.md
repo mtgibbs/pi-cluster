@@ -121,7 +121,7 @@ Group settings bind providers to three **role slots**:
 
 | Slot | Used by | Beelink status |
 | :--- | :--- | :--- |
-| `default` (text) | "Import with AI" URL/text paste; structuring transcripts | ✅ ready — `qwen3-30b-instruct` (or `qwen3.6:35b-a3b`) via LiteLLM `https://ai.lab.mtgibbs.dev/v1` |
+| `default` (text) | "Import with AI" URL/text paste; structuring transcripts | ✅ ready — `qwen3.6-35b` (or `qwen3.6:35b-a3b`) via LiteLLM `https://ai.lab.mtgibbs.dev/v1` |
 | `image` (vision) | Photo-of-recipe import | ❌ gap — no vision model on Beelink yet (qwen-VL-class pull needed) |
 | `audio` | Instagram/social video import (the yt-dlp strategy is **only enabled when an audio provider is set**) | ❌ gap — Mealie calls `/v1/audio/transcriptions` (Whisper API) first, then falls back to chat-completion `input_audio`; Beelink serves neither today (needs faster-whisper/speaches behind LiteLLM) |
 
@@ -136,7 +136,7 @@ Plain URL import (recipe-scrapers / schema.org) uses **no AI** and already works
       1Password `mealie` item, field `litellm-key`. **Human gate — do this BEFORE the bootstrap
       Job lands or its ExternalSecret stalls.**
 - [ ] **Text slot first** (works today): bootstrap Job registers LiteLLM
-      (`https://ai.lab.mtgibbs.dev/v1`, `qwen3-30b-instruct`) as `default` provider →
+      (`https://ai.lab.mtgibbs.dev/v1`, `qwen3.6-35b`) as `default` provider →
       unlocks AI text/URL import and the caption-fallback test.
 - [ ] Beelink: pull a vision model (qwen2.5-VL-class) → register as `image` provider.
 - [ ] Beelink: stand up Whisper (faster-whisper/speaches) behind LiteLLM → register as `audio`

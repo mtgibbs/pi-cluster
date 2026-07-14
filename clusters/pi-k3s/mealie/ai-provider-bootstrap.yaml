@@ -48,7 +48,7 @@ data:
     KEY = os.environ["LITELLM_API_KEY"]
     NAME = os.environ.get("PROVIDER_NAME", "beelink-litellm")
     BASE_URL = os.environ.get("PROVIDER_BASE_URL", "https://ai.lab.mtgibbs.dev/v1")
-    MODEL = os.environ.get("PROVIDER_MODEL", "qwen3-30b-instruct")
+    MODEL = os.environ.get("PROVIDER_MODEL", "qwen3.6-35b")
     TIMEOUT = int(os.environ.get("PROVIDER_TIMEOUT", "300"))
 
 
@@ -105,7 +105,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: mealie-ai-provider-bootstrap-v1
+  name: mealie-ai-provider-bootstrap-v2
   namespace: mealie
 spec:
   backoffLimit: 3
