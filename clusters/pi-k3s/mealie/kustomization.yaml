@@ -10,3 +10,4 @@ resources:
   - service.yaml
   - ingress.yaml
   - ai-provider-bootstrap.yaml
+  - ai-prompts.yaml

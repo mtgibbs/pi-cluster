@@ -1,0 +1,50 @@
+# Custom AI prompts for Mealie (OPENAI_CUSTOM_PROMPT_DIR=/prompts).
+#
+# Overrides mealie/services/openai/prompts/recipes/scrape-recipe.txt. The
+# default prompt is two sentences and cites https://schema.org/Recipe as a
+# reference — qwen-class models then copy the schema.org DOCS example
+# ("1 cup flour") into recipeIngredient and emit human-readable durations
+# that fail ISO-8601 parsing. First live eval (gyudon reel, 2026-07-14):
+# name + all 6 instructions perfect, ingredients hallucinated, times dropped.
+# This prompt pins down exactly those failure modes. Falls back to the
+# built-in prompt automatically if this file is missing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mealie-ai-prompts
+  namespace: mealie
+data:
+  scrape-recipe.txt: |
+    Extract the recipe from the provided webpage content and return it as a
+    single schema.org Recipe JSON object. https://schema.org/Recipe defines
+    the FORMAT only — never copy example values from schema.org documentation
+    into your output.
+
+    Strict rules:
+    - COPY, never invent. Every ingredient and every instruction must be
+      copied from the provided content. If a field is not present in the
+      content, omit that field entirely.
+    - "recipeIngredient": an array with one entry per ingredient line, copied
+      exactly as written in the content — keep quantities, units, and
+      parentheses. Include EVERY ingredient line, including ones under
+      section headings such as "Toppings" or "For the sauce".
+    - "recipeInstructions": one entry per step, in the original order, with
+      the step text copied from the content.
+    - "name": the short dish name only. Never use the page title, the
+      author/account name, or the whole caption as the name.
+    - Durations ("prepTime", "cookTime", "totalTime"): ISO 8601 duration
+      format only (30 minutes = "PT30M", 1 hour = "PT1H"). Omit any duration
+      the content does not state.
+    - "recipeYield": only if the content states servings or yield.
+    - "description": one or two sentences summarizing the dish; nutrition
+      macros may be included here if stated.
+    - "keywords": a comma-separated string built only from hashtags or
+      keywords present in the content.
+    - Include "@context": "https://schema.org" and "@type": "Recipe".
+    - If the content contains no recipe at all, return an empty JSON
+      object: {}
+
+    Return only the JSON object, no commentary.
+
+    You will receive the webpage contents, including (but not necessarily
+    limited to) text extracted from the HTML.
