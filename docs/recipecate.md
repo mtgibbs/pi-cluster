@@ -74,18 +74,26 @@ fallback if Mealie disappoints hands-on (it also imports `.paprikarecipes` with 
 
 Standard service pattern (`clusters/pi-k3s/mealie/`):
 
-- [ ] `mealie` Deployment — `ghcr.io/mealie-recipes/mealie` (arm64 published; 64-bit required —
+- [x] `mealie` Deployment — `ghcr.io/mealie-recipes/mealie` (arm64 published; 64-bit required —
       fine on Pi 5). Pin the version — **v3.20.1 is current as of 2026-07-12** (repo verified
       active: commits daily, AGPL-3.0, yt-dlp dep bumped 2026-07-09; note `mealie.io` is a stale
       placeholder page — the live fronts are the GitHub repo + docs.mealie.io). Any 3.x image
       satisfies the sidecar's "1.9.0+" note; confirm PR #6764 (native social video import) is in
-      the pinned release's changelog at build time.
-- [ ] **Postgres** companion (plain PG, matching the n8n decision) + 1Password item `mealie`
+      the pinned release's changelog at build time. **Deployed 2026-07-13 (PR #49).**
+- [x] **Postgres** companion (plain PG, matching the n8n decision) + 1Password item `mealie`
       (db creds, `MEALIE_API_TOKEN` later) via ExternalSecret.
-- [ ] Volumes: app data (`/app/data` — images live here) on local-path PVC; backups to NFS.
-- [ ] Ingress `recipes.lab.mtgibbs.dev` + cert (existing cert-tls pattern); LAN + Tailscale only.
-- [ ] Homepage tile + AutoKuma monitor (same as RomM bring-up).
-- [ ] Household/user accounts for Matt + Julia (multi-user from day one).
+      **Gotcha (PR #50):** Mealie's discrete `POSTGRES_*` path builds its DSN with
+      `urllib.parse.quote()` at the default `safe='/'`, so any password containing `/` (i.e. any
+      base64-generated one) crashloops the pod with pydantic "invalid port number". Fix: the
+      ExternalSecret templates the full `POSTGRES_URL_OVERRIDE` DSN — that code path re-quotes
+      the password with `safe=''` and tolerates any password.
+- [x] Volumes: app data (`/app/data` — images live here) on local-path PVC; backups to NFS.
+- [x] Ingress `recipes.lab.mtgibbs.dev` + cert (existing cert-tls pattern); LAN + Tailscale only.
+- [x] Homepage tile + AutoKuma monitor (same as RomM bring-up).
+- [ ] Household/user accounts for Matt + Julia (multi-user from day one). Default admin is
+      `changeme@example.com` / `MyPassword` — change on first login. Onboarding wizard's AI
+      provider + email prompts can be skipped (see Phase 3 — providers are DB records now, and
+      SMTP/OIDC are optional env vars).
 - [ ] Smoke test: URL-import 3–5 recipes from major sites (schema.org path, no AI needed).
 
 ## 3. Phase 2 — Paprika 3 Migration
@@ -104,19 +112,43 @@ Standard service pattern (`clusters/pi-k3s/mealie/`):
 
 ## 4. Phase 3 — AI Import Bring-Up (the Instagram feature)
 
-- [ ] Beelink: confirm a **tool + vision capable** model is available via LiteLLM (the sidecar
-      requires both; qwen2.5-VL-class if nothing suitable is pulled yet) and decide the Whisper
-      story (sidecar supports a local HF model or API endpoint).
+**How v3 actually wires AI (verified in v3.20.1 source, 2026-07-13):** providers are **per-group
+database records**, not env vars — the old `OPENAI_BASE_URL`-style config is gone. Each provider
+is `{name, base_url, api_key, model, timeout, request_headers, request_params}`, managed in the
+UI (Group Settings → AI Providers) or via REST: CRUD at
+`/api/groups/ai-providers/providers`, role assignment at `/api/groups/ai-providers/settings`.
+Group settings bind providers to three **role slots**:
+
+| Slot | Used by | Beelink status |
+| :--- | :--- | :--- |
+| `default` (text) | "Import with AI" URL/text paste; structuring transcripts | ✅ ready — `qwen3-30b-instruct` (or `qwen3.6:35b-a3b`) via LiteLLM `https://ai.lab.mtgibbs.dev/v1` |
+| `image` (vision) | Photo-of-recipe import | ❌ gap — no vision model on Beelink yet (qwen-VL-class pull needed) |
+| `audio` | Instagram/social video import (the yt-dlp strategy is **only enabled when an audio provider is set**) | ❌ gap — Mealie calls `/v1/audio/transcriptions` (Whisper API) first, then falls back to chat-completion `input_audio`; Beelink serves neither today (needs faster-whisper/speaches behind LiteLLM) |
+
+Plain URL import (recipe-scrapers / schema.org) uses **no AI** and already works.
+
+- [ ] **Keep IaC despite DB-resident config:** bootstrap providers via API — a small rerunnable
+      script (or one-shot Job) that PUTs provider config using a Mealie API token + the LiteLLM
+      key, both from 1Password. Commit the script; the DB rows are then reproducible.
 - [ ] Mint a LiteLLM virtual key for `mealie` (one identity per client, per convention).
-- [ ] Configure Mealie's AI provider (`OPENAI_BASE_URL` → LiteLLM, model, key) via ExternalSecret.
+- [ ] **Text slot first** (works today): register LiteLLM + text model as `default` provider →
+      unlocks AI text/URL import and the caption-fallback test.
+- [ ] Beelink: pull a vision model (qwen2.5-VL-class) → register as `image` provider.
+- [ ] Beelink: stand up Whisper (faster-whisper/speaches) behind LiteLLM → register as `audio`
+      provider (hard requirement for the reel-transcription path).
 - [ ] Test ladder, cheapest first:
-      1. Instagram URL → Mealie import with **caption-fallback** path (page text → LLM).
-      2. Instagram reel → **video download + transcription** path (yt-dlp + audio model).
+      1. Instagram URL → Mealie import with **caption-fallback** path (page text → LLM; needs
+         `default` slot only).
+      2. Instagram reel → **video download + transcription** path (yt-dlp + `audio` slot).
       3. A JSON-LD site through the AI path to confirm no regression on normal sites.
 - [ ] **Known fragility (verified):** yt-dlp Instagram downloads fail for some users without
       cookies ("empty media response…use --cookies"; suspected EU cookie-prompt trigger). Test
       from our US residential IP first — if we hit the wall, caption-fallback still works, and a
       cookie-refresh strategy is a separate decision (ToS-sensitive; don't automate casually).
+
+**Other onboarding seams (env-var based, both optional, both skippable for now):**
+`SMTP_*` (only needed for invite emails / password resets — accounts are hand-created, skip)
+and `OIDC_*` (full OIDC support exists; revisit when Authelia lands in Beelink Phase 1).
 
 ## 5. Phase 4 — Family Capture UX
 
