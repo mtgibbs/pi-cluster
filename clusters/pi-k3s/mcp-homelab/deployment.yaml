@@ -73,6 +73,11 @@ spec:
                 secretKeyRef:
                   name: mcp-homelab-secrets
                   key: sabnzbd-api-key
+            - name: MEALIE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-secrets
+                  key: mealie-api-token
           volumeMounts:
             - name: ssh-key
               mountPath: /secrets/ssh
