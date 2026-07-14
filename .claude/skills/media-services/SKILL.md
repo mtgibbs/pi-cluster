@@ -479,6 +479,35 @@ curl -X POST "https://jellyfin.lab.mtgibbs.dev/Items/ITEM_ID_HERE/Refresh?metada
 
 The project is mid-rebrand from **Jellyseerr** to **Seerr** — see the `preview-seerr` / `preview-rename-tags` tags, and the ~10-month gap with no new stable since 2.7.3. When the successor ships its first **stable** release — possibly under a **new image name** (e.g. `seerr`) — *that* is the trigger to do a real migration (new manifest/image name, check for a config/data migration step). Until then, 2.7.3 is correct. **Treat the next *stable* release as the only real "update" — ignore the in-app nag in the meantime.**
 
+### GOTCHA: new Jellyfin libraries are NOT auto-synced to Jellyseerr — requests stick at "Processing" forever
+
+Found 2026-07-13: a whole TV show, fully downloaded and playable in Jellyfin, still showed as "requested"/still-processing in Jellyseerr. Root cause was **not** Sonarr/Radarr — the show, Sonarr, and Jellyfin all agreed the file was present. Jellyseerr's own Jellyfin service config (`.jellyfin.libraries` in its settings) only had **Movies** and **Turbo Fire** in the synced-library list; the real **Shows** library had been added to Jellyfin at some point but never enabled in Jellyseerr. Its `jellyfin-recently-added-scan` (5 min) and `jellyfin-full-scan` (daily) jobs ran fine on schedule but could never see anything in an unsynced library, so `jellyfinMediaId` never populates and status is permanently stuck at `PROCESSING` (3). This was **systemic**, not a one-off: all 17 TV requests were affected; movies were fine because `Movies` was in the sync list.
+
+**Diagnose:**
+```sh
+KEY=$(kubectl exec -n media deploy/jellyseerr -- cat /app/config/settings.json | jq -r '.main.apiKey')
+# current synced libraries
+curl -sS "https://requests.lab.mtgibbs.dev/api/v1/settings/jellyfin" -H "X-Api-Key: $KEY" | jq '.libraries'
+# ALL libraries Jellyfin actually has (ignores current enabled state)
+curl -sS "https://requests.lab.mtgibbs.dev/api/v1/settings/jellyfin/library?sync=true" -H "X-Api-Key: $KEY" | jq
+```
+If a library is present in Jellyfin's `VirtualFolders` but missing (or `enabled:false`) from the first call, that's the bug.
+
+**Fix — enable via the dedicated library endpoint (GET, not POST/PUT — both return 405/400):**
+```sh
+ENABLE_IDS="<comma-separated library ids to keep enabled, e.g. all of them>"
+curl -sS "https://requests.lab.mtgibbs.dev/api/v1/settings/jellyfin/library?enable=${ENABLE_IDS}" -H "X-Api-Key: $KEY"
+```
+This is the only endpoint that actually persists library enable/disable — `POST /api/v1/settings/jellyfin` rejects `libraries` as read-only, and `PUT` isn't a supported method on that route at all. Then trigger a scan immediately rather than waiting for the cron:
+```sh
+curl -sS -X POST "https://requests.lab.mtgibbs.dev/api/v1/settings/jobs/jellyfin-full-scan/run" -H "X-Api-Key: $KEY"
+```
+Poll `GET /api/v1/settings/jobs` for `running:false`, then re-check `GET /api/v1/media?take=100&filter=all` — affected titles should flip from `status:3` (PROCESSING, `jellyfinMediaId:null`) to `status:5` (AVAILABLE) or `4` (PARTIALLY_AVAILABLE for legitimately still-airing shows).
+
+**Also note:** Jellyseerr's own API key is generated in-app, not stored in 1Password — pull it from the running pod's `/app/config/settings.json` (`main.apiKey`) if you need to hit its API directly.
+
+**Prevention:** whenever a new Jellyfin library is added (movies, shows, or otherwise), check Jellyseerr's synced-library list — it does not pick up new libraries automatically.
+
 ## Known Jellyfin Issues
 
 - **Galavant S01E02-E08**: Corrupt MKV files (EBML header parsing errors, 0x00 as first byte)
