@@ -127,11 +127,16 @@ Group settings bind providers to three **role slots**:
 
 Plain URL import (recipe-scrapers / schema.org) uses **no AI** and already works.
 
-- [ ] **Keep IaC despite DB-resident config:** bootstrap providers via API — a small rerunnable
-      script (or one-shot Job) that PUTs provider config using a Mealie API token + the LiteLLM
-      key, both from 1Password. Commit the script; the DB rows are then reproducible.
-- [ ] Mint a LiteLLM virtual key for `mealie` (one identity per client, per convention).
-- [ ] **Text slot first** (works today): register LiteLLM + text model as `default` provider →
+- [x] **Keep IaC despite DB-resident config:** `ai-provider-bootstrap.yaml` — in-cluster Job
+      (python:3.12-alpine, stdlib only) that create-or-updates the `beelink-litellm` provider by
+      name and binds the `default` slot, preserving audio/image bindings. Secrets via
+      `mealie-ai-secret` ExternalSecret (`mealie/litellm-key` + shared
+      `mcp-homelab/mealie-api-token`). Re-run on change: bump the Job name suffix (`-v1` → `-v2`).
+- [ ] Mint a LiteLLM virtual key for `mealie` (one identity per client, per convention) →
+      1Password `mealie` item, field `litellm-key`. **Human gate — do this BEFORE the bootstrap
+      Job lands or its ExternalSecret stalls.**
+- [ ] **Text slot first** (works today): bootstrap Job registers LiteLLM
+      (`https://ai.lab.mtgibbs.dev/v1`, `qwen3-30b-instruct`) as `default` provider →
       unlocks AI text/URL import and the caption-fallback test.
 - [ ] Beelink: pull a vision model (qwen2.5-VL-class) → register as `image` provider.
 - [ ] Beelink: stand up Whisper (faster-whisper/speaches) behind LiteLLM → register as `audio`
