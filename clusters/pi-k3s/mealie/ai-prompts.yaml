@@ -40,6 +40,8 @@ data:
       macros may be included here if stated.
     - "keywords": a comma-separated string built only from hashtags or
       keywords present in the content.
+    - "image": if the content includes a line starting with "Recipe Image:",
+      copy that URL exactly into the "image" field. Otherwise omit "image".
     - Include "@context": "https://schema.org" and "@type": "Recipe".
     - If the content contains no recipe at all, return an empty JSON
       object: {}

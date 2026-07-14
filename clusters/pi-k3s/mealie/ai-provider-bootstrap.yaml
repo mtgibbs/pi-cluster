@@ -105,7 +105,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: mealie-ai-provider-bootstrap-v2
+  name: mealie-ai-provider-bootstrap-v3
   namespace: mealie
 spec:
   backoffLimit: 3
@@ -121,6 +121,12 @@ spec:
           image: python:3.12-alpine
           command: ["python", "/scripts/bootstrap.py"]
           env:
+            # Dedicated LiteLLM alias: same qwen3.6-35b weights, temperature
+            # pinned to 0 server-side (Mealie sends no temperature, and the
+            # Ollama default ~0.8 made extraction quality vary run-to-run).
+            # Dewey's shared qwen3.6-35b alias is untouched.
+            - name: PROVIDER_MODEL
+              value: mealie-extract
             - name: MEALIE_API_TOKEN
               valueFrom:
                 secretKeyRef:
