@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # harness — attach to / fire commands into the persistent coding-agent
-# containers on the Beelink (coding-harness-qwen, coding-harness-claude).
+# containers on the Beelink (coding-harness-qwen, coding-harness-claude,
+# coding-harness-claude-2).
 #
-# Both containers run a detached tmux session named "main" with zero exposed
+# All containers run a detached tmux session named "main" with zero exposed
 # ports — the only way in is `ssh beelink-ai` (already-established alias, see
 # scripts/README.md) + `docker exec`. This wrapper is just that two-step hop
 # collapsed into one command; it grants no new access on its own.
 #
 #   harness attach qwen              # pop in and drive it live
 #   harness attach claude
+#   harness attach claude2           # second, independent Claude Code instance
+#                                     # — own $HOME/repo-mirror, same shared
+#                                     # creds. Lets two windows work in parallel.
 #   harness run qwen "specs/foo"     # fire-and-forget: runs run-task.sh in the
 #                                     # SAME session you can later attach to
 #   harness status                   # docker compose ps, filtered to the two
@@ -25,13 +29,14 @@ HOST="${HARNESS_SSH_HOST:-beelink-ai}"
 CLAUDE_HOME_DIR="/srv/coding-harness-claude-data/home"
 MEMORY_REPO_LAPTOP="$HOME/.claude/projects"
 MEMORY_REPO_CONTAINER="/home/agent/.claude/projects"
-usage() { echo "usage: harness {attach|run|status|sync-ctx|prompt|push-memory|pull-memory} [qwen|claude] [args...]" >&2; exit 1; }
+usage() { echo "usage: harness {attach|run|status|sync-ctx|prompt|push-memory|pull-memory} [qwen|claude|claude2] [args...]" >&2; exit 1; }
 
 container_for() {
   case "$1" in
-    qwen)   echo "coding-harness-qwen" ;;
-    claude) echo "coding-harness-claude" ;;
-    *) echo "harness: unknown target '$1' (expected qwen or claude)" >&2; exit 1 ;;
+    qwen)    echo "coding-harness-qwen" ;;
+    claude)  echo "coding-harness-claude" ;;
+    claude2) echo "coding-harness-claude-2" ;;
+    *) echo "harness: unknown target '$1' (expected qwen, claude, or claude2)" >&2; exit 1 ;;
   esac
 }
 
@@ -54,7 +59,7 @@ case "$cmd" in
     # every positional arg is a plain token — sidesteps nested-quoting through
     # ssh + tmux send-keys, and papers over qwen vs. claude run-task.sh having
     # different arg counts (claude's takes an extra repo-name in position 2).
-    if [ "$target" = "claude" ]; then
+    if [ "$target" = "claude" ] || [ "$target" = "claude2" ]; then
       task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
     else
       task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
@@ -65,7 +70,7 @@ case "$cmd" in
   status)
     # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
     # sudo required: .env is 0600 root:root (same reason every other subcommand needs it).
-    ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude"
+    ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude coding-harness-claude-2"
     ;;
   sync-ctx)
     # Point-in-time snapshot of the laptop's local ctx index — ctx's MCP mode
