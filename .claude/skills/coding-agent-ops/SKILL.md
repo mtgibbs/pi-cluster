@@ -177,16 +177,19 @@ relocate those.
 
 ## Remote harness (Beelink) — persistent, sandboxed, tmux-attach sessions
 
-Two containers on the Beelink give the laptop's `oc`/`ralph-qwen.sh` setup a
+Three containers on the Beelink give the laptop's `oc`/`ralph-qwen.sh` setup a
 persistent, remotely-reachable home — no laptop needs to stay open, and you
 can either let a loop run unattended or pop in and drive it live, same session
 either way. Deployed via `beelink-ansible/playbooks/50-ai-stack.yml`; source
-in `beelink-ansible/files/coding-harness-{qwen,claude}/` (separate repo).
+in `beelink-ansible/files/coding-harness-{qwen,claude}/` (separate repo) —
+`coding-harness-claude-2` reuses the `coding-harness-claude` image/build
+context, just a second compose service with its own volume.
 
 | Container | What it is |
 |---|---|
 | `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh`. Single-repo (pi-cluster). |
 | `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh` (delegates to qwen like a laptop session), **plus `ctx`** (local agent-history search) and this laptop's synced Claude memory. **General workstation, not repo-locked** — clone anything under `/Users/mtgibbs/dev/`. |
+| `coding-harness-claude-2` | **Second, independent Claude Code instance** — same role/image as `coding-harness-claude`, own `$HOME`/repo-mirror/tmux session, so two windows can drive parallel work without sharing state. Added 2026-07-14. **Provisioned but not activated** — see below. |
 
 **General workstation, not pi-cluster-only:** `coding-harness-claude` mounts
 `/Users/mtgibbs/dev` (not just a scratch dir) specifically so it matches the
@@ -214,7 +217,7 @@ history search and there's no need to double-ship the verbose form) to the
 matching path in the container. Works for any project the laptop has memory
 for, not just pi-cluster, because of the path-matching design above.
 
-**Access:** `scripts/harness attach {qwen\|claude}` (or `harness run qwen <spec-dir>`
+**Access:** `scripts/harness attach {qwen\|claude\|claude2}` (or `harness run qwen <spec-dir>`
 to fire a loop and check on it later) — wraps `ssh beelink-ai` + `docker exec -it
 <container> tmux attach -t main`. Zero new exposed ports: reachability is entirely
 inherited from the existing Tailscale SSH access to the box (see tailscale-ops
@@ -255,6 +258,17 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
 3. **DONE.** First attach to `coding-harness-claude` did the one-time interactive
    Claude login (subscription OAuth device-code — not API key) — session state
    persists in the bind-mounted volume across restarts.
+3a. **`coding-harness-claude-2` — provisioned but NOT activated.** Container is
+    up, verified working (binaries, git identity `mtgibbs (coding-harness-claude-2)`,
+    GitHub PAT auth, MCP env vars, tmux session all confirmed 2026-07-14), but two
+    manual steps are still outstanding — same first-attach pattern as above, done
+    per-container since `$HOME` isn't shared:
+    - `scripts/harness attach claude2` → run `claude` → subscription OAuth login.
+    - `gh auth login` inside, if you want `gh` usable there too (git push/pull
+      already works via the shared PAT regardless).
+    Known gap: `harness sync-ctx` / `push-memory` / `pull-memory` are hardcoded to
+    the first `coding-harness-claude` container/volume — they don't touch
+    `-2` yet. Not needed until `-2` is actually put to use.
 4. MCP tool access for `coding-harness-claude` (reaching `mcp-homelab` etc. the
    way this session does) is **not wired up** — deliberately left as an open
    scoping decision (full parity with this session's tools vs. a more
