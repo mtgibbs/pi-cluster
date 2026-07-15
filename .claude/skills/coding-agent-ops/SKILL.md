@@ -320,7 +320,27 @@ destroy them. Fixed 2026-07-08/09 with:
   `MEMORY.md` + topic-file pair never lands as a torn half-commit), portable
   (an `mkdir`-based lock, since `flock` isn't on macOS by default), and
   self-protecting (refuses + resets if anything outside `*/memory/*` gets
-  staged, rather than trusting the `.gitignore` alone).
+  staged, rather than trusting the `.gitignore` alone). **After committing it
+  best-effort-pushes the _current_ branch** (`main` on the laptop, `container`
+  in the harness) — detached in a subshell so the turn never blocks, with git's
+  own `GIT_HTTP_LOW_SPEED_LIMIT`/`_TIME` abort instead of `timeout` (absent on
+  stock macOS). It only ever pushes _its own_ branch, never across them, so the
+  reviewed-merge design below is untouched. **Push added 2026-07-15** — the
+  original commit-but-never-push let the container drift 8 commits / 3 days
+  behind GitHub (pushes had silently been manual all along); a container rebuild
+  in that window would have lost the lot. Both live hooks were patched then, and
+  the laptop↔container vault reconciled by a reviewed merge.
+- **The hook + settings are seeded from the base image, not just hand-placed.**
+  Originally `memory-autocommit.sh`, `tmux-notify.sh`, and `settings.json` lived
+  _only_ in the container's persistent `/home/agent` volume (hand-placed during
+  the 2026-07-08/09 dogfood), so a from-scratch volume would boot with **zero**
+  memory protection. `beelink-ansible@6a27b68` bakes all three into the image
+  (`/opt/harness-defaults/`, same staging as `opencode.jsonc`) and the
+  entrypoint first-boot-seeds them into `~/.claude/` — seed-if-absent (existing
+  volumes never clobbered), hooks `chmod +x` (the ansible build-context copy
+  stages them `0644`). Covers `coding-harness-claude-2`'s separate volume too
+  (shared build context). **Takes effect on the next image rebuild**; not urgent,
+  since both existing volumes were already live-patched.
 - **GitHub as the sync hub, not a live remote or bundle transport**:
   `mtgibbs/claude-memory-vault` (private). Laptop owns `main`, the container
   owns its own `container` branch — neither ever pushes to the other's, so
