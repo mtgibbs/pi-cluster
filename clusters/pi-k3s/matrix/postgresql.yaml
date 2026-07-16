@@ -61,8 +61,11 @@ spec:
                 secretKeyRef:
                   name: matrix-secret
                   key: POSTGRES_PASSWORD
+            # Synapse REQUIRES C collation/ctype (else it refuses to start). Pin it
+            # explicitly instead of relying on the alpine image default — deterministic
+            # from-scratch rebuild. Baked in on first init; harmless (empty DB).
             - name: POSTGRES_INITDB_ARGS
-              value: "--data-checksums"
+              value: "--data-checksums --encoding=UTF8 --locale=C"
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           args:
