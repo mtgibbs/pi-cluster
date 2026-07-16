@@ -38,8 +38,8 @@ fi
 SC="$DIR/synapse-config.yaml"
 if have "$SC"; then
   grep -qE 'server_name:[[:space:]]*"?matrix\.lab\.mtgibbs\.dev"?' "$SC" && ok "server_name-exact" || no "server_name-exact"
-  grep -q 'federation_domain_whitelist: \[\]' "$SC" && ok "federation-off"    || no "federation-off"
-  grep -q 'enable_registration: false'        "$SC" && ok "registration-off"  || no "registration-off"
+  grep -Eq 'federation_domain_whitelist:[[:space:]]*\[[[:space:]]*\]' "$SC" && ok "federation-off"   || no "federation-off"
+  grep -Eqi 'enable_registration:[[:space:]]*false'                   "$SC" && ok "registration-off" || no "registration-off"
 else pend "synapse-config"; fi
 
 # 2. No inbound federation listener anywhere (negative check — safe to always run)

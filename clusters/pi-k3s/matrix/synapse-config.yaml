@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: synapse-config
+  namespace: matrix
+data:
+  # Base homeserver config — NON-SECRET only. The database block + the three secrets
+  # (registration_shared_secret, macaroon_secret_key, form_secret) are supplied by the
+  # ESO-rendered homeserver-secrets.yaml as Synapse's second --config-path (see synapse.yaml).
+  homeserver.yaml: |
+    server_name: "matrix.lab.mtgibbs.dev"
+    public_baseurl: "https://matrix.lab.mtgibbs.dev/"
+    pid_file: /data/homeserver.pid
+    signing_key_path: /data/homeserver.signing.key
+    media_store_path: /data/media_store
+    report_stats: false
+    enable_registration: false
+    enable_registration_without_verification: false
+    federation_domain_whitelist: []
+    trusted_key_servers: []
+    suppress_key_server_warning: true
+    log_config: "/synapse/config/log.config"
+    listeners:
+      - port: 8008
+        tls: false
+        type: http
+        x_forwarded: true
+        bind_addresses: ['0.0.0.0']
+        resources:
+          - names: [client]
+            compress: false
+  log.config: |
+    version: 1
+    formatters:
+      precise:
+        format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(request)s - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: precise
+    loggers:
+      synapse.storage.SQL:
+        level: INFO
+    root:
+      level: INFO
+      handlers: [console]
+    disable_existing_loggers: false
