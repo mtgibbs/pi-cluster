@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: matrix
+  namespace: matrix
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Media uploads (avatars, file shares) can be large; don't cap the body size.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - matrix.lab.mtgibbs.dev
+        - element.lab.mtgibbs.dev
+      secretName: matrix-tls
+  rules:
+    - host: matrix.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: synapse
+                port:
+                  number: 8008
+    - host: element.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: element
+                port:
+                  number: 80

@@ -58,7 +58,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: element-web
+  name: element
   namespace: matrix
 spec:
   selector:

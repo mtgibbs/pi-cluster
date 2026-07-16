@@ -8,3 +8,4 @@ resources:
 - synapse-config.yaml
 - synapse.yaml
 - element.yaml
+- ingress.yaml
