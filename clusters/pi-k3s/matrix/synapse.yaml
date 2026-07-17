@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synapse
+  namespace: matrix
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: synapse
+  template:
+    metadata:
+      labels:
+        app: synapse
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi5-worker-2
+      # matrixdotorg/synapse runs as uid/gid 991; fsGroup makes the local-path PVC writable
+      # (signing key + media_store). Confirm the uid at first deploy — LIVE-tier tuning is mine.
+      securityContext:
+        runAsUser: 991
+        runAsGroup: 991
+        fsGroup: 991
+      initContainers:
+        # Generate the signing key onto /data on first boot (idempotent). We bypass the image's
+        # /start.py so we can pass BOTH config files; --generate-keys creates only what's missing.
+        - name: generate-keys
+          image: matrixdotorg/synapse:v1.156.0
+          command: ["python", "-m", "synapse.app.homeserver"]
+          args:
+            - "--config-path=/synapse/config/homeserver.yaml"
+            - "--config-path=/synapse/secrets/homeserver-secrets.yaml"
+            - "--generate-keys"
+          volumeMounts:
+            - { name: config,  mountPath: /synapse/config,  readOnly: true }
+            - { name: secrets, mountPath: /synapse/secrets, readOnly: true }
+            - { name: data,    mountPath: /data }
+      containers:
+        - name: synapse
+          image: matrixdotorg/synapse:v1.156.0
+          command: ["python", "-m", "synapse.app.homeserver"]
+          args:
+            - "--config-path=/synapse/config/homeserver.yaml"
+            - "--config-path=/synapse/secrets/homeserver-secrets.yaml"
+          ports:
+            - containerPort: 8008
+              name: http
+          readinessProbe:
+            httpGet: { path: /health, port: 8008 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8008 }
+            initialDelaySeconds: 45
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - { name: config,  mountPath: /synapse/config,  readOnly: true }
+            - { name: secrets, mountPath: /synapse/secrets, readOnly: true }
+            - { name: data,    mountPath: /data }
+      volumes:
+        - name: config
+          configMap:
+            name: synapse-config
+        - name: secrets
+          secret:
+            secretName: matrix-secret
+            items:
+              - key: homeserver-secrets.yaml
+                path: homeserver-secrets.yaml
+        - name: data
+          persistentVolumeClaim:
+            claimName: synapse-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: synapse
+  namespace: matrix
+spec:
+  selector:
+    app: synapse
+  ports:
+    - port: 8008
+      targetPort: 8008
+  type: ClusterIP

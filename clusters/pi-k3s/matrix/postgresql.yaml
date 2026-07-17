@@ -1,0 +1,96 @@
+---
+# Dedicated Postgres for Matrix.
+# Plain single-instance Deployment (matches the n8n/Immich pattern; no CNPG operator here).
+# The matrix-postgresql-data PVC lives in pvc.yaml (single source of truth) — do NOT
+# re-declare it here; duplicate resource IDs break `kustomize build`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrix-postgresql
+  namespace: matrix
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: matrix-postgresql
+  template:
+    metadata:
+      labels:
+        app: matrix-postgresql
+    spec:
+      # Keep the DB on a Pi 5 (8GB) worker, not the 1GB Pi 3.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pi5-worker-1
+                      - pi5-worker-2
+      containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: synapse
+            - name: POSTGRES_USER
+              value: synapse
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: matrix-secret
+                  key: POSTGRES_PASSWORD
+            # Synapse REQUIRES C collation/ctype (else it refuses to start). Pin it
+            # explicitly instead of relying on the alpine image default — deterministic
+            # from-scratch rebuild. Baked in on first init; harmless (empty DB).
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums --encoding=UTF8 --locale=C"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          args:
+            - "-c"
+            - "shared_buffers=128MB"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "synapse"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "synapse"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: matrix-postgresql-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: matrix-postgresql
+  namespace: matrix
+spec:
+  selector:
+    app: matrix-postgresql
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

@@ -674,3 +674,27 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 32. matrix - Agent Bus (Phase 0): private Matrix homeserver (Synapse) + Element web client,
+# the live chat channel for homelab agents + humans (docs/agent-bus.md, specs/agent-bus/).
+# Federation OFF (closed homeserver), registration OFF (shared-secret admin only), LAN/Tailscale
+# only. Postgres companion in-namespace on pi5-worker-2. Needs the matrix 1Password item
+# (db-password, registration-shared-secret, macaroon-secret, form-secret).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: matrix
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/matrix
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
