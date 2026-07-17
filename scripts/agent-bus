@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# agent-bus — post / read / wait on the homelab Matrix chat bus, over the plain
+# client-server REST API (pure curl + jq). One script shared by laptop-Claude, the
+# harness agents, and qwen so they (and humans in Element) share a live channel.
+#
+#   agent-bus whoami                          # confirm identity + token
+#   agent-bus rooms                           # list joined rooms
+#   agent-bus post agents "hello world"       # post to #agents
+#   agent-bus post tasks "task: rom-slugs done" --thread '$evt:...'   # reply in-thread
+#   agent-bus read agents [--limit 20]        # recent messages
+#   agent-bus wait --room tasks --mention --timeout 300   # block until mentioned (/sync long-poll)
+#   agent-bus upload ./plan.md agents         # upload a file, post link to #agents
+#
+# Identity: picks credentials for AGENT_BUS_IDENTITY (default: laptop-claude).
+# Token resolution mirrors scripts/oc — env → macOS Keychain → 1Password (canonical):
+#   MATRIX_TOKEN                                   (containers inject this)
+#   security find-generic-password -s agent-bus-<id>   (laptop convenience)
+#   op read op://pi-cluster/agent-bus-<id>/token       (canonical, first run)
+# Homeserver: MATRIX_HOMESERVER env → op → https://matrix.lab.mtgibbs.dev.
+set -euo pipefail
+
+IDENTITY="${AGENT_BUS_IDENTITY:-laptop-claude}"
+HS_DEFAULT="https://matrix.lab.mtgibbs.dev"
+DOMAIN_DEFAULT="matrix.lab.mtgibbs.dev"
+
+die() { echo "agent-bus: $*" >&2; exit 1; }
+command -v curl >/dev/null || die "curl not found"
+command -v jq   >/dev/null || die "jq not found (install jq — the only dependency beyond curl)"
+
+# help/usage needs no credentials
+case "${1:-}" in ""|-h|--help|help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
+
+# --- credentials -----------------------------------------------------------
+HS="${MATRIX_HOMESERVER:-}"
+if [ -z "$HS" ]; then HS="$(op read "op://pi-cluster/agent-bus-$IDENTITY/homeserver" 2>/dev/null || true)"; fi
+[ -z "$HS" ] && HS="$HS_DEFAULT"
+# The Matrix domain is the server_name (matrix.lab.mtgibbs.dev), not the URL host — they
+# happen to match here; keep an override seam but default to the canonical server_name.
+DOMAIN="${MATRIX_DOMAIN:-$DOMAIN_DEFAULT}"
+
+TOKEN="${MATRIX_TOKEN:-}"
+if [ -z "$TOKEN" ] && command -v security >/dev/null 2>&1; then
+  TOKEN="$(security find-generic-password -s "agent-bus-$IDENTITY" -w 2>/dev/null || true)"
+fi
+if [ -z "$TOKEN" ]; then TOKEN="$(op read "op://pi-cluster/agent-bus-$IDENTITY/token" 2>/dev/null || true)"; fi
+[ -z "$TOKEN" ] && die "no token for identity '$IDENTITY' (set MATRIX_TOKEN, seed Keychain 'agent-bus-$IDENTITY', or op://pi-cluster/agent-bus-$IDENTITY/token)"
+
+# --- low-level API ---------------------------------------------------------
+CS="$HS/_matrix/client/v3"
+api() {  # api METHOD PATH [json-body]
+  local m="$1" p="$2" body="${3:-}"
+  local args=(-sS -X "$m" -H "Authorization: Bearer $TOKEN")
+  [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
+  local out; out="$(curl "${args[@]}" "$CS$p")" || die "curl failed: $m $p"
+  if echo "$out" | jq -e '.errcode?' >/dev/null 2>&1; then
+    die "$(echo "$out" | jq -r '.errcode + ": " + (.error // "")')"
+  fi
+  printf '%s' "$out"
+}
+urlenc() { jq -rn --arg s "$1" '$s|@uri'; }
+txn() { echo "ab$(date +%s)$RANDOM$$"; }
+
+# resolve #alias / bare-name / !room_id → room_id
+rid() {
+  local r="$1"
+  case "$r" in
+    '!'*) printf '%s' "$r"; return;;
+    '#'*) : ;;                       # already an alias
+    *)    r="#$r:$DOMAIN";;           # bare name → alias
+  esac
+  case "$r" in *:*) : ;; *) r="$r:$DOMAIN";; esac
+  api GET "/directory/room/$(urlenc "$r")" | jq -r '.room_id'
+}
+
+# --- subcommands -----------------------------------------------------------
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  whoami)
+    api GET "/account/whoami" | jq -r '"user: \(.user_id)\ndevice: \(.device_id // "-")"'
+    echo "identity: $IDENTITY  homeserver: $HS" ;;
+
+  rooms)
+    for id in $(api GET "/joined_rooms" | jq -r '.joined_rooms[]'); do
+      name="$(api GET "/rooms/$(urlenc "$id")/state/m.room.name/" 2>/dev/null | jq -r '.name // "-"')"
+      echo "$id  $name"
+    done ;;
+
+  post)
+    room="${1:?usage: post <room> <text> [--thread <event-id>]}"; shift
+    thread=""; text=""
+    while [ $# -gt 0 ]; do case "$1" in --thread) thread="$2"; shift 2;; *) text="${text:+$text }$1"; shift;; esac; done
+    [ -n "$text" ] || die "empty message"
+    id="$(rid "$room")"
+    if [ -n "$thread" ]; then
+      body="$(jq -nc --arg b "$text" --arg t "$thread" \
+        '{msgtype:"m.text",body:$b,"m.relates_to":{rel_type:"m.thread",event_id:$t,is_falling_back:true,"m.in_reply_to":{event_id:$t}}}')"
+    else
+      body="$(jq -nc --arg b "$text" '{msgtype:"m.text",body:$b}')"
+    fi
+    api PUT "/rooms/$(urlenc "$id")/send/m.room.message/$(txn)" "$body" | jq -r '"posted: \(.event_id)"' ;;
+
+  read)
+    room="${1:?usage: read <room> [--limit N]}"; shift; limit=20
+    while [ $# -gt 0 ]; do case "$1" in --limit) limit="$2"; shift 2;; *) shift;; esac; done
+    id="$(rid "$room")"
+    api GET "/rooms/$(urlenc "$id")/messages?dir=b&limit=$limit" \
+      | jq -r '.chunk | reverse | .[] | select(.type=="m.room.message") | "\(.sender): \(.content.body)"' ;;
+
+  wait)
+    room=""; mention=0; timeout=300
+    while [ $# -gt 0 ]; do case "$1" in
+      --room) room="$2"; shift 2;; --mention) mention=1; shift;; --timeout) timeout="$2"; shift 2;; *) shift;; esac; done
+    me="$(api GET "/account/whoami" | jq -r '.user_id')"; local_part="${me#@}"; local_part="${local_part%%:*}"
+    filter_rid=""; [ -n "$room" ] && filter_rid="$(rid "$room")"
+    since="$(api GET "/sync?timeout=0" | jq -r '.next_batch')"
+    deadline=$(( $(date +%s) + timeout ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      resp="$(api GET "/sync?since=$(urlenc "$since")&timeout=25000")"
+      since="$(echo "$resp" | jq -r '.next_batch')"
+      hits="$(echo "$resp" | jq -c --arg rid "$filter_rid" --arg me "$me" --arg lp "$local_part" --argjson mention "$mention" '
+        .rooms.join // {} | to_entries[]
+        | select($rid=="" or .key==$rid) as $room
+        | .value.timeline.events[]? | select(.type=="m.room.message" and .sender!=$me)
+        | select($mention==0 or ((.content.body//"") | test("@"+$lp+"|"+$me; "i")))
+        | {room:$room.key, sender:.sender, body:.content.body, event_id:.event_id}')"
+      if [ -n "$hits" ]; then echo "$hits" | jq -r '"[\(.room)] \(.sender): \(.body)  (\(.event_id))"'; exit 0; fi
+    done
+    echo "agent-bus: wait timed out after ${timeout}s" >&2; exit 2 ;;
+
+  upload)
+    file="${1:?usage: upload <file> [<room>]}"; room="${2:-}"
+    [ -f "$file" ] || die "no such file: $file"
+    ct="$(file --mime-type -b "$file" 2>/dev/null || echo application/octet-stream)"
+    mxc="$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: $ct" \
+      --data-binary @"$file" "$HS/_matrix/media/v3/upload?filename=$(urlenc "$(basename "$file")")" | jq -r '.content_uri')"
+    [ -n "$mxc" ] && [ "$mxc" != null ] || die "upload failed"
+    echo "mxc: $mxc"
+    if [ -n "$room" ]; then
+      id="$(rid "$room")"; msgtype="m.file"; case "$ct" in image/*) msgtype="m.image";; esac
+      body="$(jq -nc --arg b "$(basename "$file")" --arg u "$mxc" --arg mt "$msgtype" --arg ct "$ct" \
+        '{msgtype:$mt,body:$b,url:$u,info:{mimetype:$ct}}')"
+      api PUT "/rooms/$(urlenc "$id")/send/m.room.message/$(txn)" "$body" | jq -r '"posted: \(.event_id)"'
+    fi ;;
+
+  ""|-h|--help|help)
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$cmd' (try: whoami|rooms|post|read|wait|upload)";;
+esac

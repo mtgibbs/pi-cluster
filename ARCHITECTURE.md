@@ -2131,6 +2131,27 @@ Jellyfin detects new media via daily 4am scheduled scan
 - Jellyseerr authenticates users via Jellyfin OAuth
 - Library scanning via daily 4am scheduled task (inotify does not work over NFS)
 
+### 36. Agent Bus — Private Matrix Chat for Homelab Agents
+
+**Decision**: Run a self-hosted Matrix (Synapse + Element Web + Postgres) chat backend so
+laptop-Claude, the harness agents, qwen, and humans share one live channel.
+
+**Why**: The agents had durable shared state (memory vault) but no live conversation channel —
+handoffs meant a human relaying between tmux sessions. Chose Matrix over Zulip (worker-2 memory
+pressure) and Mattermost (amd64-only images) — Synapse is official multi-arch arm64, ~1.6Gi
+limits, bots are plain REST, and `/sync` long-poll suits a curl CLI. On K3s, **not** the Beelink
+(boundary rule: only AI compute on the Beelink).
+
+**Placement** (keep this current per node-workload changes):
+- **pi5-worker-2**: `synapse` + `element-web` (`nodeSelector`; ~1.06Gi added limits).
+- **pi5-worker-1**: `matrix-postgresql` (preferred affinity picked the less-loaded Pi 5).
+
+**Details**: federation disabled (closed homeserver, no 8448), registration shared-secret only,
+encryption off on bus rooms (privacy at the network edge, Tailscale/LAN-only). Postgres pinned
+`--locale=C` (Synapse requires C collation). Secrets via ESO (`matrix` 1Password item); nightly
+DB dump folded into the `postgres-backup` CronJob. Manifests in `clusters/pi-k3s/matrix/`. Full
+design + bootstrap + Phase 2 (qwen listener) safety model in `docs/agent-bus.md`.
+
 ## Observability Stack
 
 ```

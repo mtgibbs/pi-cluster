@@ -79,6 +79,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
 | **Family Board (dashboard UI)** | **self-contained subtree** `clusters/pi-k3s/family-board/` (own `CLAUDE.md` + `.claude/skills/family-board-ui` + `.claude/agents/board-designer`; slated to spin off) | `cluster-ops` (deploy/verify) |
 | **review-hub (PR-review gates)** | `docs/adr/008-review-hub-framework-seam.md` (framework/instance seam; `scripts/reviewhub/` + `specs/validators/`; slated to spin off when a second consumer exists) | `cluster-ops` (deploy/verify) |
+| **Agent Bus (Matrix chat)** | `docs/agent-bus.md` (Synapse+Element+Postgres; `scripts/agent-bus` CLI; `clusters/pi-k3s/matrix/`) | `cluster-ops` (deploy/verify); MCP for status |
 
 ## Hardware Overview
 -   **Master**: `pi-k3s` (Pi 5, 8GB)

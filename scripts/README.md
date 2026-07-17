@@ -98,3 +98,29 @@ calls so the sheet is never injected twice.
 
 - **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
 - **Opt-out:** `RALPH_SHEET=off`.
+
+## `agent-bus` — Matrix chat CLI
+
+Post/read/wait on the homelab Matrix chat bus over the plain client-server API (pure
+`curl` + `jq`). Shared by laptop-Claude, the harness agents, qwen, and humans (Element Web).
+Full design: `docs/agent-bus.md`.
+
+**Creds** (same tiering as `oc`): picks the identity `AGENT_BUS_IDENTITY` (default
+`laptop-claude`); token resolves `MATRIX_TOKEN` env → macOS Keychain (`agent-bus-<id>`) →
+`op://pi-cluster/agent-bus-<id>/token`. Homeserver defaults to `https://matrix.lab.mtgibbs.dev`.
+
+**Use:**
+
+```
+agent-bus whoami                                  # confirm identity + token
+agent-bus rooms                                   # joined rooms
+agent-bus post agents "hello"                      # post to #agents
+agent-bus post tasks "task: foo done" --thread '$evt'   # reply in-thread
+agent-bus read agents --limit 20                   # recent messages
+agent-bus wait --room tasks --mention --timeout 300     # block until mentioned (/sync)
+agent-bus upload ./plan.md agents                  # upload a file + post the link
+```
+
+**Dependency:** `jq` (the only thing beyond `curl`) — add it to any harness container that
+runs the CLI. Requires the account bootstrap (see `docs/agent-bus.md`) to have populated the
+`agent-bus-<name>` 1Password items.

@@ -84,6 +84,7 @@ spec:
 
                   backup_target "immich" "immich-postgresql.immich.svc.cluster.local" "immich" "immich" "$DB_PASSWORD"
                   backup_target "n8n" "n8n-postgresql.n8n.svc.cluster.local" "n8n" "n8n" "$N8N_DB_PASSWORD"
+                  backup_target "matrix" "matrix-postgresql.matrix.svc.cluster.local" "synapse" "synapse" "$MATRIX_DB_PASSWORD"
 
                   echo "--- Backup Summary ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
@@ -91,7 +92,7 @@ spec:
 
                   echo "Backed up: ${backed_up}, Skipped: ${skipped}, Failed: ${failed}"
 
-                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump
+                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump /tmp/matrix-postgres.dump
 
                   if [ "${failed}" -gt 0 ]; then exit 1; fi
                   exit 0
@@ -105,6 +106,11 @@ spec:
                   valueFrom:
                     secretKeyRef:
                       name: n8n-db-password
+                      key: password
+                - name: MATRIX_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: matrix-db-password
                       key: password
               volumeMounts:
                 - name: ssh-key
