@@ -1,22 +1,8 @@
 ---
 # Dedicated Postgres for Matrix.
 # Plain single-instance Deployment (matches the n8n/Immich pattern; no CNPG operator here).
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: matrix-postgresql-data
-  namespace: matrix
-  annotations:
-    # Prevent Flux from deleting this PVC (protects data)
-    kustomize.toolkit.fluxcd.io/prune: disabled
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 5Gi
----
+# The matrix-postgresql-data PVC lives in pvc.yaml (single source of truth) — do NOT
+# re-declare it here; duplicate resource IDs break `kustomize build`.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
