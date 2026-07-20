@@ -13,13 +13,21 @@
 //
 // Grants summary:
 //   - Members can reach each other, k8s-operator nodes, the inference box,
-//     the internet (exit node), and the home LAN (192.168.1.0/24).
+//     the internet (exit node), and the three advertised LAN hosts.
 //   - K8s operator can reach members (subnet routing).
 //   - Tailscale SSH allowed from members to their own devices (autogroup:self).
 
 {
     "tagOwners": {
-        "tag:k8s-operator": ["autogroup:admin", "autogroup:member"],
+        // Infrastructure tags are admin-only to own/apply. This is deliberately
+        // NARROWER than "any member" for a tailnet that is growing toward
+        // family access: a plain member must not be able to self-assign
+        // tag:k8s-operator to a device and thereby (via the exitNode
+        // autoApprover below) stand up an auto-approved exit node with no admin
+        // review. The in-cluster operator is unaffected — it registers its
+        // devices through a dedicated OAuth client that carries the tag, not
+        // through a member identity, so tag ownership here does not gate it.
+        "tag:k8s-operator": ["autogroup:admin"],
         "tag:inference":    ["autogroup:admin"],
     },
 
@@ -37,7 +45,22 @@
             "dst": ["autogroup:internet"],
             "ip":  ["*"],
         },
-        {"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]},
+        // Scoped to the LAN hosts actually advertised as subnet routes in
+        // clusters/pi-k3s/tailscale-config/connector.yaml — NOT the whole /24.
+        // Only these three are routable over the tailnet, so this grants
+        // exactly what is reachable today and states the real posture instead
+        // of a standing /24 allow. NOTE: if you advertise another host in
+        // connector.yaml, add its /32 here too, or member traffic to it will
+        // be denied even once the route exists.
+        {
+            "src": ["autogroup:member"],
+            "dst": [
+                "192.168.1.55/32",  // Pi-hole primary (pi-k3s)
+                "192.168.1.56/32",  // Pi-hole secondary (pi5-worker-1)
+                "192.168.1.70/32",  // Beelink
+            ],
+            "ip": ["*"],
+        },
     ],
 
     "ssh": [
