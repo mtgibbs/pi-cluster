@@ -7,6 +7,7 @@ resources:
   - backup-cronjob.yaml
   - postgres-backup-secret.yaml
   - postgres-backup-cronjob.yaml
+  - k3s-datastore-backup-cronjob.yaml
   - mariadb-backup-secret.yaml
   - mariadb-backup-cronjob.yaml
   - media-backup-cronjob.yaml
