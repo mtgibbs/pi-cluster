@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # harness — attach to / fire commands into the persistent coding-agent
 # containers on the Beelink (coding-harness-qwen, coding-harness-claude,
-# coding-harness-claude-2).
+# coding-harness-claude-2, coding-harness-codex).
 #
 # All containers run a detached tmux session named "main" with zero exposed
 # ports — the only way in is `ssh beelink-ai` (already-established alias, see
@@ -13,13 +13,16 @@
 #   harness attach claude2           # second, independent Claude Code instance
 #                                     # — own $HOME/repo-mirror, same shared
 #                                     # creds. Lets two windows work in parallel.
+#   harness attach codex             # OpenAI Codex CLI — separate subscription,
+#                                     # so it adds capacity rather than sharing
+#                                     # the Max pool the laptop session spends.
 #   harness run qwen "specs/foo"     # fire-and-forget: runs run-task.sh in the
 #                                     # SAME session you can later attach to
-#   harness status                   # docker compose ps, filtered to the two
-#   harness sync-ctx                 # ship a snapshot of the laptop's ctx index
-#                                     # (claude container only — re-run to refresh)
+#   harness status                   # docker compose ps, filtered to the four
+#   harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index
+#                                     # (defaults to claude — re-run to refresh)
 #   harness prompt claude "<text>"   # one-shot headless prompt, waits for the
-#                                     # answer (claude -p --output-format json)
+#                                     # answer (claude -p / codex exec)
 #   harness push-memory               # laptop main -> GitHub -> container fetch
 #   harness pull-memory               # container branch -> GitHub -> laptop
 #                                     # fetch + diff (YOU merge by hand)
@@ -27,16 +30,18 @@ set -euo pipefail
 
 HOST="${HARNESS_SSH_HOST:-beelink-ai}"
 CLAUDE_HOME_DIR="/srv/coding-harness-claude-data/home"
+CODEX_HOME_DIR="/srv/coding-harness-codex-data/home"
 MEMORY_REPO_LAPTOP="$HOME/.claude/projects"
 MEMORY_REPO_CONTAINER="/home/agent/.claude/projects"
-usage() { echo "usage: harness {attach|run|status|sync-ctx|prompt|push-memory|pull-memory} [qwen|claude|claude2] [args...]" >&2; exit 1; }
+usage() { echo "usage: harness {attach|run|status|sync-ctx|prompt|push-memory|pull-memory} [qwen|claude|claude2|codex] [args...]" >&2; exit 1; }
 
 container_for() {
   case "$1" in
     qwen)    echo "coding-harness-qwen" ;;
     claude)  echo "coding-harness-claude" ;;
     claude2) echo "coding-harness-claude-2" ;;
-    *) echo "harness: unknown target '$1' (expected qwen, claude, or claude2)" >&2; exit 1 ;;
+    codex)   echo "coding-harness-codex" ;;
+    *) echo "harness: unknown target '$1' (expected qwen, claude, claude2, or codex)" >&2; exit 1 ;;
   esac
 }
 
@@ -57,9 +62,10 @@ case "$cmd" in
     # you can pop in mid-run and watch (or take over) at any time. Branch name
     # is generated here (rather than left to run-task.sh's own default) so
     # every positional arg is a plain token — sidesteps nested-quoting through
-    # ssh + tmux send-keys, and papers over qwen vs. claude run-task.sh having
-    # different arg counts (claude's takes an extra repo-name in position 2).
-    if [ "$target" = "claude" ] || [ "$target" = "claude2" ]; then
+    # ssh + tmux send-keys, and papers over qwen vs. the rest having different
+    # arg counts (the general-workstation containers take an extra repo-name in
+    # position 2, since they aren't locked to a single clone the way qwen is).
+    if [ "$target" = "claude" ] || [ "$target" = "claude2" ] || [ "$target" = "codex" ]; then
       task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
     else
       task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
@@ -70,7 +76,7 @@ case "$cmd" in
   status)
     # cd first (not -f) so Compose auto-loads /opt/ai-stack/.env for ${VAR} interpolation.
     # sudo required: .env is 0600 root:root (same reason every other subcommand needs it).
-    ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude coding-harness-claude-2"
+    ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude coding-harness-claude-2 coding-harness-codex"
     ;;
   sync-ctx)
     # Point-in-time snapshot of the laptop's local ctx index — ctx's MCP mode
@@ -85,22 +91,41 @@ case "$cmd" in
     # confirmed non-destructive, indexed_items only grows) before re-running
     # this. See the version-pin comment in beelink-ansible's
     # coding-harness-claude/Dockerfile.
-    ssh "$HOST" "mkdir -p $CLAUDE_HOME_DIR/.ctx"
+    #
+    # Takes an optional target (claude | codex) — both bake the ctx binary and
+    # both need their own copy of the data, since it's a physical file in each
+    # container's volume, not a shared service. Defaults to claude for backward
+    # compatibility with every existing invocation.
+    target="${1:-claude}"
+    case "$target" in
+      claude) home_dir="$CLAUDE_HOME_DIR" ;;
+      codex)  home_dir="$CODEX_HOME_DIR" ;;
+      *) echo "harness: sync-ctx target must be claude or codex (got '$target')" >&2; exit 1 ;;
+    esac
+    c="$(container_for "$target")"
+    ssh "$HOST" "mkdir -p $home_dir/.ctx"
     rsync -avz --rsync-path="sudo rsync" \
-      "$HOME/.ctx/work.sqlite" "$HOST:$CLAUDE_HOME_DIR/.ctx/work.sqlite"
-    ssh "$HOST" "sudo chown -R 1001:1001 $CLAUDE_HOME_DIR/.ctx"
-    echo "harness: ctx index synced. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart coding-harness-claude'"
+      "$HOME/.ctx/work.sqlite" "$HOST:$home_dir/.ctx/work.sqlite"
+    ssh "$HOST" "sudo chown -R 1001:1001 $home_dir/.ctx"
+    echo "harness: ctx index synced to $c. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart $c'"
     ;;
   prompt)
     target="${1:?usage: harness prompt qwen-or-claude \"text\"}"
     text="${2:?usage: harness prompt qwen-or-claude \"text\"}"
     c="$(container_for "$target")"
     # One-shot, not tmux send-keys: this WAITS for and returns the answer,
-    # unlike `run` which fires into a live session you check on later.
-    # claude -p / --print: headless, no TTY needed, exits when done.
-    result_json="$(ssh "$HOST" "docker exec $c claude -p $(printf '%q' "$text") --output-format json")"
-    echo "$result_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result', sys.stdin.read()))" 2>/dev/null \
-      || echo "$result_json"
+    # unlike `run` which fires into a live session you check on later. Both
+    # CLIs have a headless mode that needs no TTY and exits when done —
+    # `claude -p` and `codex exec` — they just differ in output shape.
+    if [ "$target" = "codex" ]; then
+      # Plain text on stdout; --color never so escape codes don't ride back
+      # through ssh into your terminal.
+      ssh "$HOST" "docker exec $c codex exec --color never $(printf '%q' "$text")"
+    else
+      result_json="$(ssh "$HOST" "docker exec $c claude -p $(printf '%q' "$text") --output-format json")"
+      echo "$result_json" | python3 -c "import json,sys; print(json.load(sys.stdin).get('result', sys.stdin.read()))" 2>/dev/null \
+        || echo "$result_json"
+    fi
     ;;
   push-memory)
     # Laptop main -> GitHub -> container fetch (NOT auto-merged there).
