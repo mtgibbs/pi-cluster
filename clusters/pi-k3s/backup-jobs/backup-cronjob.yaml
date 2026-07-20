@@ -72,9 +72,31 @@ spec:
                     echo ""
                   done
 
-                  # Cleanup old backups (keep last 4 DATED sets)
+                  # Cleanup old backups — TWO bugs fixed here, both live.
                   #
-                  # The grep is load-bearing, not cosmetic. ${NAS_PATH} is a shared
+                  # BUG 2: the retention window counted NIGHTS, not WEEKS.
+                  # Directories in this parent accrue nightly — the Beelink's
+                  # off-cluster backup writes {date}/beelink/ every night at 03:30
+                  # (see .claude/skills/backup-ops/SKILL.md) — while cluster backup
+                  # sets are written WEEKLY, on Sunday. "Keep 4" therefore meant
+                  # four NIGHTS. The previous Sunday's complete cluster backup was
+                  # evicted every Wednesday, so the cluster had exactly ONE restore
+                  # point at any moment, destroyed at the same instant its
+                  # replacement was being written. A corrupt or partial Sunday run
+                  # left nothing to fall back to.
+                  #
+                  # Confirmed from pvc-backup's own 2026-07-19 summary listing: the
+                  # link counts give it away — 2026-07-16/17/18 each had 1 subdir
+                  # (beelink only), 2026-07-19 had 6 (full cluster set), and
+                  # 2026-07-12, the prior Sunday, was already gone.
+                  #
+                  # KEEP_DIRS is now measured against the nightly cadence: 30 dirs
+                  # ~= 30 nights ~= 4 Sunday cluster sets plus the nightlies in
+                  # between. This is the knob to turn to trade disk for restore
+                  # points. It is NOT four of anything anymore — read it as days.
+                  KEEP_DIRS=30
+                  #
+                  # BUG 1: the grep is load-bearing, not cosmetic. ${NAS_PATH} is a shared
                   # parent: git-mirror-cronjob.yaml writes git-mirrors/ as a SIBLING
                   # of the dated dirs. The original command was an unfiltered
                   # `ls -dt */ | tail -n +5`, which ranked git-mirrors/ by mtime
@@ -99,7 +121,7 @@ spec:
                     "cd ${NAS_PATH} && ls -d */ 2>/dev/null | grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}/\$' | sed 's/^/RETENTION: not a dated backup set, leaving untouched: /'" || true
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
-                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}/\$' | tail -n +5 | xargs -r rm -rf" || true
+                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}/\$' | tail -n +$((KEEP_DIRS + 1)) | xargs -r rm -rf" || true
                   # ^ best-effort: legacy pre-QNAP-cutover dirs are foreign-owned
                   #   and may resist deletion; never fail a good backup on cleanup.
 
