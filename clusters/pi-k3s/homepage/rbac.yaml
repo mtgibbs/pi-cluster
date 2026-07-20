@@ -9,8 +9,26 @@ kind: ClusterRole
 metadata:
   name: homepage
 rules:
+  # NOTE: "secrets" and "configmaps" were removed here deliberately — do not
+  # add them back without a concrete widget that needs them.
+  #
+  # Homepage never used them. Every widget credential arrives through the
+  # environment (deployment.yaml envFrom.secretRef -> HOMEPAGE_VAR_*), never
+  # through the Kubernetes API, and the only k8s widget configured is the
+  # cluster/nodes resource graph, which needs nodes + pods + metrics.k8s.io.
+  #
+  # What the grant actually conferred, verified with `kubectl auth can-i
+  # --as=system:serviceaccount:homepage:homepage`: get/list on all 129 secrets
+  # in the cluster, including external-secrets/onepassword-service-account
+  # (the 1Password vault token — every credential we own, including ones not
+  # in this cluster) and flux-system/flux-system (the Git deploy key, i.e.
+  # repo write, i.e. arbitrary workloads via GitOps).
+  #
+  # Homepage is LAN/Tailscale-only and absent from the Cloudflare tunnel, so
+  # this was never remotely reachable. It was a low-likelihood,
+  # total-compromise pivot: a dashboard bug would have been a vault breach.
   - apiGroups: [""]
-    resources: ["nodes", "pods", "namespaces", "services", "configmaps", "secrets"]
+    resources: ["nodes", "pods", "namespaces", "services"]
     verbs: ["get", "list"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
