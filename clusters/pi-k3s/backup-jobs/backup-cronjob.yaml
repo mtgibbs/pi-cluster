@@ -72,11 +72,34 @@ spec:
                     echo ""
                   done
 
-                  # Cleanup old backups (keep last 4)
+                  # Cleanup old backups (keep last 4 DATED sets)
+                  #
+                  # The grep is load-bearing, not cosmetic. ${NAS_PATH} is a shared
+                  # parent: git-mirror-cronjob.yaml writes git-mirrors/ as a SIBLING
+                  # of the dated dirs. The original command was an unfiltered
+                  # `ls -dt */ | tail -n +5`, which ranked git-mirrors/ by mtime
+                  # alongside the backup sets — it landed at position 5 and was
+                  # deleted every single Sunday. It went unnoticed because
+                  # git-mirror-backup runs 90 min later, recreates the directory,
+                  # and re-clones all 48 repos, so both jobs stayed green and the
+                  # tree always looked present by morning.
+                  #
+                  # The legacy April dirs survived only because they're
+                  # foreign-owned (rm fails with EPERM). git-mirrors/ is owned by
+                  # cluster-backup — the same user this job runs as — so its
+                  # deletion succeeded silently, with no error line to notice.
+                  #
+                  # Only YYYY-MM-DD directories are deletion candidates. Anything
+                  # else is reported and left alone: an unrecognized name means
+                  # someone put data here that this job doesn't understand, which
+                  # is a reason to stop, not a reason to delete.
                   echo "--- Cleaning up old backups ---"
                   ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
                     ${NAS_USER}@${NAS_HOST} \
-                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | tail -n +5 | xargs -r rm -rf" || true
+                    "cd ${NAS_PATH} && ls -d */ 2>/dev/null | grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}/\$' | sed 's/^/RETENTION: not a dated backup set, leaving untouched: /'" || true
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} \
+                    "cd ${NAS_PATH} && ls -dt */ 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}/\$' | tail -n +5 | xargs -r rm -rf" || true
                   # ^ best-effort: legacy pre-QNAP-cutover dirs are foreign-owned
                   #   and may resist deletion; never fail a good backup on cleanup.
 
