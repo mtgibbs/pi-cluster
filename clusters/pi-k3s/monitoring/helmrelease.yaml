@@ -28,6 +28,13 @@ spec:
       name: alertmanager-discord
       valuesKey: webhook-url
       targetPath: alertmanager.config.receivers[0].discord_configs[0].webhook_url
+    # Inject the healthchecks.io ping URL into the webhook receiver below.
+    # receivers[2] is the 'healthchecks' receiver (order matters — it is the
+    # third entry in alertmanager.config.receivers).
+    - kind: Secret
+      name: alertmanager-healthchecks
+      valuesKey: ping-url
+      targetPath: alertmanager.config.receivers[2].webhook_configs[0].url
   values:
     # Grafana settings
     grafana:
@@ -139,10 +146,30 @@ spec:
           repeat_interval: 4h
           receiver: discord
           routes:
-            # Silence noisy/expected alerts
+            # Watchdog is Prometheus's always-firing dead-man's-switch. Instead
+            # of silencing it, route it to an EXTERNAL heartbeat: the webhook
+            # receiver below POSTs to a healthchecks.io check on every send. As
+            # long as the whole chain is alive (Prometheus evaluating rules ->
+            # Alertmanager routing -> egress), the check keeps getting pinged.
+            # If the cluster — or the whole house — goes dark, the pings stop
+            # and healthchecks.io notifies out-of-band. This is the one alert
+            # that can survive the cluster it is watching.
+            #
+            # repeat_interval is deliberately short so pings arrive frequently
+            # relative to the external check's period+grace (set ~15m/10m on
+            # the healthchecks.io side). group_wait small so the first ping
+            # after a restart is prompt.
+            - receiver: healthchecks
+              matchers:
+                - alertname = "Watchdog"
+              group_wait: 30s
+              group_interval: 5m
+              repeat_interval: 5m
+            # Silence the expected memory-overcommit noise (this cluster runs
+            # deliberately overcommitted).
             - receiver: 'null'
               matchers:
-                - alertname =~ "Watchdog|KubeMemoryOvercommit"
+                - alertname = "KubeMemoryOvercommit"
             # Critical alerts get sent immediately
             - receiver: discord
               matchers:
@@ -161,6 +188,17 @@ spec:
                   **Description:** {{ .Annotations.description }}
                   {{ end }}
           - name: 'null'  # Silence receiver
+          # External dead-man's-switch. url is injected at reconcile time from
+          # the alertmanager-healthchecks secret (see valuesFrom above); it must
+          # stay receivers[2] for that targetPath index to line up. A bare
+          # webhook POST to a healthchecks.io check URL registers as a ping —
+          # the body is ignored. send_resolved: false because Watchdog never
+          # resolves (a resolve would only mean Prometheus itself stopped, at
+          # which point Alertmanager sends nothing anyway).
+          - name: healthchecks
+            webhook_configs:
+              - send_resolved: false
+                url: "https://hc-ping.com/placeholder-overwritten-by-valuesFrom"
 
     # Node exporter - lightweight
     nodeExporter:
