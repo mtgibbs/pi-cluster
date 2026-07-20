@@ -42,8 +42,33 @@ spec:
               prefix: index_
               period: 24h
       # Retention settings
+      #
+      # retention_period ALONE DOES NOTHING. In Loki, deletion is performed by
+      # the compactor, and the compactor only enforces retention when
+      # retention_enabled is true. Without the block below, retention_period is
+      # inert config: it reads like a 7-day cap while chunks accumulate forever.
+      #
+      # That was the live state until this commit — the rendered ConfigMap had
+      # retention_period: 168h and no compactor: block at all. Loki has been
+      # retaining every log line since it was deployed.
+      #
+      # This matters more than it sounds: loki is pinned to pi5-worker-2 with a
+      # local-path PVC, and local-path does NOT enforce the 10Gi request. Loki
+      # can consume the whole node filesystem (125.5 GB, 64.1 GB free at time of
+      # writing). pi5-worker-2 also runs ingress-nginx, a CoreDNS replica,
+      # prometheus, the n8n stack, Synapse and the Tailscale exit node, so
+      # DiskPressure eviction there is a multi-service outage, not a logging
+      # inconvenience.
       limits_config:
         retention_period: 168h  # 7 days
+
+      # delete_request_store is REQUIRED when retention_enabled is true on
+      # Loki 3.x — the binary refuses to start without it. Matches the
+      # filesystem object store configured above.
+      compactor:
+        working_directory: /var/loki/compactor   # under common.path_prefix, on the PVC
+        retention_enabled: true
+        delete_request_store: filesystem
 
     # Single binary deployment
     singleBinary:
