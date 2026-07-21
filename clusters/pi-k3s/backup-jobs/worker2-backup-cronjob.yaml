@@ -51,7 +51,10 @@ spec:
                   # signing key (the server's cryptographic identity, irreplaceable) and
                   # the media_store. local-path on pi5-worker-2, this job's node. (The
                   # Matrix Postgres DB is dumped separately by postgres-backup.)
-                  PVCS="media_sabnzbd-config media_bazarr-config n8n_n8n-data matrix_synapse-data"
+                  # ntfy_ntfy-data = ntfy's SQLite databases (auth.db = users/ACLs,
+                  # cache.db = message cache), also local-path on pi5-worker-2. ntfy has
+                  # no external DB, so this PVC is its entire persistent state.
+                  PVCS="media_sabnzbd-config media_bazarr-config n8n_n8n-data matrix_synapse-data ntfy_ntfy-data"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"
