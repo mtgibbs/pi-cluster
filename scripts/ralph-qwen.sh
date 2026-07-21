@@ -25,6 +25,16 @@ SPEC="$SPEC_DIR/spec.md"; VERIFY="$SPEC_DIR/verify.sh"; TASKS="$SPEC_DIR/tasks.t
 for f in "$SPEC" "$VERIFY" "$TASKS"; do [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 ROOT="$(git rev-parse --show-toplevel)"
 
+# Durable heartbeat (see ralph-status.sh). Sourced so a dashboard can see live
+# loop state without attaching tmux. No-op stubs if the helper is absent, so the
+# loop never depends on it.
+RALPH_AGENT="${RALPH_AGENT:-qwen}"
+if [ -f "$(dirname "$0")/ralph-status.sh" ]; then
+  . "$(dirname "$0")/ralph-status.sh"
+else
+  hb_init() { :; }; hb_write() { :; }
+fi
+
 # Navigation codesheet (repo map + shape-appropriate reference sheet), generated
 # ONCE for the whole loop: byte-stable across every task and retry, so after the
 # first attempt it rides the Beelink's prefix cache for ~free. Deliberately not
@@ -39,11 +49,15 @@ if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/d
   [ -n "$SHEET" ] && echo "codesheet: injected (~$(( ${#SHEET} / 4 )) tokens, stable for the whole loop)"
 fi
 
+hb_init; hb_write starting
+
 while IFS= read -r task || [ -n "$task" ]; do
   [ -z "${task// }" ] && continue
   echo "════════ TASK: $task ════════"
+  HB_TASK="$task"; HB_TIDX=$((HB_TIDX + 1)); hb_write running
   feedback=""; passed=0
   for attempt in $(seq 1 $((RETRIES + 1))); do
+    HB_ATTEMPT="$attempt"; hb_write running
     prompt="${SHEET:+$SHEET
 
 }Read $SPEC. Implement ONLY this one task, nothing else: ${task}
@@ -57,13 +71,15 @@ URLs/UIDs. When done, stop.${feedback}"
     OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" >/dev/null 2>&1 || true
 
     # The gate: deterministic, external. The model does NOT get to say "done".
+    hb_write verifying
     if out="$(cd "$ROOT" && bash "$VERIFY" 2>&1)"; then
       echo "  ✓ $task passed verify (attempt $attempt)"
       git -C "$ROOT" add -A
       git -C "$ROOT" commit -q -m "ralph(qwen): ${task%%:*} — ${task#*: }" || true
-      passed=1; break
+      passed=1; hb_write passed true; break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
+    hb_write failed false
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
     feedback="
 A previous attempt FAILED verification with:
@@ -78,9 +94,11 @@ Fix exactly those failures."
 
   if [ "$passed" != 1 ]; then
     echo "✋ STOP: '$task' failed verify after $((RETRIES + 1)) attempts — needs a human." >&2
+    hb_write stopped false
     exit 2
   fi
 done < "$TASKS"
 
+hb_write done true
 echo "════════ all tasks passed verify — branch ready for PR review ════════"
 git -C "$ROOT" log --oneline -"$(grep -cve '^[[:space:]]*$' "$TASKS")"
