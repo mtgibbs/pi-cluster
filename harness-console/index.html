@@ -1,4 +1,4 @@
-<title>Heartbeat of the House</title>
+<title>Pulse</title>
 <style>
   :root {
     --ground: #06070e;
@@ -34,6 +34,7 @@
 
   .note { position: absolute; right: clamp(18px, 3.4vw, 44px); bottom: clamp(74px, 9vw, 96px); max-width: 33ch; text-align: right; font-size: 10.5px; line-height: 1.7; letter-spacing: 0.05em; color: var(--ink-faint); }
   .note b { color: var(--ink-dim); font-weight: 600; }
+  body.live .note { display: none; }   /* the "simulated telemetry" note is moot on the live feed */
 
   .controls { position: absolute; left: 50%; transform: translateX(-50%); bottom: clamp(14px, 2.4vw, 26px); display: flex; align-items: center; gap: 16px; padding: 9px 16px; pointer-events: auto; background: rgba(9,11,20,0.6); border: 1px solid rgba(140,155,200,0.14); border-radius: 999px; backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px); }
   .auto { font: inherit; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); background: transparent; border: 1px solid rgba(140,155,200,0.22); border-radius: 999px; padding: 6px 13px; cursor: pointer; white-space: nowrap; }
@@ -62,7 +63,7 @@
 
 <div class="hud">
   <div class="masthead">
-    <h1>Heartbeat of the House</h1>
+    <h1>pulse</h1>
     <p>a living portrait of the cluster · beelink&nbsp;·&nbsp;pi-k3s</p>
   </div>
   <div class="pulse">
@@ -226,9 +227,9 @@
       const d = await r.json();
       if (!d || !Array.isArray(d.agents)) throw 0;
       applyLive(d);
-      if (!liveMode) { liveMode = true; controlsEl.classList.add("live"); }
+      if (!liveMode) { liveMode = true; controlsEl.classList.add("live"); document.body.classList.add("live"); }
     } catch (_) {
-      if (liveMode) { liveMode = false; controlsEl.classList.remove("live"); }
+      if (liveMode) { liveMode = false; controlsEl.classList.remove("live"); document.body.classList.remove("live"); }
     }
   }
   poll(); setInterval(poll, 1500);
