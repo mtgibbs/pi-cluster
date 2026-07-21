@@ -20,6 +20,7 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
+| Heartbeat | `scripts/ralph-status.sh` (sourced by `ralph-qwen`/`ralph-codex`) | writes a live JSON status file per loop to `~/.harness/status/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. Best-effort, no-op if absent. Contract in the file header |
 | SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
 | History search | `ctx` (`~/.local/bin/ctx`, data `~/.ctx`) | indexes Claude + opencode sessions; **orchestrator-side only** — qwen never calls it. opencode imports are lite fidelity (diffs + timing, no prose); the Claude sessions *about* a run carry the analysis |
 
