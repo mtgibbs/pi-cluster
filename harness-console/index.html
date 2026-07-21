@@ -38,6 +38,9 @@
   .controls { position: absolute; left: 50%; transform: translateX(-50%); bottom: clamp(14px, 2.4vw, 26px); display: flex; align-items: center; gap: 16px; padding: 9px 16px; pointer-events: auto; background: rgba(9,11,20,0.6); border: 1px solid rgba(140,155,200,0.14); border-radius: 999px; backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px); }
   .auto { font: inherit; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); background: transparent; border: 1px solid rgba(140,155,200,0.22); border-radius: 999px; padding: 6px 13px; cursor: pointer; white-space: nowrap; }
   .auto.on { color: #bfe9c8; border-color: rgba(120,230,160,0.42); }
+  .livebadge { display: none; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #bfe9c8; padding: 6px 4px; white-space: nowrap; }
+  .controls.live .cgroup, .controls.live .auto { display: none; }
+  .controls.live .livebadge { display: inline; }
   .cgroup { display: flex; align-items: center; gap: 8px; }
   .cdot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px 1px currentColor; }
   .cname { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); min-width: 54px; }
@@ -73,6 +76,7 @@
   </div>
   <div class="controls" id="controls">
     <button class="auto on" id="autoBtn">● live sim</button>
+    <span class="livebadge" id="livebadge">◉ live feed</span>
   </div>
 </div>
 
@@ -116,6 +120,8 @@
     pts: ball(640),
   }));
   let autoMode = true;
+  let liveMode = false;   // true once the collector feed answers — real data then drives
+  const byId = {}; for (const m of minds) byId[m.id] = m;
 
   let W = 0, H = 0, DPR = 1;
   function resize() {
@@ -198,7 +204,36 @@
     }
   }
 
-  // ---- simulation ----
+  // ---- live feed: poll the collector; fall back to the sim if unreachable ----
+  // Served by the Beelink collector, /api/state is same-origin. Opened stand-
+  // alone (e.g. the artifact), the fetch 404s and we stay on the simulation.
+  function applyLive(data) {
+    for (const a of data.agents || []) {
+      const m = byId[a.id]; if (!m) continue;
+      const prevPhase = m.phase;
+      m.state = a.state || "idle";
+      m.phase = a.phase || (m.state === "idle" ? "idle" : "thinking");
+      m.task = a.task || ""; m.idx = a.task_index || 0; m.total = a.total_tasks || 0;
+      m.attempt = a.attempt || 0; m.total_attempts = a.max_attempts || 0;
+      m.actTarget = (a.activity != null) ? a.activity : (m.state === "idle" ? 0.03 : 0.5);
+      if (m.state !== "idle" && prevPhase !== m.phase) m.gust = Math.min(1, m.gust + 0.5);
+    }
+  }
+  async function poll() {
+    try {
+      const r = await fetch("/api/state", { cache: "no-store" });
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      if (!d || !Array.isArray(d.agents)) throw 0;
+      applyLive(d);
+      if (!liveMode) { liveMode = true; controlsEl.classList.add("live"); }
+    } catch (_) {
+      if (liveMode) { liveMode = false; controlsEl.classList.remove("live"); }
+    }
+  }
+  poll(); setInterval(poll, 1500);
+
+  // ---- simulation (fallback when there is no live feed) ----
   const PHASES = ["picking up","thinking","thinking","verifying"];
   function pickWork(m) {
     m.state = "running"; m.phase = PHASES[0];
@@ -263,7 +298,8 @@
 
     let houseAct = 0, activeCount = 0;
     for (const m of minds) {
-      if (autoMode) stepWork(m, dt*speed);
+      if (liveMode) { /* applyLive() sets state/phase/actTarget from the feed */ }
+      else if (autoMode) stepWork(m, dt*speed);
       else if (m.state !== "idle") m.tokens += dt*(600 + m.act*5200);
       m.act += (m.actTarget - m.act) * Math.min(1, dt*1.3);
       m.gust *= Math.pow(0.12, dt);
@@ -307,7 +343,7 @@
 
     if (!frame._hud || now - frame._hud > 120) {
       frame._hud = now;
-      if (autoMode) syncControls();
+      if (autoMode && !liveMode) syncControls();
       const target = 46 + houseAct*78;
       bpmShown += (target - bpmShown) * 0.2;
       document.getElementById("bpm").textContent = Math.round(bpmShown);
@@ -319,9 +355,12 @@
           el.line.innerHTML = `<span class="ph" style="color:var(--ink-faint)">idle</span>`;
         } else {
           const tok = m.tokens > 1000 ? (m.tokens/1000).toFixed(1)+"k" : Math.round(m.tokens);
+          const meta = liveMode
+            ? `${m.idx}/${m.total} · att ${m.attempt}`
+            : `${m.idx}/${m.total} · att ${m.attempt} · ${tok} tok`;
           el.line.innerHTML =
             `<span class="ph" style="color:rgb(${m.hue.join(",")})">${m.phase}</span> ` +
-            `<span style="color:var(--ink-faint)">${m.idx}/${m.total} · att ${m.attempt} · ${tok} tok</span><br>${m.task}`;
+            `<span style="color:var(--ink-faint)">${meta}</span><br>${m.task}`;
         }
       }
     }
