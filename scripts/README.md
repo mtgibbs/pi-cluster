@@ -62,7 +62,7 @@ Measured basis: 20-56% less context at equal-or-better accuracy across 783 trial
 
 ## `harness` — remote coding-agent containers (Beelink)
 
-Two persistent, sandboxed containers on the Beelink give you the laptop's `oc`/
+Four persistent, sandboxed containers on the Beelink give you the laptop's `oc`/
 `ralph-qwen.sh` setup as a remote session reachable from anywhere over Tailscale —
 no laptop needs to stay open, and you can pop in and drive it live or fire off a
 loop and check back later. Full details, security model, and the human setup
@@ -79,15 +79,18 @@ cp scripts/harness ~/.local/bin/harness && chmod +x ~/.local/bin/harness   # ~/.
 ```bash
 harness attach qwen              # pop in and drive opencode/qwen live
 harness attach claude            # pop in to a real Claude Code session
+harness attach codex             # pop in to an OpenAI Codex CLI session
 harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
-harness status                   # is either container up?
-harness sync-ctx                 # ship a snapshot of the laptop's ctx index (claude only)
-harness sync-memory              # ship this laptop's Claude memory (claude only)
+harness run codex "specs/foo"    # same, but ralph-codex — a separate billing lane
+harness status                   # are the containers up?
+harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index (default: claude)
+harness push-memory              # laptop main -> GitHub -> container fetch (no auto-merge)
+harness pull-memory              # container branch -> GitHub -> laptop fetch + diff
 ```
 
 Requires: `ssh beelink-ai` already configured (see the local-creds model above).
 
-Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude}/`).
+Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude,codex}/`).
 
 ## `ralph-qwen.sh` — bounded SDD loop
 
@@ -98,6 +101,20 @@ calls so the sheet is never injected twice.
 
 - **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
 - **Opt-out:** `RALPH_SHEET=off`.
+
+## `ralph-codex.sh` — the same loop, driven by the OpenAI Codex CLI
+
+Structurally identical to `ralph-qwen.sh` — same spec-dir contract, same fresh session per
+attempt, same deterministic `verify.sh` gate, same stop-for-a-human. Only the executor swaps
+(`codex exec` instead of `oc run`), and codex reads `AGENTS.md` natively so there's no second
+brief to keep in sync.
+
+- **Use:** `scripts/ralph-codex.sh specs/<feature>` from a git worktree on a throwaway branch.
+- **Codesheet defaults OFF here** (`RALPH_SHEET=on` to enable) — the 20-56% win was measured
+  on a 30B with a small window and is unmeasured for codex.
+- **Sandbox:** defaults to `danger-full-access` because the *container* is the boundary.
+  On a laptop there is no outer sandbox — use `CODEX_SANDBOX=workspace-write`.
+- **Watchdog:** `CODEX_RUN_TIMEOUT` (default 900s), same background-kill pattern as `oc`.
 
 ## `agent-bus` — Matrix chat CLI
 

@@ -84,6 +84,10 @@ spec:
 
                   backup_target "immich" "immich-postgresql.immich.svc.cluster.local" "immich" "immich" "$DB_PASSWORD"
                   backup_target "n8n" "n8n-postgresql.n8n.svc.cluster.local" "n8n" "n8n" "$N8N_DB_PASSWORD"
+                  backup_target "mealie" "mealie-postgresql.mealie.svc.cluster.local" "mealie" "mealie" "$MEALIE_DB_PASSWORD"
+                  # Matrix's database is named "synapse" (namespace matrix). Restore
+                  # target must be C-locale — Synapse refuses non-C collation — but the
+                  # custom-format dump is locale-agnostic, so that's a restore concern.
                   backup_target "matrix" "matrix-postgresql.matrix.svc.cluster.local" "synapse" "synapse" "$MATRIX_DB_PASSWORD"
 
                   echo "--- Backup Summary ---"
@@ -92,7 +96,8 @@ spec:
 
                   echo "Backed up: ${backed_up}, Skipped: ${skipped}, Failed: ${failed}"
 
-                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump /tmp/matrix-postgres.dump
+                  rm -f /tmp/id_ed25519 /tmp/immich-postgres.dump /tmp/n8n-postgres.dump \
+                        /tmp/mealie-postgres.dump /tmp/matrix-postgres.dump
 
                   if [ "${failed}" -gt 0 ]; then exit 1; fi
                   exit 0
@@ -106,6 +111,11 @@ spec:
                   valueFrom:
                     secretKeyRef:
                       name: n8n-db-password
+                      key: password
+                - name: MEALIE_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mealie-db-password
                       key: password
                 - name: MATRIX_DB_PASSWORD
                   valueFrom:

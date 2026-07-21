@@ -47,7 +47,10 @@ spec:
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/media"
 
                   # Media PVCs to backup (namespace_pvcname patterns)
-                  PVCS="media_prowlarr-config media_sonarr-config media_radarr-config media_qbittorrent-config media_jellyseerr-config media_lazylibrarian-config media_calibre-web-config media_readarr-config media_lidarr-config romm_romm-config"
+                  # mealie_mealie-data = Mealie's /app/data (recipe images + assets),
+                  # local-path on pi5-worker-1 — same node this job runs on. (The Mealie
+                  # Postgres DB is dumped separately by postgres-backup, not rsynced here.)
+                  PVCS="media_prowlarr-config media_sonarr-config media_radarr-config media_qbittorrent-config media_jellyseerr-config media_lazylibrarian-config media_calibre-web-config media_readarr-config media_lidarr-config romm_romm-config mealie_mealie-data"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"

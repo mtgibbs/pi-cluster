@@ -20,6 +20,7 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
+| Heartbeat | `scripts/ralph-status.sh` (sourced by `ralph-qwen`/`ralph-codex`) | writes a live JSON status file per loop to `~/.harness/status/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. Best-effort, no-op if absent. Contract in the file header |
 | SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
 | History search | `ctx` (`~/.local/bin/ctx`, data `~/.ctx`) | indexes Claude + opencode sessions; **orchestrator-side only** — qwen never calls it. opencode imports are lite fidelity (diffs + timing, no prose); the Claude sessions *about* a run carry the analysis |
 
@@ -177,11 +178,11 @@ relocate those.
 
 ## Remote harness (Beelink) — persistent, sandboxed, tmux-attach sessions
 
-Three containers on the Beelink give the laptop's `oc`/`ralph-qwen.sh` setup a
+Four containers on the Beelink give the laptop's `oc`/`ralph-qwen.sh` setup a
 persistent, remotely-reachable home — no laptop needs to stay open, and you
 can either let a loop run unattended or pop in and drive it live, same session
 either way. Deployed via `beelink-ansible/playbooks/50-ai-stack.yml`; source
-in `beelink-ansible/files/coding-harness-{qwen,claude}/` (separate repo) —
+in `beelink-ansible/files/coding-harness-{qwen,claude,codex}/` (separate repo) —
 `coding-harness-claude-2` reuses the `coding-harness-claude` image/build
 context, just a second compose service with its own volume.
 
@@ -190,6 +191,39 @@ context, just a second compose service with its own volume.
 | `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh`. Single-repo (pi-cluster). |
 | `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh` (delegates to qwen like a laptop session), **plus `ctx`** (local agent-history search) and this laptop's synced Claude memory. **General workstation, not repo-locked** — clone anything under `/Users/mtgibbs/dev/`. |
 | `coding-harness-claude-2` | **Second, independent Claude Code instance** — same role/image as `coding-harness-claude`, own `$HOME`/repo-mirror/tmux session, so two windows can drive parallel work without sharing state. Added 2026-07-14. **Provisioned but not activated** — see below. |
+| `coding-harness-codex` | **OpenAI Codex CLI** (`codex` 0.144.6), driving `scripts/ralph-codex.sh`. Also carries opencode/`oc` (delegate down to qwen) and `ctx`. General workstation, same two-mount shape as the claude containers. Added 2026-07-20. **Provisioned but not activated** — needs its one-time login, see below. |
+
+**Why a third executor, and which one to reach for.** The three differ by
+*budget*, not just by model — that's the whole reason codex earns a container:
+
+| | Bills | Use it for |
+|---|---|---|
+| qwen | Nothing (local Beelink) | Bulk mechanical passes; the default first try |
+| claude | The **same Max pool** the laptop session spends | Matt's own remote workstation — NOT a delegation target, since farming out here just moves spend within one pool |
+| codex | A **separate ChatGPT subscription** | The genuine farm-out target: real frontier capability that doesn't contend with the pool the orchestrator is already using |
+
+That distinction is the point. Handing work to `coding-harness-claude` saves no
+budget; handing it to `coding-harness-codex` adds a parallel lane.
+
+**Driving codex — `scripts/ralph-codex.sh`.** Same spec-dir contract
+(`spec.md` / `verify.sh` / `tasks.txt`), same fresh-session-per-attempt, same
+deterministic external gate, same `exit 2` stop-for-a-human as `ralph-qwen.sh`.
+The loop carries the rigor; only the executor swaps. Three deliberate
+differences:
+
+- **No second brief to maintain.** Codex reads `AGENTS.md` natively — the same
+  lean brief qwen already uses.
+- **The codesheet defaults OFF.** Its 20–56% saving was measured on a 30B with
+  a small window; that result is **unmeasured** for codex, which has its own
+  repo navigation and prompt cache. `RALPH_SHEET=on` to A/B it — don't assume
+  the qwen number transfers.
+- **Sandboxing is the container's job, not codex's.** Defaults to
+  `--sandbox danger-full-access`, which is precisely the "externally
+  sandboxed" case codex's own help describes: read-only rootfs, `cap_drop:
+  ALL`, non-root, no socket/kubeconfig/NAS, PR-gated output. Nested
+  landlock+seccomp under `cap_drop: ALL` is unreliable and buys nothing here.
+  **Running it on the laptop instead? There is no outer sandbox — override:**
+  `CODEX_SANDBOX=workspace-write scripts/ralph-codex.sh specs/<feature>`.
 
 **General workstation, not pi-cluster-only:** `coding-harness-claude` mounts
 `/Users/mtgibbs/dev` (not just a scratch dir) specifically so it matches the
@@ -269,14 +303,35 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
     Known gap: `harness sync-ctx` / `push-memory` / `pull-memory` are hardcoded to
     the first `coding-harness-claude` container/volume — they don't touch
     `-2` yet. Not needed until `-2` is actually put to use.
+3b. **`coding-harness-codex` — provisioned but NOT activated.** No new
+    credential is needed in `.env` or 1Password: the ChatGPT login is a
+    one-time interactive step whose tokens land in `~/.codex/auth.json` on the
+    persistent volume, so it survives restarts *and* rebuilds.
+    - `scripts/harness attach codex` → `codex login --device-auth` → open the
+      printed URL on your laptop, paste the code. Verify with
+      `codex login status` / `codex doctor`.
+    - `gh auth login` inside, if you want `gh` there too (git push/pull already
+      works via the shared PAT regardless).
+    - `harness sync-ctx codex` from the laptop, if you want history search here.
+    **Drive the login interactively, not headlessly** — same lesson as the
+    memory-protection dogfood: a `codex exec` in a container with no TTY can't
+    clear an auth prompt and just fails.
 4. MCP tool access for `coding-harness-claude` (reaching `mcp-homelab` etc. the
    way this session does) is **not wired up** — deliberately left as an open
    scoping decision (full parity with this session's tools vs. a more
-   restricted read-mostly set to start) rather than assumed.
-5. `harness sync-ctx` (from the laptop, after deploy) ships the local `ctx`
-   index snapshot into `coding-harness-claude`. Not automatic/scheduled —
-   re-run after the laptop's index has moved on meaningfully. (Memory sync no
-   longer uses rsync — see "Memory protection" below.)
+   restricted read-mostly set to start) rather than assumed. **`codex` has a
+   harder blocker than a scoping decision:** its streamable-HTTP MCP config
+   only supports a bearer token (`--bearer-token-env-var`), while the homelab
+   MCP servers authenticate with an `X-API-Key` header — there's no
+   arbitrary-header option to express it. Fix is either a bearer-auth path on
+   the MCP servers or a small stdio shim; until then codex gets `ctx` (stdio,
+   works fine) and nothing else. Its bundled `oc` still reaches all three.
+5. `harness sync-ctx [claude|codex]` (from the laptop, after deploy) ships the
+   local `ctx` index snapshot into that container — the data is a physical file
+   per volume, not a shared service, so each one needs its own copy. Defaults
+   to `claude`. Not automatic/scheduled — re-run after the laptop's index has
+   moved on meaningfully. (Memory sync no longer uses rsync — see "Memory
+   protection" below.)
 
 **Known gap, not yet built:** egress isn't restricted to just `ai.lab.mtgibbs.dev`
 + `github.com` — the containers can reach the open internet like any other

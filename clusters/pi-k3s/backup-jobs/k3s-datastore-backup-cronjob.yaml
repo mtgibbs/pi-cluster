@@ -1,0 +1,158 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k3s-datastore-backup
+  namespace: backup-jobs
+spec:
+  # Sunday 2:15 AM — inside the weekly backup window, after pvc-backup (2:00)
+  # has started. Each job mkdir -p's its own dated dir, so ordering is not a
+  # hard dependency.
+  schedule: "15 2 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          # The datastore is a local file on the control-plane node only. This
+          # job MUST run there. pi-k3s carries no taint, so a nodeSelector alone
+          # is sufficient — no toleration needed.
+          nodeSelector:
+            kubernetes.io/hostname: pi-k3s
+          # This job never calls the Kubernetes API. Don't hand it a token.
+          automountServiceAccountToken: false
+          securityContext:
+            # Required: /var/lib/rancher/k3s/server is mode 0700 root, so the
+            # process must be uid 0 to traverse into it. The mount is read-only
+            # (see below), so root here cannot modify anything on the host.
+            runAsUser: 0
+            runAsGroup: 0
+          containers:
+            - name: backup
+              image: instrumentisto/rsync-ssh:alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  apk add --no-cache sqlite >/dev/null
+
+                  BACKUP_DATE=$(date +%Y-%m-%d)
+                  NAS_USER="cluster-backup"
+                  NAS_HOST="storage.lab.mtgibbs.dev"
+                  NAS_PATH="/share/cluster/backups"
+                  SSH_KEY="/ssh/id_ed25519"
+                  SRC="/k3s-server"          # read-only host mount of server/
+                  WORK="/work"
+
+                  echo "=== K3s Datastore Backup ==="
+                  echo "Date: ${BACKUP_DATE}"
+                  echo "sqlite: $(sqlite3 --version)"
+                  echo ""
+
+                  # --- 1. Consistent hot snapshot of the live SQLite datastore.
+                  # kine (k3s's default single-server backend) runs SQLite in WAL
+                  # mode. A plain cp of state.db is unsafe — it can capture a torn
+                  # page image and miss committed frames still in the -wal. The
+                  # SQLite Online Backup API (.backup) reads the live database
+                  # under a read transaction and produces a point-in-time
+                  # consistent copy while k3s keeps writing. Verified on this
+                  # cluster that .backup succeeds against the live db even from a
+                  # READ-ONLY mount (k3s maintains the shared-memory wal index; our
+                  # read connection attaches to it), so we never touch the host's
+                  # files. integrity_check = ok, all rows present.
+                  echo "--- snapshotting state.db ---"
+                  sqlite3 "${SRC}/db/state.db" ".timeout 30000" ".backup '${WORK}/state.db'"
+
+                  # --- 2. Fail closed on a bad snapshot. This is a REQUIRED
+                  # target: unlike the multi-target dump jobs, there is no
+                  # soft-skip here. A datastore backup that isn't a valid SQLite
+                  # database is worse than useless, so a non-ok integrity_check
+                  # aborts the job (non-zero exit) and surfaces via BackupJobFailed.
+                  echo "--- verifying snapshot integrity ---"
+                  INTEGRITY=$(sqlite3 "${WORK}/state.db" "PRAGMA integrity_check;")
+                  ROWS=$(sqlite3 "${WORK}/state.db" "SELECT count(*) FROM kine;")
+                  echo "integrity_check: ${INTEGRITY}"
+                  echo "kine rows: ${ROWS}"
+                  if [ "${INTEGRITY}" != "ok" ]; then
+                    echo "FATAL: snapshot failed integrity_check — aborting" >&2
+                    exit 1
+                  fi
+                  gzip -9 "${WORK}/state.db"
+
+                  # --- 3. Capture the small companion material a restore needs.
+                  # state.db holds cluster STATE, but bringing a control-plane node
+                  # back also needs the cluster's identity: the server token and
+                  # the TLS material (cluster CA + service-account signing keys).
+                  # Without these, a restored datastore is orphaned — existing node
+                  # and client certs won't validate. All tiny (<300K combined).
+                  # No NEW secret exposure: state.db already contains every
+                  # Kubernetes Secret in the cluster, so the trust class of this
+                  # backup set is unchanged by adding the CA/token.
+                  echo "--- archiving server identity (token, tls, cred) ---"
+                  tar czf "${WORK}/k3s-server-identity.tar.gz" -C "${SRC}" token tls cred
+
+                  # --- 4. Ship to NAS.
+                  cp "${SSH_KEY}" /tmp/id_ed25519
+                  chmod 600 /tmp/id_ed25519
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}/k3s"
+                  rsync -avz -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
+                    "${WORK}/state.db.gz" "${WORK}/k3s-server-identity.tar.gz" \
+                    "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/${BACKUP_DATE}/k3s/"
+
+                  echo "--- Backup Summary ---"
+                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
+                    ${NAS_USER}@${NAS_HOST} "ls -lh ${NAS_PATH}/${BACKUP_DATE}/k3s/"
+
+                  rm -f /tmp/id_ed25519
+                  echo ""
+                  echo "K3s datastore backup completed successfully!"
+              volumeMounts:
+                - name: k3s-server
+                  mountPath: /k3s-server
+                  readOnly: true
+                - name: ssh-key
+                  mountPath: /ssh
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                # NOTE: readOnlyRootFilesystem is intentionally NOT set. This job
+                # installs sqlite with `apk add` at runtime (same convention as
+                # the postgres/mariadb backup jobs), and apk writes the package
+                # into /usr on the root fs — impossible on a read-only root. The
+                # real hardening here is the read-only hostPath mount (the live
+                # control plane can't be touched), dropped caps, no privilege
+                # escalation, and no service-account token.
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+          volumes:
+            # Read-only mount of the entire k3s server dir. One mount reaches
+            # db/, token, tls/ and cred/; readOnly guarantees the job cannot
+            # perturb the live control plane.
+            - name: k3s-server
+              hostPath:
+                path: /var/lib/rancher/k3s/server
+                type: Directory
+            - name: ssh-key
+              secret:
+                secretName: backup-ssh-key
+                defaultMode: 0400
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

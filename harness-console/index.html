@@ -1,0 +1,375 @@
+<title>Pulse</title>
+<style>
+  :root {
+    --ground: #06070e;
+    --ink: #cdd6ef;
+    --ink-dim: #838cae;
+    --ink-faint: #4e5573;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ground); color: var(--ink); font-family: var(--mono); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  #field { position: fixed; inset: 0; display: block; }
+
+  .hud { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  .masthead { position: absolute; top: clamp(18px, 3.4vw, 40px); left: clamp(18px, 3.4vw, 44px); }
+  .masthead h1 { margin: 0; font-size: clamp(15px, 2.1vw, 24px); font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 22px rgba(180,200,255,0.16); }
+  .masthead p { margin: 0.7em 0 0; font-size: clamp(9.5px, 1vw, 11px); letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); }
+
+  .pulse { position: absolute; top: clamp(18px, 3.4vw, 40px); right: clamp(18px, 3.4vw, 44px); text-align: right; }
+  .pulse .bpm { font-size: clamp(30px, 5vw, 56px); font-weight: 600; line-height: 0.9; font-variant-numeric: tabular-nums; color: #e4eaff; text-shadow: 0 0 26px rgba(150,175,255,0.28); }
+  .pulse .bpm small { font-size: 0.32em; letter-spacing: 0.3em; color: var(--ink-faint); margin-left: 0.5em; }
+  .pulse .sub { margin-top: 0.5em; font-size: clamp(9.5px, 1vw, 11px); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-dim); }
+
+  .legend { position: absolute; left: clamp(18px, 3.4vw, 44px); bottom: clamp(74px, 9vw, 96px); display: flex; flex-direction: column; gap: 14px; }
+  .mind { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 2px; align-items: baseline; min-width: 258px; }
+  .mind .dot { grid-row: 1 / 3; align-self: center; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 8px 1px currentColor; }
+  .mind .name { font-size: 13px; letter-spacing: 0.06em; color: var(--ink); }
+  .mind .name b { font-weight: 600; }
+  .mind .name span { color: var(--ink-faint); font-size: 11px; margin-left: 0.6em; letter-spacing: 0.14em; text-transform: uppercase; }
+  .mind .line { grid-column: 2; font-size: 11px; letter-spacing: 0.02em; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+  .mind .line .ph { text-transform: uppercase; letter-spacing: 0.14em; font-size: 10px; }
+  .mind[data-state="idle"] { opacity: 0.52; }
+
+  .note { position: absolute; right: clamp(18px, 3.4vw, 44px); bottom: clamp(74px, 9vw, 96px); max-width: 33ch; text-align: right; font-size: 10.5px; line-height: 1.7; letter-spacing: 0.05em; color: var(--ink-faint); }
+  .note b { color: var(--ink-dim); font-weight: 600; }
+  body.live .note { display: none; }   /* the "simulated telemetry" note is moot on the live feed */
+
+  .controls { position: absolute; left: 50%; transform: translateX(-50%); bottom: clamp(14px, 2.4vw, 26px); display: flex; align-items: center; gap: 16px; padding: 9px 16px; pointer-events: auto; background: rgba(9,11,20,0.6); border: 1px solid rgba(140,155,200,0.14); border-radius: 999px; backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px); }
+  .auto { font: inherit; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); background: transparent; border: 1px solid rgba(140,155,200,0.22); border-radius: 999px; padding: 6px 13px; cursor: pointer; white-space: nowrap; }
+  .auto.on { color: #bfe9c8; border-color: rgba(120,230,160,0.42); }
+  .livebadge { display: none; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #bfe9c8; padding: 6px 4px; white-space: nowrap; }
+  .controls.live .cgroup, .controls.live .auto { display: none; }
+  .controls.live .livebadge { display: inline; }
+  .cgroup { display: flex; align-items: center; gap: 8px; }
+  .cdot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px 1px currentColor; }
+  .cname { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); min-width: 54px; }
+  .seg { display: flex; border: 1px solid rgba(140,155,200,0.16); border-radius: 7px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); background: transparent; border: 0; padding: 5px 9px; cursor: pointer; transition: color .15s, background .15s; }
+  .seg button:hover { color: var(--ink); }
+  .seg button + button { border-left: 1px solid rgba(140,155,200,0.12); }
+  .auto:focus-visible, .seg button:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
+
+  @media (max-width: 720px) {
+    .note { display: none; }
+    .legend { gap: 10px; bottom: clamp(84px, 22vw, 120px); }
+    .mind { min-width: 0; }
+    .mind .line { max-width: 30ch; }
+  }
+</style>
+
+<canvas id="field"></canvas>
+
+<div class="hud">
+  <div class="masthead">
+    <h1>pulse</h1>
+    <p>a living portrait of the cluster · beelink&nbsp;·&nbsp;pi-k3s</p>
+  </div>
+  <div class="pulse">
+    <div class="bpm"><span id="bpm">—</span><small>BPM</small></div>
+    <div class="sub"><span id="active">0</span> of 4 minds thinking</div>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="note">
+    <b>simulated telemetry</b> — an art-direction preview.<br>
+    next: the live feed from the harness collector, so the atoms move with what the house is actually doing.
+  </div>
+  <div class="controls" id="controls">
+    <button class="auto on" id="autoBtn">● live sim</button>
+    <span class="livebadge" id="livebadge">◉ live feed</span>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById("field");
+  const ctx = cv.getContext("2d", { alpha: false });
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const AGENTS = [
+    { id:"qwen",    name:"qwen",     role:"local · 30B/Q8",  hue:[233,181, 96], anchor:[0.30,0.42],
+      tasks:["T3: arr widgets","T1: pihole custom-dns","T5: backup cronjob","T2: homepage tile"] },
+    { id:"claude",  name:"claude",   role:"opus · orchestr", hue:[104,214,226], anchor:[0.70,0.34],
+      tasks:["orchestrating: coverage gap","review: PR #71","verifying audit finding","spec: k3s snapshot"] },
+    { id:"claude2", name:"claude-2", role:"sonnet · cheap",  hue:[168,142,255], anchor:[0.34,0.66],
+      tasks:["draft: session recap","doc pass: runbook","triage: renovate PRs","summarise: incident"] },
+    { id:"codex",   name:"codex",    role:"gpt · separate",  hue:[255,120,160], anchor:[0.68,0.64],
+      tasks:["audit: backup retention","T2: matrix ingress","scan: RBAC surface","T4: loki compactor"] },
+  ];
+
+  // a fuzzy 3D ball of dust — points from surface to interior, so it reads
+  // volumetric when it spins, not like a hollow shell.
+  function ball(n) {
+    const p = [], GA = 2.399963;
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (i/(n-1))*2, r = Math.sqrt(Math.max(0, 1 - y*y)), th = i*GA;
+      const j = 0.32 + Math.pow(Math.random(), 0.55) * 0.78;   // radius 0.32..1.1, biased outward
+      p.push({ ox: Math.cos(th)*r*j, oy: y*j, oz: Math.sin(th)*r*j, fl: 0.5 + Math.random()*0.5 });
+    }
+    return p;
+  }
+
+  const SPIN = [1, -1, 1, -1];
+  const minds = AGENTS.map((a, i) => ({
+    ...a, spin: SPIN[i],
+    x: 0, y: 0, vx: 0, vy: 0, hx: 0, hy: 0,
+    act: Math.random() < 0.5 ? 0.85 : 0.03, actTarget: 0.03,
+    state: "idle", phase: "idle", task: "", tokens: 0, gust: 0,
+    R: 74, ax: Math.random()*6.28, ay: Math.random()*6.28, seed: Math.random()*100,
+    pts: ball(640),
+  }));
+  let autoMode = true;
+  let liveMode = false;   // true once the collector feed answers — real data then drives
+  const byId = {}; for (const m of minds) byId[m.id] = m;
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W*DPR; cv.height = H*DPR;
+    cv.style.width = W+"px"; cv.style.height = H+"px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    for (const m of minds) {
+      m.hx = m.anchor[0]*W; m.hy = m.anchor[1]*H;
+      if (m.x === 0 && m.y === 0) { m.x = m.hx; m.y = m.hy; }
+    }
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  // ---- legend ----
+  const legendEl = document.getElementById("legend");
+  const rowEls = {};
+  for (const m of minds) {
+    const row = document.createElement("div");
+    row.className = "mind"; row.dataset.state = "idle";
+    row.innerHTML =
+      `<span class="dot" style="color:rgb(${m.hue.join(",")})"></span>` +
+      `<div class="name"><b>${m.name}</b><span>${m.role}</span></div>` +
+      `<div class="line"></div>`;
+    legendEl.appendChild(row);
+    rowEls[m.id] = { row, line: row.querySelector(".line") };
+  }
+
+  // ---- manual controls ----
+  const controlsEl = document.getElementById("controls");
+  const autoBtn = document.getElementById("autoBtn");
+  const segEls = {};
+  const LEVELS = ["rest", "think", "flare"];
+  for (const m of minds) {
+    const g = document.createElement("div"); g.className = "cgroup";
+    g.innerHTML = `<span class="cdot" style="color:rgb(${m.hue.join(",")})"></span><span class="cname">${m.name}</span>`;
+    const seg = document.createElement("div"); seg.className = "seg";
+    segEls[m.id] = {};
+    for (const lvl of LEVELS) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = lvl; b.dataset.lvl = lvl;
+      b.addEventListener("click", () => { setLevel(m, lvl); syncControls(); });
+      seg.appendChild(b); segEls[m.id][lvl] = b;
+    }
+    g.appendChild(seg); controlsEl.appendChild(g);
+  }
+  autoBtn.addEventListener("click", () => {
+    autoMode = !autoMode;
+    if (autoMode) for (const m of minds) m.manualLevel = null;
+    syncControls();
+  });
+  function setLevel(m, lvl) {
+    autoMode = false; m.manualLevel = lvl;
+    if (lvl === "rest") { m.state = "idle"; m.phase = "idle"; m.actTarget = 0.03; }
+    else {
+      m.state = "running"; m.phase = "thinking";
+      if (!m.task) { m.task = m.tasks[(Math.random()*m.tasks.length)|0]; m.idx = 1; m.total = 4; m.attempt = 1; }
+      m.actTarget = lvl === "flare" ? 0.98 : 0.5;
+      if (lvl === "flare") m.gust = 1;
+    }
+  }
+  function levelOf(m) {
+    if (!autoMode && m.manualLevel) return m.manualLevel;
+    if (m.state === "idle") return "rest";
+    return m.act > 0.75 ? "flare" : "think";
+  }
+  function syncControls() {
+    autoBtn.classList.toggle("on", autoMode);
+    autoBtn.textContent = autoMode ? "● live sim" : "○ manual";
+    for (const m of minds) {
+      const cur = levelOf(m);
+      for (const lvl of LEVELS) {
+        const b = segEls[m.id][lvl], on = lvl === cur;
+        b.style.background = on ? `rgb(${m.hue.join(",")})` : "";
+        b.style.color = on ? "#0a0c14" : "";
+        b.style.fontWeight = on ? "600" : "";
+      }
+    }
+  }
+
+  // ---- live feed: poll the collector; fall back to the sim if unreachable ----
+  // Served by the Beelink collector, /api/state is same-origin. Opened stand-
+  // alone (e.g. the artifact), the fetch 404s and we stay on the simulation.
+  function applyLive(data) {
+    for (const a of data.agents || []) {
+      const m = byId[a.id]; if (!m) continue;
+      const prevPhase = m.phase;
+      m.state = a.state || "idle";
+      m.phase = a.phase || (m.state === "idle" ? "idle" : "thinking");
+      m.task = a.task || ""; m.idx = a.task_index || 0; m.total = a.total_tasks || 0;
+      m.attempt = a.attempt || 0; m.total_attempts = a.max_attempts || 0;
+      m.actTarget = (a.activity != null) ? a.activity : (m.state === "idle" ? 0.03 : 0.5);
+      if (m.state !== "idle" && prevPhase !== m.phase) m.gust = Math.min(1, m.gust + 0.5);
+    }
+  }
+  async function poll() {
+    try {
+      const r = await fetch("/api/state", { cache: "no-store" });
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      if (!d || !Array.isArray(d.agents)) throw 0;
+      applyLive(d);
+      if (!liveMode) { liveMode = true; controlsEl.classList.add("live"); document.body.classList.add("live"); }
+    } catch (_) {
+      if (liveMode) { liveMode = false; controlsEl.classList.remove("live"); document.body.classList.remove("live"); }
+    }
+  }
+  poll(); setInterval(poll, 1500);
+
+  // ---- simulation (fallback when there is no live feed) ----
+  const PHASES = ["picking up","thinking","thinking","verifying"];
+  function pickWork(m) {
+    m.state = "running"; m.phase = PHASES[0];
+    m.task = m.tasks[(Math.random()*m.tasks.length)|0];
+    m.attempt = 1; m.total = 3 + ((Math.random()*3)|0); m.idx = 1;
+    m.actTarget = 0.8 + Math.random()*0.2; m.phaseClock = 0; m.phaseFor = 2.2 + Math.random()*2.4;
+  }
+  function stepWork(m, dt) {
+    if (m.state === "idle") {
+      m.actTarget = 0.03;
+      if (Math.random() < dt * (m.id==="qwen"||m.id==="codex" ? 0.09 : 0.05)) pickWork(m);
+      return;
+    }
+    m.tokens += dt * (600 + m.act*5200);
+    m.phaseClock += dt;
+    if (m.phaseClock >= m.phaseFor) {
+      m.phaseClock = 0; m.phaseFor = 1.8 + Math.random()*2.6;
+      if (m.phase === "verifying") {
+        if (Math.random() < 0.72) {
+          m.idx++; m.gust = 1;
+          if (m.idx > m.total) { setTimeout(()=>{ m.state="idle"; m.phase="idle"; m.task=""; }, 20); m.phase="passed ✓"; }
+          else m.phase = "thinking";
+        } else if (m.attempt < 3) { m.attempt++; m.phase = "retry ✗"; m.gust = 0.7; setTimeout(()=>{ if(m.state!=="idle") m.phase="thinking"; }, 20); }
+        else { m.phase = "stopped"; setTimeout(()=>{ m.state="idle"; m.phase="idle"; m.task=""; }, 20); }
+      } else { m.phase = PHASES[Math.min(PHASES.indexOf(m.phase)+1, PHASES.length-1)]; }
+    }
+  }
+
+  // ---- physics: atoms drift home, bond + touch when both are active ----
+  const KHOME = 2.4, KBOND = 4.6, KREP = 7.0, DAMP = 0.85, VMAX = 520;
+  function physics(dt) {
+    for (let i = 0; i < minds.length; i++) {
+      const m = minds[i];
+      let ax = (m.hx - m.x) * KHOME, ay = (m.hy - m.y) * KHOME;
+      for (let j = 0; j < minds.length; j++) {
+        if (j === i) continue;
+        const o = minds[j];
+        const dx = m.x - o.x, dy = m.y - o.y, d = Math.hypot(dx, dy) + 0.01;
+        const ux = dx/d, uy = dy/d, target = m.R + o.R;
+        const bond = m.act * o.act;                 // only two THINKING minds bond
+        if (bond > 0.05) { const f = -KBOND * (d - target) * bond; ax += ux*f; ay += uy*f; }
+        if (d < target * 0.92) { const f = KREP * (target*0.92 - d); ax += ux*f; ay += uy*f; }   // soft core: touch, don't merge
+      }
+      m.vx = (m.vx + ax*dt) * DAMP; m.vy = (m.vy + ay*dt) * DAMP;
+      const v = Math.hypot(m.vx, m.vy); if (v > VMAX) { m.vx = m.vx/v*VMAX; m.vy = m.vy/v*VMAX; }
+    }
+    for (const m of minds) { m.x += m.vx*dt; m.y += m.vy*dt; }
+  }
+
+  let last = performance.now(); const T0 = last;
+  let bpmShown = 0;
+  const col = minds.map(m => `rgb(${m.hue[0]},${m.hue[1]},${m.hue[2]})`);
+
+  function frame(now) {
+    let dt = Math.min((now - last)/1000, 0.05); last = now;
+    const t = (now - T0)/1000;
+    const speed = reduce ? 0.4 : 1;
+
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "rgba(6,7,14,0.22)";
+    ctx.fillRect(0, 0, W, H);
+
+    let houseAct = 0, activeCount = 0;
+    for (const m of minds) {
+      if (liveMode) { /* applyLive() sets state/phase/actTarget from the feed */ }
+      else if (autoMode) stepWork(m, dt*speed);
+      else if (m.state !== "idle") m.tokens += dt*(600 + m.act*5200);
+      m.act += (m.actTarget - m.act) * Math.min(1, dt*1.3);
+      m.gust *= Math.pow(0.12, dt);
+      const idle = m.state === "idle";
+      m.glow = idle ? 0.80 + 0.10*Math.sin(t*0.7 + m.seed) : 1;
+      m.lum = idle ? 0.15*m.glow : 0.20 + m.act*0.62 + m.gust*0.30;
+      houseAct += m.act; if (!idle) activeCount++;
+      // radius breathes with activity; rotation quickens with it
+      const Rt = 60 + m.act*66 + m.gust*24;
+      m.R += (Rt - m.R) * Math.min(1, dt*3);
+      m.ay += dt*speed*(0.18 + m.act*1.7)*m.spin;
+      m.ax += dt*speed*(0.07 + m.act*0.45);
+      m.pulseT = (m.pulseT || 0) + dt*speed*(0.4 + m.act*1.5);
+      if (m.pulseT >= 1) { m.pulseT -= 1; if (m.act > 0.12) m.gust = Math.min(1, m.gust + 0.3*m.act); }
+    }
+    houseAct /= minds.length;
+
+    physics(dt * speed);
+
+    // ---- render each atom as a spinning 3D ball of dust ----
+    ctx.globalCompositeOperation = "lighter";
+    for (let k = 0; k < minds.length; k++) {
+      const m = minds[k];
+      const cY = Math.cos(m.ay), sY = Math.sin(m.ay), cX = Math.cos(m.ax), sX = Math.sin(m.ax);
+      const R = m.R, lum = m.lum, cx = m.x, cy = m.y;
+      ctx.fillStyle = col[k];
+      for (const p of m.pts) {
+        // rotateY then rotateX
+        const x1 = p.ox*cY + p.oz*sY, z1 = -p.ox*sY + p.oz*cY;
+        const y2 = p.oy*cX - z1*sX,   z2 = p.oy*sX + z1*cX;
+        const persp = 1 + z2*0.34;
+        const sx = cx + x1*R*persp, sy = cy + y2*R*persp;
+        const depth = 0.5 + z2*0.5;               // back .. front
+        let a = lum * p.fl * (0.20 + depth*0.80);
+        if (a < 0.014) continue;
+        ctx.globalAlpha = a > 0.9 ? 0.9 : a;
+        ctx.fillRect(sx|0, sy|0, z2 > 0.4 ? 2 : 1, z2 > 0.4 ? 2 : 1);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    if (!frame._hud || now - frame._hud > 120) {
+      frame._hud = now;
+      if (autoMode && !liveMode) syncControls();
+      const target = 46 + houseAct*78;
+      bpmShown += (target - bpmShown) * 0.2;
+      document.getElementById("bpm").textContent = Math.round(bpmShown);
+      document.getElementById("active").textContent = activeCount;
+      for (const m of minds) {
+        const el = rowEls[m.id];
+        el.row.dataset.state = m.state === "idle" ? "idle" : "busy";
+        if (m.state === "idle") {
+          el.line.innerHTML = `<span class="ph" style="color:var(--ink-faint)">idle</span>`;
+        } else {
+          const tok = m.tokens > 1000 ? (m.tokens/1000).toFixed(1)+"k" : Math.round(m.tokens);
+          const meta = liveMode
+            ? `${m.idx}/${m.total} · att ${m.attempt}`
+            : `${m.idx}/${m.total} · att ${m.attempt} · ${tok} tok`;
+          el.line.innerHTML =
+            `<span class="ph" style="color:rgb(${m.hue.join(",")})">${m.phase}</span> ` +
+            `<span style="color:var(--ink-faint)">${meta}</span><br>${m.task}`;
+        }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  pickWork(minds[0]); pickWork(minds[3]);
+  syncControls();
+  requestAnimationFrame(frame);
+})();
+</script>
