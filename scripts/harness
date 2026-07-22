@@ -99,8 +99,14 @@ case "$cmd" in
     # position 2, since they aren't locked to a single clone the way qwen is).
     if [ "$target" = "claude" ] || [ "$target" = "claude2" ] || [ "$target" = "codex" ]; then
       task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="$task_cmd --repo $repo"
+      fi
     else
       task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="$task_cmd --repo $repo"
+      fi
     fi
     # REFUSE to type into a busy pane. send-keys is dumb: it types characters at whatever is
     # attached, and if a previous run is still producing output the keystrokes interleave with
@@ -134,6 +140,9 @@ case "$cmd" in
     done
     if [ "$started" = 1 ]; then
       echo "harness: started (branch $branch, off $base_branch). Watch it with: harness attach $target"
+      if [ -n "$repo" ]; then
+        echo "harness: started (branch $branch, off $base_branch, repo '$repo'). Watch it with: harness attach $target"
+      fi
     else
       echo "harness: sent, but no run-task.sh appeared within 10s — the keystrokes may not have landed." >&2
       echo "         pane tail:" >&2
