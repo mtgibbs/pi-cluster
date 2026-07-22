@@ -93,8 +93,13 @@ else
   fi
 fi
 
-# --- AC2: when supplied, repo goes to position 2 for EVERY agent (qwen included) ---
-if has "--repo"; then
+# --- AC2/AC4 are T3's work. Key them on a T3 marker, NOT on "--repo" being present. ---
+# Bug found 2026-07-22: these were gated on `has "--repo"`, which T1 satisfies the moment it
+# adds the flag parser. So finishing T1 correctly immediately failed the gate for not having
+# done T3, and T1 could never pass — three runs burned against an impossible criterion, and the
+# feedback ("repo is not appended") pushed the executor to do T3's work inside T1, which is
+# exactly what the earlier runs did. A presence-gated check must key on ITS OWN task's output.
+if grep -qE 'task_cmd=.*\$repo' "$F"; then
   # AC2: the flag is APPENDED. A positional form would shift qwen's args — see spec §6.
   grep -qE -- '--repo \$repo"?$|--repo \$repo ' "$F" \
     && ok "--repo appended, positionals unshifted (AC2)" \
@@ -104,11 +109,14 @@ if has "--repo"; then
     || ok "no positional repo form (AC2)"
 fi
 
-# --- AC4: the operator can see which repo was targeted ---
-if has "--repo"; then
-  grep -qE 'echo "harness: sent.*repo|repo.*harness: sent' "$F" \
-    && ok "run echoes the target repo (AC4)" \
-    || no "the 'harness: sent' line does not name the repo (AC4)"
+# --- AC4: the operator can see which repo was targeted (T3) ---
+if grep -qE 'task_cmd=.*\$repo' "$F"; then
+  # Match sent OR started: #90 renamed this message, and a gate that hardcodes a string
+  # another PR is free to change is a two-way-sync failure waiting to happen. Assert the
+  # PROPERTY (the success line names the repo), not the exact wording.
+  grep -qE 'harness: (sent|started).*repo' "$F" \
+    && ok "the run's success line names the target repo (AC4)" \
+    || no "the run's success line does not name the repo (AC4)"
 fi
 
 # --- Safeguard 3: no credential ever appears in this file ---
