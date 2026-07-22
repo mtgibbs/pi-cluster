@@ -57,6 +57,10 @@ case "$cmd" in
   run)
     repo="$(harness_repo_flag "$@")"
     set -- $(harness_strip_repo "$@")
+    if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      echo "harness: invalid repo name '$repo' — must be a bare repository name (letters, numbers, dots, underscores, hyphens only)" >&2
+      exit 1
+    fi
     target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     base_branch="${3:-main}"
