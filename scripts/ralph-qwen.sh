@@ -43,6 +43,13 @@ if [ -f "$(dirname "$0")/ralph-bus.sh" ]; then
 else
   bus_init() { :; }; bus_open() { :; }; bus_say() { :; }
 fi
+# Attempt artefacts. ralph discarded the model's output and then reset the tree, so a stopped
+# loop left nothing to diagnose with. See scripts/ralph-log.sh.
+if [ -f "$(dirname "$0")/ralph-log.sh" ]; then
+  . "$(dirname "$0")/ralph-log.sh"
+else
+  log_init() { :; }; log_path() { printf '/dev/null'; }; log_failure() { :; }; log_where() { :; }
+fi
 
 # Navigation codesheet (repo map + shape-appropriate reference sheet), generated
 # ONCE for the whole loop: byte-stable across every task and retry, so after the
@@ -58,7 +65,7 @@ if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/d
   [ -n "$SHEET" ] && echo "codesheet: injected (~$(( ${#SHEET} / 4 )) tokens, stable for the whole loop)"
 fi
 
-hb_init; hb_write starting
+hb_init; log_init; hb_write starting
 # Keep the heartbeat alive through the long model calls, and make sure it stops when this
 # loop does — a heartbeat that outlives its loop would make a dead agent look busy forever.
 hb_tick_start
@@ -82,7 +89,9 @@ URLs/UIDs. When done, stop.${feedback}"
     # Fresh session each attempt (no -c/--continue) = no context bloat. oc adds the
     # 1Password key + a watchdog timeout so a stalled stream can't hang for hours.
     # OC_SHEET=off: the sheet is already in the prompt (once, loop-stable) above.
-    OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" >/dev/null 2>&1 || true
+    # Keep the transcript. This used to go to /dev/null, which made every STOP undiagnosable.
+    OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" \
+      > "$(log_path "$HB_TIDX" "$attempt")" 2>&1 || true
 
     # The gate: deterministic, external. The model does NOT get to say "done".
     hb_write verifying
@@ -96,6 +105,7 @@ URLs/UIDs. When done, stop.${feedback}"
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
+    log_failure "$HB_TIDX" "$attempt" "$out"   # BEFORE the reset below erases the evidence
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
     feedback="
 A previous attempt FAILED verification with:
@@ -111,6 +121,7 @@ Fix exactly those failures."
   if [ "$passed" != 1 ]; then
     echo "✋ STOP: '$task' failed verify after $((RETRIES + 1)) attempts — needs a human." >&2
     hb_write stopped false
+    log_where
     bus_say "✋ STOP — '${task%%:*}' failed verify after $((RETRIES + 1)) attempts. Needs a human."
     exit 2
   fi
