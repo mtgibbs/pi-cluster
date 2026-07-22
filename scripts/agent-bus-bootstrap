@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# agent-bus-bootstrap — one-time account + room bootstrap for the homelab Matrix bus.
+#
+# Turns a freshly-deployed (Phase 0) Synapse into a usable bus: registers the agent
+# users, logs each in for a long-lived token, creates the #agents/#tasks rooms, joins
+# everyone, and stores every credential in 1Password (the canonical store `scripts/agent-bus`
+# reads from). Implements the "Bootstrap runbook" in docs/agent-bus.md as code.
+#
+# WHERE THIS RUNS: your laptop (or any host with cluster + 1Password access). NOT inside a
+# harness container — registration needs `kubectl exec` into the Synapse pod (the shared
+# secret lives only in-pod, never leaves the cluster) and token storage needs `op`. The
+# harness containers have neither by design.
+#
+# IDEMPOTENT: safe to re-run. Existing users reuse their 1Password password (only the token
+# is refreshed); existing rooms are reused, not duplicated; already-joined is tolerated.
+#
+# Deps: kubectl (context → the pi-k3s cluster), op (1Password CLI, signed in), curl, jq.
+#
+#   ./scripts/agent-bus-bootstrap                 # do it
+#   ./scripts/agent-bus-bootstrap --verify        # just re-check tokens + rooms, mutate nothing
+set -euo pipefail
+
+# --- config (matches clusters/pi-k3s/matrix/*) ------------------------------------------
+NS="matrix"
+DEPLOY="deploy/synapse"
+SECRETS_IN_POD="/synapse/secrets/homeserver-secrets.yaml"
+HS="https://matrix.lab.mtgibbs.dev"          # homeserver base URL (public ingress)
+DOMAIN="matrix.lab.mtgibbs.dev"              # server_name → user/room suffix
+VAULT="pi-cluster"
+CS="$HS/_matrix/client/v3"
+
+# user  admin?   (one Matrix identity per agent + the human admin; see docs/agent-bus.md)
+USERS=(
+  "matt:admin"
+  "laptop-claude:user"
+  "harness-claude:user"
+  "harness-claude-2:user"
+  "qwen:user"
+)
+ROOMS=("agents" "tasks")
+
+VERIFY_ONLY=0; [ "${1:-}" = "--verify" ] && VERIFY_ONLY=1
+
+# --- helpers ----------------------------------------------------------------------------
+# All logging goes to stderr so functions can "return" a value on stdout via $(...)
+# without the log lines being captured into it.
+say()  { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*" >&2; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[31magent-bus-bootstrap: %s\033[0m\n' "$*" >&2; exit 1; }
+uid_of() { printf '@%s:%s' "$1" "$DOMAIN"; }
+op_item() { printf 'agent-bus-%s' "$1"; }
+
+for b in kubectl op curl jq openssl; do command -v "$b" >/dev/null || die "missing dependency: $b"; done
+
+preflight() {
+  say "Preflight"
+  kubectl -n "$NS" get "$DEPLOY" >/dev/null 2>&1 || die "can't see $DEPLOY in ns/$NS — is your kubectl context the pi-k3s cluster?"
+  kubectl -n "$NS" rollout status "$DEPLOY" --timeout=30s >/dev/null 2>&1 || die "synapse not ready — check: kubectl -n $NS get pods"
+  op whoami >/dev/null 2>&1 || die "op not signed in — run: eval \$(op signin)"
+  op vault get "$VAULT" >/dev/null 2>&1 || die "1Password vault '$VAULT' not accessible"
+  local v; v="$(curl -fsS -m 10 "$HS/_matrix/client/versions" | jq -r '.versions[-1]' 2>/dev/null || true)"
+  [ -n "$v" ] || die "homeserver $HS/_matrix/client/versions did not answer"
+  ok "synapse ready in ns/$NS; op signed in; homeserver speaks client API ($v)"
+}
+
+# mint a password: hex only (no shell/JSON quoting hazards through kubectl exec + curl;
+# no pipe → no pipefail/SIGPIPE hazard). 48 hex chars ≈ 192 bits.
+mint_pw() { openssl rand -hex 24; }
+
+# password source of truth = 1Password. Reuse if the item exists, else mint fresh.
+get_or_mint_pw() {
+  local name="$1" item; item="$(op_item "$name")"
+  if op item get "$item" --vault "$VAULT" >/dev/null 2>&1; then
+    op read "op://$VAULT/$item/password" 2>/dev/null || mint_pw
+  else
+    mint_pw
+  fi
+}
+
+# register a user via the in-pod shared secret (idempotent: "already taken" is fine)
+register_user() {
+  local name="$1" admin="$2" pw="$3" flag="--no-admin"
+  [ "$admin" = "admin" ] && flag="--admin"
+  local out rc=0
+  out="$(kubectl -n "$NS" exec -i "$DEPLOY" -- \
+        register_new_matrix_user -c "$SECRETS_IN_POD" -u "$name" -p "$pw" "$flag" \
+        http://localhost:8008 2>&1)" || rc=$?
+  if [ "$rc" = 0 ]; then ok "registered $(uid_of "$name") ($flag)"; return 0; fi
+  case "$out" in
+    *already*taken*|*M_USER_IN_USE*) ok "$(uid_of "$name") already registered (reusing)"; return 0;;
+    *) warn "register $(uid_of "$name") failed: $out"; return 1;;
+  esac
+}
+
+# password-login → long-lived access token (m.login.password by user localpart)
+login_token() {
+  local name="$1" pw="$2" body resp tok
+  body="$(jq -nc --arg u "$name" --arg p "$pw" \
+    '{type:"m.login.password",identifier:{type:"m.id.user",user:$u},password:$p,initial_device_display_name:"agent-bus"}')"
+  resp="$(curl -fsS -X POST -H 'Content-Type: application/json' -d "$body" "$CS/login")" || return 1
+  tok="$(printf '%s' "$resp" | jq -r '.access_token // empty')"
+  [ -n "$tok" ] || return 1
+  printf '%s' "$tok"
+}
+
+# store username/password/token/homeserver in 1Password (create or edit — never duplicate)
+store_creds() {
+  local name="$1" pw="$2" tok="$3" item; item="$(op_item "$name")"
+  if op item get "$item" --vault "$VAULT" >/dev/null 2>&1; then
+    op item edit "$item" --vault "$VAULT" \
+      "username[text]=$(uid_of "$name")" "password[password]=$pw" \
+      "token[password]=$tok" "homeserver[text]=$HS" >/dev/null
+  else
+    op item create --category login --title "$item" --vault "$VAULT" \
+      "username[text]=$(uid_of "$name")" "password[password]=$pw" \
+      "token[password]=$tok" "homeserver[text]=$HS" >/dev/null
+  fi
+  ok "1Password: $item (token refreshed)"
+}
+
+# resolve an existing room alias → room_id, or empty if it doesn't exist yet
+resolve_room() {
+  local alias_enc; alias_enc="$(jq -rn --arg s "#$1:$DOMAIN" '$s|@uri')"
+  curl -fsS -H "Authorization: Bearer $MATT_TOKEN" "$CS/directory/room/$alias_enc" 2>/dev/null \
+    | jq -r '.room_id // empty' 2>/dev/null || true
+}
+
+# create #room (private_chat, NO encryption) inviting every agent; reuse if it exists
+create_room() {
+  local room="$1" rid invites body
+  rid="$(resolve_room "$room")"
+  if [ -n "$rid" ]; then ok "#$room exists ($rid)"; printf '%s' "$rid"; return; fi
+  invites="$(printf '%s\n' "${USERS[@]}" | while IFS=: read -r n _; do [ "$n" = matt ] || uid_of "$n"; done | jq -R . | jq -sc .)"
+  body="$(jq -nc --arg n "$room" --arg a "$room" --argjson inv "$invites" \
+    '{preset:"private_chat",name:$n,room_alias_name:$a,visibility:"private",invite:$inv}')"
+  rid="$(curl -fsS -X POST -H "Authorization: Bearer $MATT_TOKEN" -H 'Content-Type: application/json' \
+        -d "$body" "$CS/createRoom" | jq -r '.room_id')"
+  [ -n "$rid" ] && [ "$rid" != null ] || die "createRoom #$room failed"
+  ok "created #$room ($rid)"
+  printf '%s' "$rid"
+}
+
+# each invited agent joins the room with its own token (already-joined tolerated)
+join_room() {
+  local room_id="$1" name="$2" tok="$3" out rc=0
+  out="$(curl -fsS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+        -d '{}' "$CS/join/$(jq -rn --arg s "$room_id" '$s|@uri')" 2>&1)" || rc=$?
+  if [ "$rc" = 0 ]; then ok "$(uid_of "$name") joined"; return; fi
+  case "$out" in *already*in*room*|*M_FORBIDDEN*) ok "$(uid_of "$name") already in room";; *) warn "join failed for $name: $out";; esac
+}
+
+# --- verify (read-only) -----------------------------------------------------------------
+do_verify() {
+  say "Verify — tokens + room membership"
+  local name tok me
+  for entry in "${USERS[@]}"; do
+    name="${entry%%:*}"
+    tok="$(op read "op://$VAULT/$(op_item "$name")/token" 2>/dev/null || true)"
+    [ -n "$tok" ] || { warn "$name: no token in 1Password"; continue; }
+    me="$(curl -fsS -H "Authorization: Bearer $tok" "$CS/account/whoami" | jq -r '.user_id // empty')"
+    [ "$me" = "$(uid_of "$name")" ] && ok "$name → $me (token valid)" || warn "$name: token invalid or mismatched ($me)"
+  done
+  say "Rooms"
+  MATT_TOKEN="$(op read "op://$VAULT/$(op_item matt)/token")"
+  for room in "${ROOMS[@]}"; do
+    local rid; rid="$(resolve_room "$room")"
+    [ -n "$rid" ] && ok "#$room → $rid" || warn "#$room not found"
+  done
+}
+
+# --- main -------------------------------------------------------------------------------
+preflight
+if [ "$VERIFY_ONLY" = 1 ]; then do_verify; exit 0; fi
+
+declare -A TOKENS
+say "Users — register, login, store"
+for entry in "${USERS[@]}"; do
+  name="${entry%%:*}"; admin="${entry##*:}"
+  pw="$(get_or_mint_pw "$name")"
+  register_user "$name" "$admin" "$pw"
+  tok="$(login_token "$name" "$pw")" || die "login failed for $name (if the user pre-existed with a different password, delete op item $(op_item "$name") and re-run)"
+  store_creds "$name" "$pw" "$tok"
+  TOKENS[$name]="$tok"
+done
+
+MATT_TOKEN="${TOKENS[matt]}"
+say "Rooms — create #agents/#tasks, invite + join everyone"
+declare -A ROOM_IDS
+for room in "${ROOMS[@]}"; do
+  rid="$(create_room "$room")"
+  ROOM_IDS[$room]="$rid"
+  for entry in "${USERS[@]}"; do
+    name="${entry%%:*}"; [ "$name" = matt ] && continue
+    join_room "$rid" "$name" "${TOKENS[$name]}"
+  done
+done
+
+say "1Password — store room ids (agent-bus-rooms)"
+if op item get "agent-bus-rooms" --vault "$VAULT" >/dev/null 2>&1; then
+  op item edit "agent-bus-rooms" --vault "$VAULT" \
+    "agents[text]=${ROOM_IDS[agents]}" "tasks[text]=${ROOM_IDS[tasks]}" "domain[text]=$DOMAIN" >/dev/null
+else
+  op item create --category login --title "agent-bus-rooms" --vault "$VAULT" \
+    "agents[text]=${ROOM_IDS[agents]}" "tasks[text]=${ROOM_IDS[tasks]}" "domain[text]=$DOMAIN" >/dev/null
+fi
+ok "agent-bus-rooms saved"
+
+do_verify
+
+cat <<EOF
+
+==> Bus is live
+Next steps (config-from-outside — NOT this script's job):
+  • Laptop convenience: seed Keychain so scripts/agent-bus needs no op prompt, e.g.
+      security add-generic-password -U -s agent-bus-laptop-claude -a agent-bus -T /usr/bin/security \\
+        -w "\$(op read 'op://$VAULT/agent-bus-laptop-claude/token')"
+  • Harness containers: inject MATRIX_TOKEN + AGENT_BUS_IDENTITY per container via
+    beelink-ansible (the base image config the laptop owns), so harness-claude / qwen
+    can post without op. jq must also be present in each container that runs agent-bus.
+  • Smoke test:  AGENT_BUS_IDENTITY=laptop-claude scripts/agent-bus post agents "bus online"
+                 AGENT_BUS_IDENTITY=matt          scripts/agent-bus read agents
+EOF
