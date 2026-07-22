@@ -16,7 +16,15 @@ F="${F:-scripts/harness}"
 fail=0
 ok(){   echo "  PASS  $1"; }
 no(){   echo "  FAIL  $1" >&2; fail=1; }
-pend(){ echo "  pend  $1 (not built yet)"; }
+# STRICT=1 turns every pend into a failure. Presence-gating verifies "correct if present" and
+# can NEVER verify "done": a run that changed nothing pends every check and passes. That is not
+# hypothetical — a loop reported 3/3 done having written nothing, because the executor died
+# instantly on every attempt and `--repo` never appeared for anything to fail closed on.
+# ralph runs the gate once more with STRICT=1 after the last task, where pending means unbuilt.
+pend(){
+  if [ "${STRICT:-0}" = 1 ]; then no "$1 — still unbuilt at the final check (STRICT)"; else
+    echo "  pend  $1 (not built yet)"; fi
+}
 has(){  grep -q -- "$1" "$F" 2>/dev/null; }
 
 echo "VERIFY specs/harness-multi-repo  ($F)"
