@@ -45,7 +45,7 @@ if has "--repo"; then
   done
   if grep -qE '^[[:space:]]*harness_repo_flag\(\)' "$F" && grep -qE '^[[:space:]]*harness_strip_repo\(\)' "$F"; then
     # Lift both helpers out by brace matching and run them standalone.
-    probe="$(mktemp -t hflag)"
+    probe="$(mktemp "${TMPDIR:-/tmp}/hflag.XXXXXX")"
     awk '/^[[:space:]]*harness_repo_flag\(\)/,/^[[:space:]]*}/' "$F"  >  "$probe"
     awk '/^[[:space:]]*harness_strip_repo\(\)/,/^[[:space:]]*}/' "$F" >> "$probe"
     printf 'case "$1" in flag) shift; harness_repo_flag "$@";; strip) shift; harness_strip_repo "$@";; esac\n' >> "$probe"
