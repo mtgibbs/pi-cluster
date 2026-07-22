@@ -38,6 +38,20 @@ spec:
               value: "/books/metadata.db"
           ports:
             - containerPort: 5299
+          readinessProbe:
+            tcpSocket:
+              port: 5299
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 5299
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           volumeMounts:
             - name: config
               mountPath: /config

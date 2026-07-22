@@ -25,6 +25,20 @@ spec:
               value: America/Chicago
           ports:
             - containerPort: 6767
+          readinessProbe:
+            tcpSocket:
+              port: 6767
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 6767
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
           volumeMounts:
             - name: config
               mountPath: /config
