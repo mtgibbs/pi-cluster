@@ -48,7 +48,7 @@ spec:
           livenessProbe:
             tcpSocket:
               port: 5299
-            initialDelaySeconds: 120
+            initialDelaySeconds: 240
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 6
