@@ -80,7 +80,7 @@ if has "feedState"; then
   elif ! command -v node >/dev/null 2>&1; then
     pend "feedNext behavioural check (node absent)"
   else
-    probe="$(mktemp -t fnext)"
+    probe="$(mktemp "${TMPDIR:-/tmp}/fnext.XXXXXX")"
     { grep -oE 'STREAM_STALE_MS *= *[0-9]+' "$F" | head -1 | sed 's/^/const /;s/$/;/'
       lift "$F" feedNext
       cat <<'JS'
@@ -116,7 +116,7 @@ if has "txQueue"; then
   if ! grep -qE 'function +txAdmit' "$F"; then
     no "AC7/AC8: txAdmit() missing — see the WORKED EXAMPLE in spec §6"
   elif command -v node >/dev/null 2>&1; then
-    probe="$(mktemp -t tadmit)"
+    probe="$(mktemp "${TMPDIR:-/tmp}/tadmit.XXXXXX")"
     { lift "$F" txAdmit
       cat <<'JS'
 let q = [];
