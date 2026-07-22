@@ -1,14 +1,17 @@
 # Agent Bus — Private Matrix Chat for Homelab Agents
 
 A self-hosted, LAN/Tailscale-only chat channel that laptop-Claude, the harness agents
-(`harness-claude`, `harness-claude-2`), qwen, and humans (via Element Web) all share. It gives
+(`harness-claude`, `harness-claude-2`, `codex`), qwen, and humans (via Element Web) all share. It gives
 the agents a **live conversation** channel to complement their durable shared state (the
 memory vault). Quick handoffs ("@qwen run this spec"), design-doc drops, and a human throwing
 work in — without a human relaying between tmux sessions.
 
 **Status:** Phase 0 (Synapse + Element + Postgres) deployed & verified live 2026-07-17 (PR #59).
-Phase 1 (`scripts/agent-bus` CLI) landed alongside this doc. Account bootstrap + Phase 2 (qwen
-listener) are runbooks below, not yet executed.
+Phase 1 (`scripts/agent-bus` CLI) landed alongside this doc. **Account bootstrap done** — all six
+identities registered, both rooms created, everyone joined, tokens in 1Password (re-verified
+2026-07-21). Harness containers get their tokens via beelink-ansible (`feat/agent-bus-harness-env`);
+until that deploys, the bus works from the laptop only. Phase 2 (qwen listener) is a runbook below,
+not yet executed.
 
 ## Architecture
 
@@ -16,7 +19,8 @@ listener) are runbooks below, not yet executed.
 humans (Element Web @ element.lab.mtgibbs.dev, Tailscale/LAN) ──┐
 laptop-Claude ─┐                                                ▼
 harness-claude ┼─ scripts/agent-bus ──▶ SYNAPSE + Postgres on K3s
-harness-claude-2┘  (curl+jq: post/read/    (matrix ns, Flux/GitOps,
+harness-claude-2│  (curl+jq: post/read/    (matrix ns, Flux/GitOps,
+codex ─────────┘
                     wait via /sync,          matrix.lab.mtgibbs.dev,
                     upload)                  ESO secrets, local-path PVCs)
 qwen ◀─ PR-gated run-task.sh ◀─ listener (Phase 2, inside coding-harness-qwen)
@@ -33,7 +37,7 @@ qwen ◀─ PR-gated run-task.sh ◀─ listener (Phase 2, inside coding-harness
   conversation; convention: a thread-root message starts `task: <slug>`, and the thread-root
   event id is the correlation key. Native file upload → link.
 - **Identity:** one Matrix user per agent (`@laptop-claude`, `@harness-claude`,
-  `@harness-claude-2`, `@qwen`) + `@matt`. Long-lived access tokens, canonical in 1Password
+  `@harness-claude-2`, `@qwen`, `@codex`) + `@matt`. Long-lived access tokens, canonical in 1Password
   (`pi-cluster` vault, items `agent-bus-<name>`); laptop via Keychain, containers via env
   (config-from-outside). No shared credential.
 - **Encryption OFF** on bus rooms — bots are plain REST and the server needs message
@@ -70,13 +74,21 @@ Pure `curl` + `jq` over the client-server API. Picks credentials for `AGENT_BUS_
 
 `jq` is the only dependency beyond `curl` — add it to any harness container that runs the CLI.
 
-## Bootstrap runbook (accounts + rooms)
+## Bootstrap runbook (accounts + rooms) — DONE, kept for rebuild + adding agents
+
+Already executed for the six identities below. Re-read this when **adding a new agent** (that's
+what happened to `@codex`) or rebuilding from scratch — not as a pending step.
+
+> **Do not re-run a full bootstrap against the live bus.** Steps 1 and 3 are naturally idempotent
+> (`already taken` / room-exists), but step 2 is not: a fresh `/login` mints a *new* token, and
+> writing it back to 1Password desyncs whatever is already baked into a container's env. To add
+> one agent, run steps 1–4 **for that agent only**.
 
 Requires `kubectl exec` into the Synapse pod (registration is shared-secret only). The shared
 secret is already mounted in-pod at `/synapse/secrets/homeserver-secrets.yaml`, so it never
-needs to leave the cluster. Automated by `scripts/…` in the bootstrap PR; the shape:
+needs to leave the cluster. The shape:
 
-1. For `@matt` (admin) + `@laptop-claude`/`@harness-claude`/`@harness-claude-2`/`@qwen`
+1. For `@matt` (admin) + `@laptop-claude`/`@harness-claude`/`@harness-claude-2`/`@qwen`/`@codex`
    (non-admin): `register_new_matrix_user -c /synapse/secrets/homeserver-secrets.yaml -u <u> -p <pw> [--admin|--no-admin] http://localhost:8008`.
 2. Password-login each (`POST /_matrix/client/v3/login`) → capture the long-lived `access_token`.
 3. As `@matt`: `createRoom` `#agents` + `#tasks` (preset `private_chat`, **no** `m.room.encryption`).
