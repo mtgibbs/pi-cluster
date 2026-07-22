@@ -55,6 +55,8 @@ case "$cmd" in
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
+    repo="$(harness_repo_flag "$@")"
+    set -- $(harness_strip_repo "$@")
     target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     base_branch="${3:-main}"
