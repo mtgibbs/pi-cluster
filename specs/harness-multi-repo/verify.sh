@@ -23,44 +23,38 @@ echo "VERIFY specs/harness-multi-repo  ($F)"
 [ -f "$F" ] || { echo "  FAIL  $F missing" >&2; exit 1; }
 bash -n "$F" 2>/dev/null && ok "harness parses" || no "harness has a syntax error"
 
-# --- T1: optional flag, order-independent (AC5) — BEHAVIOURAL, not a grep ---
-# A grep can only see the SHAPE of a parser. "Order must not matter" is behaviour, and the
-# first version of this check asked only "is there a loop over $@?" -- which
-# `while [[ $# -gt 0 ]] ... *) break` satisfies while being a LEADING-ONLY parser. An
-# executor shipped exactly that, the gate passed it, and a human caught it in review
-# (pi-cluster#86). So: extract the flag-parsing block and actually run it.
-#
-# Extraction is deliberately fault-tolerant. If the block can't be isolated the check PENDs
-# rather than fails -- a brittle gate that cries wolf gets ignored, which is worse than a
-# gate with a known blind spot you have written down.
+# --- T1/AC5: EXECUTE the flag helpers. Extract BY NAME, never by position. ---
+# The previous version of this check sliced from `run)` to the first `target=` line. An executor
+# then put its parsing AFTER `target=`, the slice came back empty, the check PENDed, and a
+# parser that never set `repo` at all was reported as passing. Two lessons, both encoded here:
+#   1. Extract by function NAME so placement cannot silently disable the check.
+#   2. FAIL CLOSED. Once --repo appears in the file, a missing helper is a failure, not a pend —
+#      "I could not test this" must never read the same as "this is fine".
 if has "--repo"; then
-  ok "--repo flag present"
-  blk="$(sed -n '/^  run)/,/target="\${1/p' "$F" 2>/dev/null | sed '1d;$d')"
-  if [ -z "$blk" ] || ! printf '%s' "$blk" | grep -q -- '--repo'; then
-    pend "AC5 behavioural check (could not isolate the run) flag block)"
-  else
-    probe="$(mktemp -t hprobe)"
-    { printf '%s\n' "$blk"
-      printf 'printf "repo=%%s target=%%s spec=%%s base=%%s\\n" "${repo:-}" "${1:-}" "${2:-}" "${3:-main}"\n'
-    } > "$probe"
-    r_none="$(bash "$probe" qwen specs/foo 2>/dev/null | tail -1)"
-    r_lead="$(bash "$probe" --repo beelink-ansible qwen specs/foo 2>/dev/null | tail -1)"
-    r_tail="$(bash "$probe" qwen specs/foo --repo beelink-ansible 2>/dev/null | tail -1)"
+  ok "--repo handled"
+  for fn in harness_repo_flag harness_strip_repo; do
+    grep -qE "^[[:space:]]*$fn\\(\\)" "$F" || no "AC5: $fn() missing — see the WORKED EXAMPLE in spec §6"
+  done
+  if grep -qE '^[[:space:]]*harness_repo_flag\(\)' "$F" && grep -qE '^[[:space:]]*harness_strip_repo\(\)' "$F"; then
+    # Lift both helpers out by brace matching and run them standalone.
+    probe="$(mktemp -t hflag)"
+    awk '/^[[:space:]]*harness_repo_flag\(\)/,/^[[:space:]]*}/' "$F"  >  "$probe"
+    awk '/^[[:space:]]*harness_strip_repo\(\)/,/^[[:space:]]*}/' "$F" >> "$probe"
+    printf 'case "$1" in flag) shift; harness_repo_flag "$@";; strip) shift; harness_strip_repo "$@";; esac\n' >> "$probe"
+
+    r0="$(bash "$probe" flag qwen specs/foo 2>/dev/null)"
+    r1="$(bash "$probe" flag --repo beelink-ansible qwen specs/foo 2>/dev/null)"
+    r2="$(bash "$probe" flag qwen specs/foo --repo beelink-ansible 2>/dev/null)"
+    r3="$(bash "$probe" flag qwen specs/foo --repo=beelink-ansible 2>/dev/null)"
+    st="$(bash "$probe" strip qwen specs/foo --repo beelink-ansible 2>/dev/null | tr '\n' ' ')"
     rm -f "$probe"
 
-    case "$r_none" in
-      "repo= target=qwen spec=specs/foo base=main") ok "AC1: no flag leaves positionals untouched" ;;
-      *) no "AC1: no-flag parse changed the positionals -> $r_none" ;;
-    esac
-    case "$r_lead" in
-      "repo=beelink-ansible target=qwen spec=specs/foo base=main") ok "AC5: --repo works LEADING" ;;
-      *) no "AC5: leading --repo did not parse -> $r_lead" ;;
-    esac
-    # The one that matters: beelink-ansible's run-task.sh expects harness to APPEND the flag.
-    case "$r_tail" in
-      "repo=beelink-ansible target=qwen spec=specs/foo base=main") ok "AC5: --repo works APPENDED" ;;
-      *) no "AC5: appended --repo did not parse -> $r_tail  (a parser that breaks on the first non-flag argument is leading-only)" ;;
-    esac
+    [ -z "$r0" ] && ok "AC1: no flag yields no repo" || no "AC1: repo set to '$r0' with no flag present"
+    [ "$r1" = beelink-ansible ] && ok "AC5: --repo works LEADING"  || no "AC5: leading --repo gave '$r1'"
+    [ "$r2" = beelink-ansible ] && ok "AC5: --repo works APPENDED" || no "AC5: appended --repo gave '$r2' (a parser that stops at the first non-flag argument is leading-only)"
+    [ "$r3" = beelink-ansible ] && ok "AC5: --repo=value form works" || no "AC5: --repo=value gave '$r3'"
+    [ "$st" = "qwen specs/foo " ] && ok "AC2: stripping leaves the positionals intact" \
+      || no "AC2: stripped args were '$st', expected 'qwen specs/foo '"
   fi
 else pend "--repo flag"; fi
 
