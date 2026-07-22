@@ -172,6 +172,19 @@ silently. A sequencing hazard you can delete beats one you document.
 
 See `tasks.txt` — three tasks, all in `scripts/harness`.
 
+**Task ownership, stated as prohibitions.** A literal executor reads this whole spec and
+implements everything it can see; positive instructions alone do not bound it. Evidence: an
+executor copied §6's helpers correctly, then also rewrote `task_cmd` during T1 — using the
+positional form §6 explicitly rejects — and failed the gate for work it was not asked to do.
+
+| line in `scripts/harness` | owned by | forbidden to |
+|---|---|---|
+| the two helper functions | T1 | T2, T3 |
+| `repo=` / `set --` call site, above `target=` | T1 | T2, T3 |
+| the `^[A-Za-z0-9._-]+$` rejection | T2 | T1, T3 |
+| both `task_cmd=` assignments | T3 | T1, T2 |
+| the run's success `echo` line | T3 | T1, T2 |
+
 Companion tasks in `beelink-ansible` (separate spec, must deploy first):
 - qwen's `run-task.sh` adopts the 4-arg signature `<spec> [repo] [branch] [base]`.
 - All four `run-task.sh` clone `$BASE` on demand when it is not a git clone, using
