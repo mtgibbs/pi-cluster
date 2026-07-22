@@ -47,6 +47,11 @@ USERS=(
   "harness-claude-2:user"
   "qwen:user"
   "codex:user"
+  # Not an executor -- the pulse dashboard's collector, which only ever READS the bus
+  # (/sync long-poll) to animate who-talked-to-whom. Same one-identity-per-role rule as
+  # the agents: it gets its own, so a message from an agent is never confusable with the
+  # observer watching them.
+  "pulse:user"
 )
 ROOMS=("agents" "tasks")
 
@@ -187,6 +192,17 @@ store_creds() {
   ok "1Password: $item (token refreshed)"
 }
 
+# who is already in the room — fetched ONCE per room so the converged case costs one
+# request instead of two per agent. That isn't just tidiness: Synapse rate-limits, and
+# blindly re-inviting everyone on every run earns a 429 that lands on whichever agent is
+# unlucky. Seen for real 2026-07-22 adding @pulse — the storm from five redundant invites
+# got it throttled out of #tasks, so it joined one room and silently missed the other.
+room_members() {
+  curl -fsS -m 15 -H "Authorization: Bearer $MATT_TOKEN" \
+    "$CS/rooms/$(jq -rn --arg s "$1" '$s|@uri')/joined_members" 2>/dev/null \
+    | jq -r '.joined // {} | keys[]' 2>/dev/null || true
+}
+
 # resolve an existing room alias → room_id, or empty if it doesn't exist yet
 resolve_room() {
   local alias_enc; alias_enc="$(jq -rn --arg s "#$1:$DOMAIN" '$s|@uri')"
@@ -292,8 +308,13 @@ say "Rooms — create #agents/#tasks, invite + join everyone"
 for room in "${ROOMS[@]}"; do
   rid="$(create_room "$room")"
   room_set "$room" "$rid"
+  members="$(room_members "$rid")"
   for entry in "${USERS[@]}"; do
     name="${entry%%:*}"; [ "$name" = matt ] && continue
+    if printf '%s\n' "$members" | grep -qxF "$(uid_of "$name")"; then
+      ok "$(uid_of "$name") already in #$room"
+      continue
+    fi
     invite_room "$rid" "$name"
     join_room "$rid" "$name" "$(tok_get "$name")"
   done
