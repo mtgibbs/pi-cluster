@@ -83,6 +83,52 @@ fi
 - `branch` is generated laptop-side on purpose so every positional argument is a plain token —
   it sidesteps nested quoting through `ssh` + `tmux send-keys`. Keep that property.
 
+### WORKED EXAMPLE — copy this shape
+
+Two executors have now written a `--repo` parser here and **both were wrong**: one worked only
+when the flag came first; the other never set `repo` at all and placed its parsing after
+`target=`, where the criterion could not even be checked. Prose was not enough, so the shape is
+given.
+
+Write these two functions. They read **only their arguments**, so the gate can lift them out and
+run them wherever in the file you put them:
+
+```sh
+# prints the --repo value, or nothing when the flag is absent
+harness_repo_flag() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   printf '%s' "${2:-}"; return 0 ;;
+      --repo=*) printf '%s' "${1#--repo=}"; return 0 ;;
+      *)        shift ;;
+    esac
+  done
+}
+
+# prints the arguments with any --repo pair removed, one per line
+harness_strip_repo() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   shift 2 || shift ;;
+      --repo=*) shift ;;
+      *)        printf '%s\n' "$1"; shift ;;
+    esac
+  done
+}
+```
+
+Use them like this, before `target=` and `spec=` are assigned:
+
+```sh
+repo="$(harness_repo_flag "$@")"
+set -- $(harness_strip_repo "$@")
+```
+
+The unquoted `$(...)` is deliberate, not an oversight. Every positional this script handles is a
+plain token with no spaces — it has to survive `ssh` + `tmux send-keys` (see Norms) — so word
+splitting is exactly the behaviour wanted. Do **not** "fix" it by quoting; that collapses every
+argument into one.
+
 ### Why `--repo` is APPENDED as a flag, not passed as positional 2
 
 The first draft of this spec said "pass repo in position 2 for every agent". That is wrong, and
