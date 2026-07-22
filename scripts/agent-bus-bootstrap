@@ -11,13 +11,23 @@
 # secret lives only in-pod, never leaves the cluster) and token storage needs `op`. The
 # harness containers have neither by design.
 #
-# IDEMPOTENT: safe to re-run. Existing users reuse their 1Password password (only the token
-# is refreshed); existing rooms are reused, not duplicated; already-joined is tolerated.
+# WHAT THIS IS FOR NOW: the bus is already bootstrapped (2026-07-17). Reach for this to
+# rebuild from scratch, or to ADD AN AGENT — put the new identity in USERS below and re-run;
+# everyone who already exists is left alone. It is not a pending step.
+#
+# IDEMPOTENT, INCLUDING THE TOKENS. Existing users keep their 1Password password AND their
+# existing access token: if the stored token still passes /account/whoami, it is reused, not
+# reissued. That distinction is the whole safety property. A fresh /login does NOT invalidate
+# the old token — it mints a SECOND one — so blindly re-logging in would overwrite 1Password
+# with a token that the containers, whose env was populated at deploy time, know nothing
+# about. The bus would keep working right up until something re-read 1Password, and then
+# quietly not. Use --rotate when you actually want new tokens.
 #
 # Deps: kubectl (context → the pi-k3s cluster), op (1Password CLI, signed in), curl, jq.
 #
-#   ./scripts/agent-bus-bootstrap                 # do it
+#   ./scripts/agent-bus-bootstrap                 # converge (safe on a live bus)
 #   ./scripts/agent-bus-bootstrap --verify        # just re-check tokens + rooms, mutate nothing
+#   ./scripts/agent-bus-bootstrap --rotate        # force new tokens for everyone (see above)
 set -euo pipefail
 
 # --- config (matches clusters/pi-k3s/matrix/*) ------------------------------------------
@@ -36,10 +46,17 @@ USERS=(
   "harness-claude:user"
   "harness-claude-2:user"
   "qwen:user"
+  "codex:user"
 )
 ROOMS=("agents" "tasks")
 
-VERIFY_ONLY=0; [ "${1:-}" = "--verify" ] && VERIFY_ONLY=1
+VERIFY_ONLY=0; ROTATE=0
+case "${1:-}" in
+  --verify) VERIFY_ONLY=1 ;;
+  --rotate) ROTATE=1 ;;
+  "") ;;
+  *) printf 'usage: %s [--verify|--rotate]\n' "$0" >&2; exit 2 ;;
+esac
 
 # --- helpers ----------------------------------------------------------------------------
 # All logging goes to stderr so functions can "return" a value on stdout via $(...)
@@ -53,12 +70,50 @@ op_item() { printf 'agent-bus-%s' "$1"; }
 
 for b in kubectl op curl jq openssl; do command -v "$b" >/dev/null || die "missing dependency: $b"; done
 
+# Parallel indexed arrays, NOT `declare -A`. macOS ships bash 3.2, which has no associative
+# arrays — `declare -A` is a hard syntax error there ("invalid option"), and the laptop is
+# exactly where this script's header says to run it. The original main path died on that
+# line every time; --verify appeared to work only because it exits before reaching it.
+# Indexed arrays and ${!arr[@]} are fine in 3.2, so this stays portable without a bash5 dep.
+TOK_NAMES=(); TOK_VALS=()
+tok_set() { TOK_NAMES[${#TOK_NAMES[@]}]="$1"; TOK_VALS[${#TOK_VALS[@]}]="$2"; }
+tok_get() {
+  local i
+  for i in $(seq 0 $(( ${#TOK_NAMES[@]} - 1 )) ); do
+    [ "${TOK_NAMES[$i]}" = "$1" ] && { printf '%s' "${TOK_VALS[$i]}"; return 0; }
+  done
+  return 1
+}
+
+ROOM_NAMES=(); ROOM_VALS=()
+room_set() { ROOM_NAMES[${#ROOM_NAMES[@]}]="$1"; ROOM_VALS[${#ROOM_VALS[@]}]="$2"; }
+room_get() {
+  local i
+  for i in $(seq 0 $(( ${#ROOM_NAMES[@]} - 1 )) ); do
+    [ "${ROOM_NAMES[$i]}" = "$1" ] && { printf '%s' "${ROOM_VALS[$i]}"; return 0; }
+  done
+  return 1
+}
+
 preflight() {
   say "Preflight"
   kubectl -n "$NS" get "$DEPLOY" >/dev/null 2>&1 || die "can't see $DEPLOY in ns/$NS — is your kubectl context the pi-k3s cluster?"
   kubectl -n "$NS" rollout status "$DEPLOY" --timeout=30s >/dev/null 2>&1 || die "synapse not ready — check: kubectl -n $NS get pods"
-  op whoami >/dev/null 2>&1 || die "op not signed in — run: eval \$(op signin)"
-  op vault get "$VAULT" >/dev/null 2>&1 || die "1Password vault '$VAULT' not accessible"
+  # Probe op with the operation this script actually uses, and only warn.
+  #
+  # `op whoami` and `op vault get` both need an account-level session. The laptop this runs
+  # on does not have one — its op resolves secret references through the desktop app, where
+  # `op read` succeeds while BOTH of those fail. Gating on them refuses to run on a working
+  # setup: verified 2026-07-21, whoami and vault-get failing while `op read` returned the
+  # token fine. Reading matt's token proves the path end to end; falling back to vault-get
+  # covers a genuine first bootstrap, where that item does not exist yet.
+  #
+  # A failed probe is a warning, not a stop: every read below dies loudly and actionably on
+  # its own, and refusing to start on a false negative is the worse failure.
+  if ! op read "op://$VAULT/$(op_item matt)/token" >/dev/null 2>&1 \
+     && ! op vault get "$VAULT" >/dev/null 2>&1; then
+    warn "1Password did not answer a test read — continuing; if it's locked, the first read below will say so"
+  fi
   local v; v="$(curl -fsS -m 10 "$HS/_matrix/client/versions" | jq -r '.versions[-1]' 2>/dev/null || true)"
   [ -n "$v" ] || die "homeserver $HS/_matrix/client/versions did not answer"
   ok "synapse ready in ns/$NS; op signed in; homeserver speaks client API ($v)"
@@ -91,6 +146,19 @@ register_user() {
     *already*taken*|*M_USER_IN_USE*) ok "$(uid_of "$name") already registered (reusing)"; return 0;;
     *) warn "register $(uid_of "$name") failed: $out"; return 1;;
   esac
+}
+
+# A stored token that still authenticates IS the right token — hand it back and skip the
+# login entirely. This is what makes the script safe to run against a live bus: see the
+# header for why re-issuing would silently desync the harness containers.
+existing_token() {
+  local name="$1" tok me
+  tok="$(op read "op://$VAULT/$(op_item "$name")/token" 2>/dev/null)" || return 1
+  [ -n "$tok" ] || return 1
+  me="$(curl -fsS -m 10 -H "Authorization: Bearer $tok" "$CS/account/whoami" 2>/dev/null \
+        | jq -r '.user_id // empty')" || return 1
+  [ "$me" = "$(uid_of "$name")" ] || return 1
+  printf '%s' "$tok"
 }
 
 # password-login → long-lived access token (m.login.password by user localpart)
@@ -141,13 +209,38 @@ create_room() {
   printf '%s' "$rid"
 }
 
+# Invite an agent to an EXISTING room, as matt. Only createRoom carries an invite list, so
+# an agent added to USERS after the rooms exist is never invited by that path — and these
+# rooms are preset:private_chat, where an uninvited join is refused. Hit for real adding
+# @codex on 2026-07-21. Already-in-room is the expected no-op here, not an error.
+invite_room() {
+  local room_id="$1" name="$2" out
+  # NOTE: no -f. Matrix answers an already-a-member invite with 403 + a JSON body naming the
+  # reason, and curl's -f throws the body away — leaving only "error: 403" to pattern-match,
+  # which turns the single most common case into unreadable noise on every run.
+  out="$(curl -sS -X POST -H "Authorization: Bearer $MATT_TOKEN" -H 'Content-Type: application/json' \
+        -d "$(jq -nc --arg u "$(uid_of "$name")" '{user_id:$u}')" \
+        "$CS/rooms/$(jq -rn --arg s "$room_id" '$s|@uri')/invite" 2>&1)"
+  case "$out" in
+    *already*in*the*room*|*already*joined*) return 0;;  # expected no-op, stay quiet
+    *errcode*) warn "invite $name: $(printf '%s' "$out" | jq -r '.error // .' 2>/dev/null)";;
+  esac
+  return 0
+}
+
 # each invited agent joins the room with its own token (already-joined tolerated)
 join_room() {
   local room_id="$1" name="$2" tok="$3" out rc=0
   out="$(curl -fsS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
         -d '{}' "$CS/join/$(jq -rn --arg s "$room_id" '$s|@uri')" 2>&1)" || rc=$?
   if [ "$rc" = 0 ]; then ok "$(uid_of "$name") joined"; return; fi
-  case "$out" in *already*in*room*|*M_FORBIDDEN*) ok "$(uid_of "$name") already in room";; *) warn "join failed for $name: $out";; esac
+  # M_FORBIDDEN is deliberately NOT treated as success. On a private_chat room it means
+  # "not invited" at least as often as it means "already here", and swallowing it turns a
+  # genuinely-not-in-the-room agent into a green line.
+  case "$out" in
+    *already*in*room*) ok "$(uid_of "$name") already in room";;
+    *) warn "join failed for $name: $out";;
+  esac
 }
 
 # --- verify (read-only) -----------------------------------------------------------------
@@ -173,36 +266,46 @@ do_verify() {
 preflight
 if [ "$VERIFY_ONLY" = 1 ]; then do_verify; exit 0; fi
 
-declare -A TOKENS
 say "Users — register, login, store"
 for entry in "${USERS[@]}"; do
   name="${entry%%:*}"; admin="${entry##*:}"
+
+  # Working token already on file → reuse it and touch nothing. This is the branch that
+  # makes a re-run against the live bus a no-op instead of a silent credential rotation.
+  if [ "$ROTATE" = 0 ] && tok="$(existing_token "$name")"; then
+    ok "$(uid_of "$name") token still valid (reused, NOT reissued)"
+    tok_set "$name" "$tok"
+    continue
+  fi
+
   pw="$(get_or_mint_pw "$name")"
   register_user "$name" "$admin" "$pw"
   tok="$(login_token "$name" "$pw")" || die "login failed for $name (if the user pre-existed with a different password, delete op item $(op_item "$name") and re-run)"
   store_creds "$name" "$pw" "$tok"
-  TOKENS[$name]="$tok"
+  tok_set "$name" "$tok"
 done
 
-MATT_TOKEN="${TOKENS[matt]}"
+[ "$ROTATE" = 1 ] && warn "--rotate: every token was reissued. Anything holding an old one (harness container env — see beelink-ansible 50-ai-stack.yml) must be redeployed."
+
+MATT_TOKEN="$(tok_get matt)"
 say "Rooms — create #agents/#tasks, invite + join everyone"
-declare -A ROOM_IDS
 for room in "${ROOMS[@]}"; do
   rid="$(create_room "$room")"
-  ROOM_IDS[$room]="$rid"
+  room_set "$room" "$rid"
   for entry in "${USERS[@]}"; do
     name="${entry%%:*}"; [ "$name" = matt ] && continue
-    join_room "$rid" "$name" "${TOKENS[$name]}"
+    invite_room "$rid" "$name"
+    join_room "$rid" "$name" "$(tok_get "$name")"
   done
 done
 
 say "1Password — store room ids (agent-bus-rooms)"
 if op item get "agent-bus-rooms" --vault "$VAULT" >/dev/null 2>&1; then
   op item edit "agent-bus-rooms" --vault "$VAULT" \
-    "agents[text]=${ROOM_IDS[agents]}" "tasks[text]=${ROOM_IDS[tasks]}" "domain[text]=$DOMAIN" >/dev/null
+    "agents[text]=$(room_get agents)" "tasks[text]=$(room_get tasks)" "domain[text]=$DOMAIN" >/dev/null
 else
   op item create --category login --title "agent-bus-rooms" --vault "$VAULT" \
-    "agents[text]=${ROOM_IDS[agents]}" "tasks[text]=${ROOM_IDS[tasks]}" "domain[text]=$DOMAIN" >/dev/null
+    "agents[text]=$(room_get agents)" "tasks[text]=$(room_get tasks)" "domain[text]=$DOMAIN" >/dev/null
 fi
 ok "agent-bus-rooms saved"
 
@@ -210,14 +313,16 @@ do_verify
 
 cat <<EOF
 
-==> Bus is live
-Next steps (config-from-outside — NOT this script's job):
+==> Bus converged
+If you just ADDED an agent, it has an identity but nothing to speak with yet — the token
+has to reach wherever that agent runs. Both of these are already wired for the four
+harness containers (beelink-ansible 50-ai-stack.yml); a NEW one needs the same treatment:
+  • Harness containers: MATRIX_TOKEN + AGENT_BUS_IDENTITY per container, plus jq in the
+    image. Config-from-outside — this script cannot do it, and the container has no op.
+    Redeploy the ai-stack after adding the extra-var.
   • Laptop convenience: seed Keychain so scripts/agent-bus needs no op prompt, e.g.
       security add-generic-password -U -s agent-bus-laptop-claude -a agent-bus -T /usr/bin/security \\
         -w "\$(op read 'op://$VAULT/agent-bus-laptop-claude/token')"
-  • Harness containers: inject MATRIX_TOKEN + AGENT_BUS_IDENTITY per container via
-    beelink-ansible (the base image config the laptop owns), so harness-claude / qwen
-    can post without op. jq must also be present in each container that runs agent-bus.
   • Smoke test:  AGENT_BUS_IDENTITY=laptop-claude scripts/agent-bus post agents "bus online"
                  AGENT_BUS_IDENTITY=matt          scripts/agent-bus read agents
 EOF
