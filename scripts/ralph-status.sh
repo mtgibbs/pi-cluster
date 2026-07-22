@@ -62,3 +62,42 @@ hb_write() {
       "$phase" "$verify" "$(_hb_esc "$commit")" "${HB_STARTED:-0}" "$now"
   } > "$HB_FILE.tmp" 2>/dev/null && mv -f "$HB_FILE.tmp" "$HB_FILE" 2>/dev/null || true
 }
+
+# --- keep-alive ticker -------------------------------------------------------------------
+# hb_write only fires at TRANSITIONS: task start, attempt start, verify, pass/fail. Between
+# them sits a single model call bounded at OC_RUN_TIMEOUT (480s by default). So the file went
+# untouched for up to eight minutes while the agent was working hardest, the collector's
+# 120s staleness rule marked it dead, and pulse drew a resting atom. Watched a real run against
+# the live board on 2026-07-22 and the house looked asleep the entire time.
+#
+# The ticker refreshes only the `updated` field, re-reading the file each pass, so it always
+# carries whatever phase hb_write last wrote — no stale copy of the loop's variables.
+#
+# It MUST die with the loop. If a killed loop kept its heartbeat fresh, "stale means dead" —
+# the collector's only liveness signal — would stop meaning anything, and a crashed agent would
+# glow on the board forever. Hence the kill -0 check on the parent, plus hb_tick_stop on exit.
+hb_tick_stop() {
+  # `wait` inside the redirected block swallows the shell's own "Terminated: 15" job-control
+  # notice, which otherwise prints on every clean exit and looks like a crash in the tmux log.
+  if [ -n "${HB_TICKER:-}" ]; then
+    { kill "$HB_TICKER" 2>/dev/null; wait "$HB_TICKER" 2>/dev/null; } 2>/dev/null || true
+  fi
+  HB_TICKER=""
+}
+
+hb_tick_start() {
+  [ -n "${HB_FILE:-}" ] || return 0
+  hb_tick_stop
+  (
+    parent=$$
+    while kill -0 "$parent" 2>/dev/null; do
+      sleep "${HB_TICK_SEC:-20}"
+      kill -0 "$parent" 2>/dev/null || break
+      [ -f "$HB_FILE" ] || continue
+      now="$(date +%s 2>/dev/null || echo 0)"
+      sed "s/\"updated\":[0-9]*/\"updated\":$now/" "$HB_FILE" > "$HB_FILE.tick" 2>/dev/null \
+        && mv -f "$HB_FILE.tick" "$HB_FILE" 2>/dev/null
+    done
+  ) &
+  HB_TICKER=$!
+}

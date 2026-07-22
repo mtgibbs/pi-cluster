@@ -34,7 +34,7 @@ RALPH_AGENT="${RALPH_AGENT:-codex}"
 if [ -f "$(dirname "$0")/ralph-status.sh" ]; then
   . "$(dirname "$0")/ralph-status.sh"
 else
-  hb_init() { :; }; hb_write() { :; }
+  hb_init() { :; }; hb_write() { :; }; hb_tick_start() { :; }; hb_tick_stop() { :; }
 fi
 
 # Matrix bus narration — the discrete-event companion to the heartbeat's continuous
@@ -86,6 +86,10 @@ run_codex() {
 }
 
 hb_init; hb_write starting
+# Keep the heartbeat alive through the long model calls, and make sure it stops when this
+# loop does — a heartbeat that outlives its loop would make a dead agent look busy forever.
+hb_tick_start
+trap 'hb_tick_stop' EXIT INT TERM
 bus_init; bus_open "$(basename "$SPEC_DIR")"
 
 while IFS= read -r task || [ -n "$task" ]; do
