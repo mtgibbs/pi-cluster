@@ -49,7 +49,11 @@ if [ -z "$TOKEN" ]; then TOKEN="$(op read "op://pi-cluster/agent-bus-$IDENTITY/t
 CS="$HS/_matrix/client/v3"
 api() {  # api METHOD PATH [json-body]
   local m="$1" p="$2" body="${3:-}"
-  local args=(-sS -X "$m" -H "Authorization: Bearer $TOKEN")
+  # Every request is bounded. Unbounded, a wedged homeserver hangs the caller forever —
+  # tolerable when a human typed the command, not when a ralph loop is posting lifecycle
+  # events between tasks (scripts/ralph-bus.sh). The /sync long-poll below raises this
+  # deliberately: blocking for ~25s is its entire job, so the default would abort it.
+  local args=(-sS --max-time "${AB_MAX_TIME:-20}" -X "$m" -H "Authorization: Bearer $TOKEN")
   [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
   local out; out="$(curl "${args[@]}" "$CS$p")" || die "curl failed: $m $p"
   if echo "$out" | jq -e '.errcode?' >/dev/null 2>&1; then
@@ -115,7 +119,7 @@ case "$cmd" in
     since="$(api GET "/sync?timeout=0" | jq -r '.next_batch')"
     deadline=$(( $(date +%s) + timeout ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-      resp="$(api GET "/sync?since=$(urlenc "$since")&timeout=25000")"
+      resp="$(AB_MAX_TIME=40 api GET "/sync?since=$(urlenc "$since")&timeout=25000")"
       since="$(echo "$resp" | jq -r '.next_batch')"
       hits="$(echo "$resp" | jq -c --arg rid "$filter_rid" --arg me "$me" --arg lp "$local_part" --argjson mention "$mention" '
         .rooms.join // {} | to_entries[]

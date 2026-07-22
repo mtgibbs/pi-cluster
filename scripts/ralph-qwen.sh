@@ -35,6 +35,15 @@ else
   hb_init() { :; }; hb_write() { :; }
 fi
 
+# Matrix bus narration — the discrete-event companion to the heartbeat's continuous
+# state. Same optional-and-never-fatal contract. See scripts/ralph-bus.sh for why both
+# exist rather than one.
+if [ -f "$(dirname "$0")/ralph-bus.sh" ]; then
+  . "$(dirname "$0")/ralph-bus.sh"
+else
+  bus_init() { :; }; bus_open() { :; }; bus_say() { :; }
+fi
+
 # Navigation codesheet (repo map + shape-appropriate reference sheet), generated
 # ONCE for the whole loop: byte-stable across every task and retry, so after the
 # first attempt it rides the Beelink's prefix cache for ~free. Deliberately not
@@ -50,6 +59,7 @@ if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/d
 fi
 
 hb_init; hb_write starting
+bus_init; bus_open "$(basename "$SPEC_DIR")"
 
 while IFS= read -r task || [ -n "$task" ]; do
   [ -z "${task// }" ] && continue
@@ -76,7 +86,9 @@ URLs/UIDs. When done, stop.${feedback}"
       echo "  ✓ $task passed verify (attempt $attempt)"
       git -C "$ROOT" add -A
       git -C "$ROOT" commit -q -m "ralph(qwen): ${task%%:*} — ${task#*: }" || true
-      passed=1; hb_write passed true; break
+      passed=1; hb_write passed true
+      bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
+      break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
@@ -95,10 +107,12 @@ Fix exactly those failures."
   if [ "$passed" != 1 ]; then
     echo "✋ STOP: '$task' failed verify after $((RETRIES + 1)) attempts — needs a human." >&2
     hb_write stopped false
+    bus_say "✋ STOP — '${task%%:*}' failed verify after $((RETRIES + 1)) attempts. Needs a human."
     exit 2
   fi
 done < "$TASKS"
 
 hb_write done true
+bus_say "done — ${HB_TOTAL:-?}/${HB_TOTAL:-?} tasks passed verify on $(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null). Branch ready for PR review."
 echo "════════ all tasks passed verify — branch ready for PR review ════════"
 git -C "$ROOT" log --oneline -"$(grep -cve '^[[:space:]]*$' "$TASKS")"
