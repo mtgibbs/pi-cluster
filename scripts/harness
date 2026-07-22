@@ -55,6 +55,30 @@ case "$cmd" in
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
+    # Parse optional --repo flag from arguments before target/spec
+    repo=""
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --repo)
+          repo="$2"
+          shift 2
+          ;;
+        --repo=*)
+          repo="${1#*=}"
+          shift
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
+    
+    # Validate repo name format if provided
+    if [ -n "$repo" ] && ! [[ "$repo" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      echo "harness: error: repo name '$repo' contains invalid characters (must match ^[A-Za-z0-9._-]+$)" >&2
+      exit 1
+    fi
+    
     target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     base_branch="${3:-main}"
@@ -68,12 +92,24 @@ case "$cmd" in
     # arg counts (the general-workstation containers take an extra repo-name in
     # position 2, since they aren't locked to a single clone the way qwen is).
     if [ "$target" = "claude" ] || [ "$target" = "claude2" ] || [ "$target" = "codex" ]; then
-      task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch --repo $repo"
+      else
+        task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
+      fi
     else
-      task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch --repo $repo"
+      else
+        task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
+      fi
     fi
     ssh "$HOST" "docker exec $c tmux send-keys -t main '$task_cmd' Enter"
-    echo "harness: sent (branch $branch, off $base_branch). Watch it with: harness attach $target"
+    if [ -n "$repo" ]; then
+      echo "harness: sent (branch $branch, off $base_branch, repo $repo). Watch it with: harness attach $target"
+    else
+      echo "harness: sent (branch $branch, off $base_branch). Watch it with: harness attach $target"
+    fi
     ;;
   status)
     # Health: compose ps. cd first (not -f) so Compose auto-loads
