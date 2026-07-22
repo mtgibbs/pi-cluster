@@ -72,8 +72,39 @@ case "$cmd" in
     else
       task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
     fi
+    # REFUSE to type into a busy pane. send-keys is dumb: it types characters at whatever is
+    # attached, and if a previous run is still producing output the keystrokes interleave with
+    # it. Hit for real twice on 2026-07-22 — the leading part of the command was swallowed and
+    # only its tail reached the prompt, leaving "-bash: 0: command not found". Nothing ran, and
+    # `harness run` cheerfully reported "sent". A loop already in flight would also be silently
+    # racing this one for the same worktree.
+    # NOT pgrep: these containers ship no procps (verified — `ps` is absent too), so pgrep
+    # exits non-zero for "command not found" and every check reads as "idle". A probe that
+    # cannot fail loudly is worse than no probe. /proc is always there.
+    task_running() { ssh "$HOST" "docker exec $c sh -c 'grep -sl run-task.sh /proc/[0-9]*/cmdline >/dev/null'"; }
+    if task_running; then
+      echo "harness: $target is already running a task — refusing to type into a busy pane." >&2
+      echo "         watch it:  harness attach $target" >&2
+      exit 1
+    fi
+
     ssh "$HOST" "docker exec $c tmux send-keys -t main '$task_cmd' Enter"
-    echo "harness: sent (branch $branch, off $base_branch). Watch it with: harness attach $target"
+
+    # "sent" is not "started". Confirm the process actually came up rather than trusting that
+    # the keystrokes landed intact — that gap is exactly what hid the failures above.
+    started=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if task_running; then started=1; break; fi
+      sleep 1
+    done
+    if [ "$started" = 1 ]; then
+      echo "harness: started (branch $branch, off $base_branch). Watch it with: harness attach $target"
+    else
+      echo "harness: sent, but no run-task.sh appeared within 10s — the keystrokes may not have landed." >&2
+      echo "         pane tail:" >&2
+      ssh "$HOST" "docker exec $c tmux capture-pane -t main -p" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -3 | sed 's/^/         /' >&2
+      exit 1
+    fi
     ;;
   status)
     # Health: compose ps. cd first (not -f) so Compose auto-loads
