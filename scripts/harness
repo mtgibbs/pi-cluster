@@ -47,6 +47,28 @@ container_for() {
   esac
 }
 
+# prints the --repo value, or nothing when the flag is absent
+harness_repo_flag() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   printf '%s' "${2:-}"; return 0 ;;
+      --repo=*) printf '%s' "${1#--repo=}"; return 0 ;;
+      *)        shift ;;
+    esac
+  done
+}
+
+# prints the arguments with any --repo pair removed, one per line
+harness_strip_repo() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   shift 2 || shift ;;
+      --repo=*) shift ;;
+      *)        printf '%s\n' "$1"; shift ;;
+    esac
+  done
+}
+
 cmd="${1:-}"; shift || usage
 case "$cmd" in
   attach)
@@ -55,6 +77,8 @@ case "$cmd" in
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
+    repo="$(harness_repo_flag "$@")"
+    set -- $(harness_strip_repo "$@")
     target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     base_branch="${3:-main}"
