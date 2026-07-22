@@ -114,7 +114,22 @@ Do not touch anything outside this task's scope. Reuse existing patterns; never 
 URLs/UIDs. When done, stop.${feedback}"
 
     # Fresh session each attempt (no `codex exec resume`) = no context bloat.
-    run_codex "$prompt" "$(log_path "$HB_TIDX" "$attempt")" || true
+    run_codex "$prompt" "$(log_path "$HB_TIDX" "$attempt")"; _rc=$?
+    # An executor that never started is NOT a failed attempt — it is a broken container, and
+    # letting it fall through to verify is how a no-op run reports success. Observed 2026-07-22:
+    # oc died in <1s with "current working directory was deleted" on every attempt, each log 247
+    # bytes, and the loop happily marked 3/3 done. A real attempt (even one the watchdog kills at
+    # OC_RUN_TIMEOUT) leaves a substantial transcript; a stillborn one leaves a stub.
+    _log="$(log_path "$HB_TIDX" "$attempt")"
+    _sz=$(wc -c < "$_log" 2>/dev/null || echo 0)
+    if [ "$_rc" != 0 ] && [ "$_sz" -lt 512 ]; then
+      echo "✋ ABORT: the executor did not start (exit $_rc, ${_sz}B of output) — the container needs attention, not another retry." >&2
+      sed 's/^/    | /' "$_log" 2>/dev/null | head -4 >&2
+      hb_write stopped false; log_where
+      bus_say "✋ ABORT — executor did not start (exit $_rc). Container needs attention."
+      exit 3
+    fi
+
 
     # The gate: deterministic, external. The model does NOT get to say "done".
     hb_write verifying
@@ -149,6 +164,17 @@ Fix exactly those failures."
     exit 2
   fi
 done < "$TASKS"
+
+# Presence-gated checks pend until their target exists, so passing every task individually does
+# NOT prove the work was done — see the STRICT note in verify.sh. Run the gate once more with
+# pending treated as failure before declaring victory.
+if ! _strict_out="$(cd "$ROOT" && STRICT=1 bash "$VERIFY" 2>&1)"; then
+  echo "✋ STOP: every task passed, but the final STRICT gate found unbuilt work:" >&2
+  printf '%s\n' "$_strict_out" | grep -E 'FAIL' | head -10 >&2
+  hb_write stopped false; log_where
+  bus_say "✋ STOP — tasks passed individually but the final strict gate found unbuilt work."
+  exit 2
+fi
 
 hb_write done true
 bus_say "done — ${HB_TOTAL:-?}/${HB_TOTAL:-?} tasks passed verify on $(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null). Branch ready for PR review."
