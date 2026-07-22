@@ -81,7 +81,12 @@ case "$cmd" in
     # NOT pgrep: these containers ship no procps (verified — `ps` is absent too), so pgrep
     # exits non-zero for "command not found" and every check reads as "idle". A probe that
     # cannot fail loudly is worse than no probe. /proc is always there.
-    task_running() { ssh "$HOST" "docker exec $c sh -c 'grep -sl run-task.sh /proc/[0-9]*/cmdline >/dev/null'"; }
+    # The bracket is load-bearing. The probe's OWN `sh -c` argv contains this pattern, and
+    # /proc includes that process — so a plain `grep run-task.sh` matches itself and reports
+    # "busy" forever, which blocked `harness run` entirely until it was caught. Writing it as
+    # run-[t]ask.sh means the regex still matches a real run-task.sh command line but NOT the
+    # literal text of this probe.
+    task_running() { ssh "$HOST" "docker exec $c sh -c 'grep -sl \"run-[t]ask.sh\" /proc/[0-9]*/cmdline >/dev/null'"; }
     if task_running; then
       echo "harness: $target is already running a task — refusing to type into a busy pane." >&2
       echo "         watch it:  harness attach $target" >&2
