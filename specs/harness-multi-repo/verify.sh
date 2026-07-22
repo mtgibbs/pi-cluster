@@ -70,9 +70,13 @@ fi
 
 # --- AC2: when supplied, repo goes to position 2 for EVERY agent (qwen included) ---
 if has "--repo"; then
-  grep -qE 'run-task\.sh \$spec \$repo \$branch \$base_branch' "$F" \
-    && ok "repo passed in position 2 uniformly (AC2)" \
-    || no "no uniform '\$spec \$repo \$branch \$base_branch' form found (AC2)"
+  # AC2: the flag is APPENDED. A positional form would shift qwen's args — see spec §6.
+  grep -qE -- '--repo \$repo"?$|--repo \$repo ' "$F" \
+    && ok "--repo appended, positionals unshifted (AC2)" \
+    || no "repo is not appended as a --repo flag (AC2)"
+  grep -qE 'run-task\.sh \$spec \$repo \$branch' "$F" \
+    && no "repo passed positionally — this shifts qwen's branch argument (AC2, spec §6)" \
+    || ok "no positional repo form (AC2)"
 fi
 
 # --- AC4: the operator can see which repo was targeted ---

@@ -83,14 +83,27 @@ fi
 - `branch` is generated laptop-side on purpose so every positional argument is a plain token —
   it sidesteps nested quoting through `ssh` + `tmux send-keys`. Keep that property.
 
-### SEQUENCING HAZARD — read this twice
+### Why `--repo` is APPENDED as a flag, not passed as positional 2
 
-qwen's `run-task.sh` takes **3** arguments. If `harness` starts passing `repo` in position 2 to
-qwen before the container side is updated, `repo` lands in `BRANCH` and the loop runs on a branch
-named `beelink-ansible`. It will not error — it will do the wrong thing quietly.
+The first draft of this spec said "pass repo in position 2 for every agent". That is wrong, and
+the companion spec (`beelink-ansible`) is where it surfaced.
 
-**The `beelink-ansible` change must be deployed before this one is merged.** The
-`--repo` flag added here must therefore be additive: absent it, behaviour is byte-identical to today.
+qwen's `run-task.sh` takes **3** positionals: `<spec> <branch> <base>`. Passing repo in position
+2 would mean that, in the window between the container half deploying and this merging, **the
+branch name is read as a repo name** — it does not error, it tries to clone
+`github.com/mtgibbs/ralph-<spec>-1784…` and reports something unrelated.
+
+Appending `--repo <name>` shifts nothing. Every positional keeps its meaning in every container,
+in both directions:
+
+| | old `run-task.sh` | new `run-task.sh` |
+|---|---|---|
+| **old `harness`** (no flag) | today's behaviour | today's behaviour |
+| **new `harness`**, no flag | today's behaviour | today's behaviour |
+| **new `harness`** `--repo x` | flag ignored → wrong repo, **loudly** | correct |
+
+So deploy order stops mattering, and the one remaining bad cell fails visibly rather than
+silently. A sequencing hazard you can delete beats one you document.
 
 ## 7. Norms · [N]
 
@@ -127,8 +140,8 @@ Companion tasks in `beelink-ansible` (separate spec, must deploy first):
 
 1. **Where** `--repo <name>` is absent, `harness run` **shall** emit the same command string it
    emits today (`pi-cluster` for the workstation containers, no repo token for qwen).
-2. **When** `--repo <name>` is supplied, `harness run` **shall** pass `<name>` in argument
-   position 2 for every agent.
+2. **When** `--repo <name>` is supplied, `harness run` **shall** APPEND `--repo <name>` to the
+   remote command, leaving every existing positional in place and unshifted.
 3. **Where** `<name>` does not match `^[A-Za-z0-9._-]+$`, `harness run` **shall** exit non-zero
    with a message naming the offending value, and **shall not** contact the host.
 4. **When** `--repo` is supplied, the usage/echo line **shall** state which repo the run targets,
