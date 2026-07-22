@@ -39,6 +39,8 @@ A dashboard that lies confidently is worse than one that is blank.
 | `lastStreamMsg` | epoch ms of the last SSE frame that reached `onmessage` |
 | `txQueue` | events accepted but not yet animated (paced release) |
 | `pollFails` | consecutive `/api/state` failures, for hysteresis |
+| `feedNext` | **pure** decision function — see the worked example in §6 |
+| `txAdmit` | **pure** queue admission — see §6 |
 
 ## 4. Approach · [A]
 
@@ -93,6 +95,55 @@ Look these up before writing; they are all real and current:
 - Opened standalone (e.g. `file://`, or the artifact preview) both endpoints fail. That path
   must keep working and must present as simulated.
 
+### WORKED EXAMPLE — the decision is a pure function, copy this shape
+
+Every criterion below is about *behaviour under a sequence of observations*, which a grep cannot
+check. Three specs in this repo have now shipped or nearly shipped defects because a behavioural
+criterion was compiled into a check on what the code looked like. So the decision is isolated
+into a pure function the gate can lift out and run against a truth table.
+
+```js
+// Pure. Given the current state and what we just observed, decide the next state and whether
+// the event stream needs recycling. Reads no globals, touches no DOM, no timers.
+//   state            'live' | 'sim'
+//   pollOk           did the most recent /api/state fetch succeed
+//   pollFails        consecutive failures INCLUDING this one (0 when pollOk)
+//   msSinceStream    ms since the last SSE frame reached onmessage
+function feedNext(state, pollOk, pollFails, msSinceStream) {
+  const next = pollOk ? "live" : (pollFails >= 3 ? "sim" : state);
+  // Only a healthy poll makes stream silence meaningful: it separates "the house is quiet"
+  // from "the socket is wedged", which is the case EventSource cannot detect about itself.
+  const recycle = next === "live" && msSinceStream > STREAM_STALE_MS;
+  return { state: next, recycle };
+}
+```
+
+Its required behaviour, which `verify.sh` asserts as a table:
+
+| state | pollOk | pollFails | msSinceStream | → state | → recycle |
+|---|---|---|---|---|---|
+| live | true  | 0 | 1000  | live | false |
+| live | false | 1 | 1000  | live | false |
+| live | false | 2 | 1000  | live | false |
+| live | false | 3 | 1000  | sim  | false |
+| sim  | true  | 0 | 1000  | live | false |
+| live | true  | 0 | 60000 | live | **true** |
+| sim  | false | 9 | 60000 | sim  | false |
+
+Row 2 and 3 are AC1 (a blip must not flip the display). Row 5 is AC3 — recovery is immediate,
+only failure is damped. The last row matters most: **a wedged stream is never diagnosed while
+the collector is unreachable**, because then silence is expected and recycling would just churn.
+
+The queue admission is pure too, for the same reason:
+
+```js
+// Pure. Returns the queue with ev appended, oldest dropped past max.
+function txAdmit(queue, ev, max) {
+  const out = queue.concat([ev]);
+  return out.length > max ? out.slice(out.length - max) : out;
+}
+```
+
 ## 7. Norms · [N]
 
 - Vanilla JS in the existing inline script. Match the file's existing comment voice: say *why*,
@@ -100,6 +151,9 @@ Look these up before writing; they are all real and current:
 - No new globals beyond those in §3. No libraries, no build step.
 - Timers must be cleared when they are replaced. A recycle must not leave an old `EventSource`
   or interval running.
+- `feedNext` and `txAdmit` must be **pure functions of their arguments** — no globals beyond the
+  constants, no DOM, no timers. The gate executes them (§11); an impure function cannot be
+  tested, and untestable is how the last three specs shipped defects.
 - The status affordance already exists in the DOM (the `live` class and the feed pill). Extend
   it; do not invent a second status widget somewhere else on the page.
 
