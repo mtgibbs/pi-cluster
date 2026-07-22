@@ -304,6 +304,27 @@
   }
   poll(); setInterval(poll, 1500);
 
+  // ---- bus feed: subscribe, don't poll ----
+  // State is polled above because it's a level. Messages are instants, and a 1.5s poll
+  // would merge or miss any two that land inside one tick. SSE because the flow is
+  // strictly server -> browser: EventSource reconnects on its own (the server sends
+  // retry:), so there's nothing to babysit and no library to load.
+  let busMode = false;
+  try {
+    const es = new EventSource("/api/events");
+    es.onopen  = () => { busMode = true; };
+    es.onerror = () => { busMode = false; };   // EventSource retries by itself
+    es.onmessage = (m) => {
+      let d; try { d = JSON.parse(m.data); } catch (_) { return; }
+      if (!d || !d.from) return;    // humans in Element have no atom — not a source here
+      // The collector replays its ring buffer on connect so a page opened mid-conversation
+      // isn't blank. That's history, not news: without this guard every reload fires a
+      // burst of stale traffic across the screen as if it had all just happened.
+      if (d.ts && (Date.now()/1000 - d.ts) > 30) return;
+      emit(d.from, d.targets);
+    };
+  } catch (_) { /* no EventSource, or opened as a standalone file — sim traffic only */ }
+
   // ---- simulation (fallback when there is no live feed) ----
   const PHASES = ["picking up","thinking","thinking","verifying"];
   function pickWork(m) {
@@ -354,6 +375,78 @@
     for (const m of minds) { m.x += m.vx*dt; m.y += m.vy*dt; }
   }
 
+  // ---- transmissions: a message is an EVENT, so it has to travel ----
+  // The bond force above can only say "these two are both awake at once". It cannot say
+  // "this one just told that one something" — that needs a sender, a target and a moment.
+  // A packet that leaves one atom and lands on another is the only thing in this scene
+  // depicting something that actually happened at a point in time; everything else is a
+  // level being rendered. Fed by /api/events (Matrix -> SSE), or by the sim when there's
+  // no feed, so the standalone art preview still shows a house that talks to itself.
+  const trans = [];
+  const TRANS_DUR = 1.15;
+
+  function emit(fromId, toIds) {
+    const a = byId[fromId]; if (!a) return;
+    a.gust = Math.min(1, a.gust + 0.45);              // the sender flares as it speaks
+    const targets = (toIds || []).filter(id => byId[id] && id !== fromId);
+    if (!targets.length) { trans.push({ from: a, to: null, t: 0 }); return; }
+    for (const id of targets) trans.push({ from: a, to: byId[id], t: 0 });
+  }
+
+  function stepTrans(dt) {
+    for (let i = trans.length - 1; i >= 0; i--) {
+      const p = trans[i];
+      p.t += dt / TRANS_DUR;
+      if (p.t >= 1) {
+        // The landing is the whole point — the receiver reacts, so the eye follows
+        // cause to effect instead of just watching a dot move.
+        if (p.to) p.to.gust = Math.min(1, p.to.gust + 0.55);
+        trans.splice(i, 1);
+      }
+    }
+  }
+
+  function drawTrans() {
+    for (const p of trans) {
+      const e = p.t < 0.5 ? 2*p.t*p.t : 1 - Math.pow(-2*p.t + 2, 2)/2;   // ease-in-out
+      if (!p.to) {
+        // Nobody was addressed, so nothing travels — it radiates. Matrix messages go to a
+        // room, not a peer; inventing a recipient here would draw a relationship the
+        // message never claimed.
+        const r = 34 + e*250, a = (1 - p.t) * 0.42;
+        ctx.strokeStyle = `rgba(190,220,255,${a})`;
+        ctx.lineWidth = 2.2 - p.t*1.6;
+        ctx.beginPath(); ctx.arc(p.from.x, p.from.y, r, 0, Math.PI*2); ctx.stroke();
+        continue;
+      }
+      const dx = p.to.x - p.from.x, dy = p.to.y - p.from.y;
+      const x = p.from.x + dx*e, y = p.from.y + dy*e;
+      const tailE = Math.max(0, e - 0.14);
+      const tx = p.from.x + dx*tailE, ty = p.from.y + dy*tailE;
+      const fade = Math.sin(Math.PI * Math.min(1, p.t*1.05));   // in and out, never a hard pop
+      const grad = ctx.createLinearGradient(tx, ty, x, y);
+      grad.addColorStop(0, "rgba(150,190,255,0)");
+      grad.addColorStop(1, `rgba(210,232,255,${0.75*fade})`);
+      ctx.strokeStyle = grad; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+      ctx.fillStyle = `rgba(255,255,255,${0.9*fade})`;
+      ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  // Sim traffic when there is no live bus, so the preview isn't a silent room.
+  let simTx = 2 + Math.random()*3;
+  function stepSimTrans(dt) {
+    if (busMode) return;
+    simTx -= dt; if (simTx > 0) return;
+    simTx = 1.8 + Math.random()*4.2;
+    const awake = minds.filter(m => m.state !== "idle");
+    if (!awake.length) return;
+    const a = awake[(Math.random()*awake.length)|0];
+    const others = minds.filter(m => m !== a);
+    emit(a.id, Math.random() < 0.25 ? [] : [others[(Math.random()*others.length)|0].id]);
+  }
+
   let last = performance.now(); const T0 = last;
   let bpmShown = 0;
   const col = minds.map(m => `rgb(${m.hue[0]},${m.hue[1]},${m.hue[2]})`);
@@ -391,9 +484,12 @@
     houseAct /= minds.length;
 
     physics(dt * speed);
+    stepSimTrans(dt * speed);
+    stepTrans(dt * speed);
 
     // ---- render each atom as a spinning 3D ball of dust ----
     ctx.globalCompositeOperation = "lighter";
+    drawTrans();   // additive, and under the dust: a packet arrives INTO an atom
     for (let k = 0; k < minds.length; k++) {
       const m = minds[k];
       const cY = Math.cos(m.ay), sY = Math.sin(m.ay), cX = Math.cos(m.ax), sX = Math.sin(m.ax);
