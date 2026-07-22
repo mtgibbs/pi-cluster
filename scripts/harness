@@ -47,6 +47,28 @@ container_for() {
   esac
 }
 
+# prints the --repo value, or nothing when the flag is absent
+harness_repo_flag() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   printf '%s' "${2:-}"; return 0 ;;
+      --repo=*) printf '%s' "${1#--repo=}"; return 0 ;;
+      *)        shift ;;
+    esac
+  done
+}
+
+# prints the arguments with any --repo pair removed, one per line
+harness_strip_repo() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)   shift 2 || shift ;;
+      --repo=*) shift ;;
+      *)        printf '%s\n' "$1"; shift ;;
+    esac
+  done
+}
+
 cmd="${1:-}"; shift || usage
 case "$cmd" in
   attach)
@@ -55,6 +77,14 @@ case "$cmd" in
     exec ssh -t "$HOST" "docker exec -it $c tmux attach -t main"
     ;;
   run)
+    repo="$(harness_repo_flag "$@")"
+    if [ -n "$repo" ]; then
+      if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "harness: invalid repo value '$repo' — must match ^[A-Za-z0-9._-]+$" >&2
+        exit 1
+      fi
+    fi
+    set -- $(harness_strip_repo "$@")
     target="${1:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     spec="${2:?usage: harness run qwen-or-claude spec-dir [base-branch]}"
     base_branch="${3:-main}"
@@ -69,8 +99,14 @@ case "$cmd" in
     # position 2, since they aren't locked to a single clone the way qwen is).
     if [ "$target" = "claude" ] || [ "$target" = "claude2" ] || [ "$target" = "codex" ]; then
       task_cmd="/usr/local/bin/run-task.sh $spec pi-cluster $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="$task_cmd --repo $repo"
+      fi
     else
       task_cmd="/usr/local/bin/run-task.sh $spec $branch $base_branch"
+      if [ -n "$repo" ]; then
+        task_cmd="$task_cmd --repo $repo"
+      fi
     fi
     # REFUSE to type into a busy pane. send-keys is dumb: it types characters at whatever is
     # attached, and if a previous run is still producing output the keystrokes interleave with
@@ -104,6 +140,9 @@ case "$cmd" in
     done
     if [ "$started" = 1 ]; then
       echo "harness: started (branch $branch, off $base_branch). Watch it with: harness attach $target"
+      if [ -n "$repo" ]; then
+        echo "harness: started (branch $branch, off $base_branch, repo '$repo'). Watch it with: harness attach $target"
+      fi
     else
       echo "harness: sent, but no run-task.sh appeared within 10s — the keystrokes may not have landed." >&2
       echo "         pane tail:" >&2
