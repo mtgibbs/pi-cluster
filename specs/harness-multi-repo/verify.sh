@@ -23,14 +23,45 @@ echo "VERIFY specs/harness-multi-repo  ($F)"
 [ -f "$F" ] || { echo "  FAIL  $F missing" >&2; exit 1; }
 bash -n "$F" 2>/dev/null && ok "harness parses" || no "harness has a syntax error"
 
-# --- T1: optional flag, order-independent (AC5) ---
+# --- T1: optional flag, order-independent (AC5) — BEHAVIOURAL, not a grep ---
+# A grep can only see the SHAPE of a parser. "Order must not matter" is behaviour, and the
+# first version of this check asked only "is there a loop over $@?" -- which
+# `while [[ $# -gt 0 ]] ... *) break` satisfies while being a LEADING-ONLY parser. An
+# executor shipped exactly that, the gate passed it, and a human caught it in review
+# (pi-cluster#86). So: extract the flag-parsing block and actually run it.
+#
+# Extraction is deliberately fault-tolerant. If the block can't be isolated the check PENDs
+# rather than fails -- a brittle gate that cries wolf gets ignored, which is worse than a
+# gate with a known blind spot you have written down.
 if has "--repo"; then
   ok "--repo flag present"
-  # Order-independence means the flag is consumed in a loop/case over "$@", not read
-  # positionally. A positional read would satisfy a naive grep but fail AC5.
-  grep -qE 'while .*\$#|for .* in "\$@"|case "\$1" in' "$F" \
-    && ok "flag is parsed by scanning arguments (AC5)" \
-    || no "--repo looks positional — flag order must not matter (AC5)"
+  blk="$(sed -n '/^  run)/,/target="\${1/p' "$F" 2>/dev/null | sed '1d;$d')"
+  if [ -z "$blk" ] || ! printf '%s' "$blk" | grep -q -- '--repo'; then
+    pend "AC5 behavioural check (could not isolate the run) flag block)"
+  else
+    probe="$(mktemp -t hprobe)"
+    { printf '%s\n' "$blk"
+      printf 'printf "repo=%%s target=%%s spec=%%s base=%%s\\n" "${repo:-}" "${1:-}" "${2:-}" "${3:-main}"\n'
+    } > "$probe"
+    r_none="$(bash "$probe" qwen specs/foo 2>/dev/null | tail -1)"
+    r_lead="$(bash "$probe" --repo beelink-ansible qwen specs/foo 2>/dev/null | tail -1)"
+    r_tail="$(bash "$probe" qwen specs/foo --repo beelink-ansible 2>/dev/null | tail -1)"
+    rm -f "$probe"
+
+    case "$r_none" in
+      "repo= target=qwen spec=specs/foo base=main") ok "AC1: no flag leaves positionals untouched" ;;
+      *) no "AC1: no-flag parse changed the positionals -> $r_none" ;;
+    esac
+    case "$r_lead" in
+      "repo=beelink-ansible target=qwen spec=specs/foo base=main") ok "AC5: --repo works LEADING" ;;
+      *) no "AC5: leading --repo did not parse -> $r_lead" ;;
+    esac
+    # The one that matters: beelink-ansible's run-task.sh expects harness to APPEND the flag.
+    case "$r_tail" in
+      "repo=beelink-ansible target=qwen spec=specs/foo base=main") ok "AC5: --repo works APPENDED" ;;
+      *) no "AC5: appended --repo did not parse -> $r_tail  (a parser that breaks on the first non-flag argument is leading-only)" ;;
+    esac
+  fi
 else pend "--repo flag"; fi
 
 # --- T2: validation before any remote call (AC3, Safeguard 2) ---
