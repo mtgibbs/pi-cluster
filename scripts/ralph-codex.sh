@@ -44,6 +44,13 @@ if [ -f "$(dirname "$0")/ralph-bus.sh" ]; then
 else
   bus_init() { :; }; bus_open() { :; }; bus_say() { :; }
 fi
+# Attempt artefacts. ralph discarded the model's output and then reset the tree, so a stopped
+# loop left nothing to diagnose with. See scripts/ralph-log.sh.
+if [ -f "$(dirname "$0")/ralph-log.sh" ]; then
+  . "$(dirname "$0")/ralph-log.sh"
+else
+  log_init() { :; }; log_path() { printf '/dev/null'; }; log_failure() { :; }; log_where() { :; }
+fi
 
 command -v codex >/dev/null 2>&1 || { echo "ralph-codex: codex CLI not on PATH" >&2; exit 1; }
 codex login status >/dev/null 2>&1 || {
@@ -72,7 +79,7 @@ fi
 # hang for hours. Not `timeout(1)` — that isn't on stock macOS, and this script
 # has to run identically on the laptop and in the container.
 run_codex() {
-  codex exec --cd "$ROOT" --sandbox "$SANDBOX" --skip-git-repo-check "$1" >/dev/null 2>&1 &
+  codex exec --cd "$ROOT" --sandbox "$SANDBOX" --skip-git-repo-check "$1" > "${2:-/dev/null}" 2>&1 &
   local pid=$! rc
   ( sleep "$TIMEOUT"
     if kill -0 "$pid" 2>/dev/null; then
@@ -85,7 +92,7 @@ run_codex() {
   return "$rc"
 }
 
-hb_init; hb_write starting
+hb_init; log_init; hb_write starting
 # Keep the heartbeat alive through the long model calls, and make sure it stops when this
 # loop does — a heartbeat that outlives its loop would make a dead agent look busy forever.
 hb_tick_start
@@ -107,7 +114,7 @@ Do not touch anything outside this task's scope. Reuse existing patterns; never 
 URLs/UIDs. When done, stop.${feedback}"
 
     # Fresh session each attempt (no `codex exec resume`) = no context bloat.
-    run_codex "$prompt" || true
+    run_codex "$prompt" "$(log_path "$HB_TIDX" "$attempt")" || true
 
     # The gate: deterministic, external. The model does NOT get to say "done".
     hb_write verifying
@@ -121,6 +128,7 @@ URLs/UIDs. When done, stop.${feedback}"
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
+    log_failure "$HB_TIDX" "$attempt" "$out"   # BEFORE the reset below erases the evidence
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
     feedback="
 A previous attempt FAILED verification with:
@@ -136,6 +144,7 @@ Fix exactly those failures."
   if [ "$passed" != 1 ]; then
     echo "✋ STOP: '$task' failed verify after $((RETRIES + 1)) attempts — needs a human." >&2
     hb_write stopped false
+    log_where
     bus_say "✋ STOP — '${task%%:*}' failed verify after $((RETRIES + 1)) attempts. Needs a human."
     exit 2
   fi
