@@ -4,7 +4,16 @@ namespace: new-horizons
 resources:
   - namespace.yaml
   - external-secret.yaml
+  - external-secret-push.yaml
   - pvc.yaml
   - deployment.yaml
   - service.yaml
   - servicemonitor.yaml
+
+# alerter.py (the Phase-3 push sidecar's script) as a stable-named ConfigMap.
+configMapGenerator:
+  - name: new-horizons-alerter
+    files:
+      - alerter/alerter.py
+generatorOptions:
+  disableNameSuffixHash: true

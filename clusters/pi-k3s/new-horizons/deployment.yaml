@@ -64,7 +64,51 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "250m"
+        # Phase 3: the push bridge. Shares the store PVC (same pod -> no RWO conflict), loops
+        # `nh alert --json` and pushes new 8+/10 leads to ntfy + Matrix. Idempotent (nh alert's
+        # state file on /data), best-effort, at-most-once. Reuses the nh image; alerter.py from a
+        # ConfigMap. Skips whichever of ntfy/Matrix is unconfigured.
+        - name: alerter
+          image: ghcr.io/mtgibbs/new-horizons:0.1.0
+          command: ["python3", "/etc/alerter/alerter.py"]
+          env:
+            - name: NH_DB
+              value: "/data/new-horizons.db"
+            - name: NH_ALERT_STATE
+              value: "/data/nh-alerted.json"
+            - name: NH_ALERT_MIN_SCORE
+              value: "8"
+            - name: NH_ALERT_INTERVAL
+              value: "900"           # 15 min bridge; the reactive n8n path (needs .eml) fires inline instead
+            # ntfy (unset URL -> skipped). PREREQ: pick a topic; token only if it's protected.
+            - name: NTFY_URL
+              value: "https://ntfy.lab.mtgibbs.dev"
+            - name: NTFY_TOPIC
+              value: "new-horizons"
+            - name: NTFY_TOKEN
+              valueFrom:
+                secretKeyRef: { name: new-horizons-push-secrets, key: ntfy-token, optional: true }
+            # Matrix (unset URL/room/token -> skipped). PREREQ: a bot access token + the room id.
+            - name: MATRIX_URL
+              value: "https://matrix.lab.mtgibbs.dev"
+            - name: MATRIX_ROOM_ID
+              value: ""              # set to the job-search room, e.g. !xxxx:lab.mtgibbs.dev
+            - name: MATRIX_TOKEN
+              valueFrom:
+                secretKeyRef: { name: new-horizons-push-secrets, key: matrix-token, optional: true }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: alerter-script
+              mountPath: /etc/alerter
+              readOnly: true
+          resources:
+            requests: { memory: "32Mi", cpu: "10m" }
+            limits: { memory: "128Mi", cpu: "100m" }
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: new-horizons-data
+        - name: alerter-script
+          configMap:
+            name: new-horizons-alerter

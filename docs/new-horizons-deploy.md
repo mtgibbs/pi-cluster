@@ -49,11 +49,29 @@ angle gets replies). You still `kubectl exec … -- nh list/stats/fetch-jd/score
 Prereq beyond Phase 1: the image must include `nh serve-metrics` (i.e. new-horizons PR #16 merged
 before the `:0.1.0` build).
 
-## Phase 3 — reactive flow  ⬜ later
+## Phase 3 — reactive flow  ◐ push drafted; ingestion blocked on sample .eml
 
-n8n job-alert email → `nh add` → `nh fetch-jd` → `nh score` → **ntfy + Matrix** ping on new 8+/10
-leads ("3 new high-fit leads, dossiers ready"). This is the PLAN's original `intake` email path
-(needs sample `.eml`s) plus the alert wiring.
+The chain: `job-alert email → nh add → nh fetch-jd → nh score → nh alert → ntfy + Matrix`.
+
+**Drafted (this PR) — the push bridge.** An `alerter` **sidecar** in the new-horizons pod (shares
+the store PVC — no RWO conflict, reuses the `nh` image) loops `nh alert --json` (new-horizons spec
+`alert`, PR #17) and pushes new 8+/10 leads to **ntfy** + **Matrix** via `urllib`. Idempotent
+(`nh alert`'s state file on `/data`), best-effort, at-most-once. `clusters/pi-k3s/new-horizons/`:
+`alerter/alerter.py` (ConfigMap-generated), the sidecar in `deployment.yaml`, and
+`external-secret-push.yaml` (ntfy/Matrix tokens — **separate** ExternalSecret so an unprovisioned
+token can't break the required `litellm-key`). Push code smoke-tested against a local receiver
+(correct ntfy POST + Matrix `m.text` PUT).
+
+**Prereqs for the pings (all optional — unset ⇒ that backend stays quiet):**
+- ntfy: the topic `new-horizons` (set `NTFY_TOKEN` only if it's protected → `op://pi-cluster/new-horizons/ntfy-token`).
+- Matrix: a bot access token → `op://pi-cluster/new-horizons/matrix-token`, and set `MATRIX_ROOM_ID`
+  in the Deployment to the job-search room.
+
+**Still blocked — the reactive ingestion.** The `email → {company,role,url}` parse node (n8n) needs
+Matt's sample job-alert `.eml`s; the `add → fetch-jd → score → alert` tail is ready. Until then the
+sidecar's 15-min idempotent poll is the bridge (fires only on genuinely-new qualifiers, not a loop).
+Wiring the n8n flow to call `nh alert` inline (so pings are instant) is the last step once the
+`.eml`s land.
 
 ## Notes
 - **Backups:** the whole store is one SQLite file, so the `pvc-backup` rsync covers it fully; restore
