@@ -698,3 +698,25 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 33. new-horizons - the job-search agent's durable home. CLI (`nh`) over one SQLite lead store
+# on a local-path PVC (backed up by pvc-backup). A runner pod keeps `nh` + the store mounted so
+# `kubectl exec ... -- nh list/stats/fetch-jd/score` work in-cluster; scoring/distill call the
+# Beelink LiteLLM. App repo: mtgibbs/new-horizons. PREREQS before green: the new-horizons/litellm-key
+# 1Password item + the ghcr.io/mtgibbs/new-horizons:0.1.0 image (public). See docs/new-horizons-deploy.md.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: new-horizons
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/new-horizons
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

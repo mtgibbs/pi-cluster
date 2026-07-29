@@ -1,0 +1,57 @@
+# new-horizons is a CLI over a single SQLite file, not a web server. This Deployment is a durable
+# RUNNER: it keeps the store PVC mounted and `nh` on PATH so you (or n8n, or a CronJob later) can
+#   kubectl exec -n new-horizons deploy/new-horizons -- nh list
+#   kubectl exec -n new-horizons deploy/new-horizons -- nh stats
+#   kubectl exec ... -- nh fetch-jd --all      # NH_LLM_* wired below for distill/score
+# Phase 2 swaps `sleep infinity` for a real read surface (Grafana exporter / thin UI).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-horizons
+  namespace: new-horizons
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC — never two pods writing the DB at once
+  selector:
+    matchLabels:
+      app: new-horizons
+  template:
+    metadata:
+      labels:
+        app: new-horizons
+    spec:
+      containers:
+        - name: nh
+          # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
+          # PREREQ: build+push to GHCR and flip the package public before this pulls.
+          image: ghcr.io/mtgibbs/new-horizons:0.1.0
+          command: ["sleep", "infinity"]
+          env:
+            - name: NH_DB
+              value: "/data/new-horizons.db"
+            - name: NH_PROFILE
+              value: "/app/profile/profile.yaml"     # baked into the image
+            - name: NH_LLM_URL
+              value: "https://ai.lab.mtgibbs.dev/v1/chat/completions"   # same Beelink LiteLLM as review-hub
+            - name: NH_LLM_MODEL
+              value: "hot-coder"
+            - name: NH_LLM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: new-horizons-secrets
+                  key: litellm-key
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: new-horizons-data
