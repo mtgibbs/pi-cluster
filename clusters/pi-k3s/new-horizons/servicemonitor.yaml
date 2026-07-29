@@ -1,0 +1,23 @@
+# Prometheus Operator scrapes nh serve-metrics. `release: kube-prometheus` matches the operator's
+# serviceMonitorSelector (same as immich/pihole exporters).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: new-horizons
+  namespace: new-horizons
+  labels:
+    app: new-horizons
+    release: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: new-horizons
+      app.kubernetes.io/component: metrics
+  namespaceSelector:
+    matchNames:
+      - new-horizons
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 10s

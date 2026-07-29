@@ -6,3 +6,5 @@ resources:
   - external-secret.yaml
   - pvc.yaml
   - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml

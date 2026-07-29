@@ -26,7 +26,20 @@ spec:
           # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
           # PREREQ: build+push to GHCR and flip the package public before this pulls.
           image: ghcr.io/mtgibbs/new-horizons:0.1.0
-          command: ["sleep", "infinity"]
+          # Phase 2: the runner now SERVES metrics (Prometheus /metrics + /healthz), recomputed per
+          # scrape from the store. You can still `kubectl exec … -- nh list/stats/fetch-jd/score`.
+          command: ["nh", "serve-metrics", "--port", "9109"]
+          ports:
+            - name: metrics
+              containerPort: 9109
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 3
+            periodSeconds: 15
           env:
             - name: NH_DB
               value: "/data/new-horizons.db"

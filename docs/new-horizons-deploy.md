@@ -36,12 +36,18 @@ and the PVC added to the `pvc-backup` allowlist (`new-horizons_new-horizons-data
 3. **Seed the store** (optional): `kubectl cp` your existing `new-horizons.db`, or start empty and let
    ingestion fill it.
 
-## Phase 2 — the tracking surface (Grafana)  ⬜ next PR
+## Phase 2 — the tracking surface (Grafana)  ✅ drafted (this PR)
 
-`nh stats --json` → a small exporter (CronJob writing a Prometheus textfile, or a sidecar) →
-a **Grafana "Job Search" dashboard**: stage funnel, fit-score distribution, and the
-résumé-version↔outcome panel (which tailoring angle gets replies). Reuses the existing
-kube-prometheus-grafana stack. *(Alternative if you'd rather: a thin read-only web page + ingress.)*
+The runner now **serves Prometheus metrics** instead of `sleep infinity`: the Deployment runs
+`nh serve-metrics` (needs the `metrics` spec — new-horizons PR #16 — built into the image), exposing
+`/metrics` (+ `/healthz`) with the `nh_*` gauges. A **Service** + **ServiceMonitor** (`release:
+kube-prometheus`) get it scraped, and `monitoring/dashboard-new-horizons.yaml` provisions a
+**Grafana "Job Search" dashboard** (label `grafana_dashboard: "1"`): total/applied stats, the
+stage funnel, fit-score distribution, and the **résumé-version applied-vs-positive** table (which
+angle gets replies). You still `kubectl exec … -- nh list/stats/fetch-jd/score` on the same pod.
+
+Prereq beyond Phase 1: the image must include `nh serve-metrics` (i.e. new-horizons PR #16 merged
+before the `:0.1.0` build).
 
 ## Phase 3 — reactive flow  ⬜ later
 
