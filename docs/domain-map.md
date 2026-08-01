@@ -307,7 +307,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
   - ingress: `n8n.lab.mtgibbs.dev`
 
 ### ntfy  ·  Flux: `ntfy` (after: `external-secrets-config`)
-- **Deployment/ntfy** — `binwiederhier/ntfy:v2.26.0`
+- **Deployment/ntfy** — `binwiederhier/ntfy:v2.26.3`
   - creds: `ntfy-secret`  _(→ secrets-map.md)_
   - storage: `ntfy-data`
 
