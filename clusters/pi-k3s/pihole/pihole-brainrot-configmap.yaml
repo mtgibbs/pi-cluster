@@ -185,6 +185,22 @@ data:
           echo "  client $cl -> HTTP $code"
         done
       fi
+      # Ad/tracker adlists must apply to BOTH Default(0) AND adults($AID); otherwise
+      # allowlisted (adults-group) devices get NO ad-blocking (they were group-0-only,
+      # so adults saw ads). Reassign every block list to [0,1], then rebuild gravity so
+      # the per-group mapping takes effect.
+      if [ -n "${AID:-}" ] && [ "$AID" != "null" ]; then
+        RC=0; RT=0
+        for L in $(curl -s "http://$H/api/lists?sid=$SID" | jq -r '.lists[]?|select(.type=="block")|.address'); do
+          RT=$((RT+1))
+          ENC=$(jq -rn --arg x "$L" '$x|@uri')
+          code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -X PUT "http://$H/api/lists/$ENC?type=block&sid=$SID" -H 'Content-Type: application/json' -d "{\"groups\":[0,$AID],\"enabled\":true}")
+          case "$code" in 200|201) RC=$((RC+1)) ;; esac
+        done
+        echo "  adlists -> groups[0,$AID]: $RC/$RT"
+        gc=$(curl -s -m 180 -o /dev/null -w '%{http_code}' -X POST "http://$H/api/action/gravity?sid=$SID")
+        echo "  gravity rebuild -> HTTP $gc"
+      fi
       G=$(curl -s "http://$H/api/groups?sid=$SID" | jq -c '[.groups[]?.name]')
       D=$(curl -s "http://$H/api/domains?sid=$SID" | jq '[.domains[]?|select(.type=="deny")]|length')
       C=$(curl -s "http://$H/api/clients?sid=$SID" | jq '.clients|length')
