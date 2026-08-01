@@ -79,6 +79,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Mealie / Recipes** | `docs/recipecate.md` (build plan + AI-provider mechanics) | MCP direct; `cluster-ops` for manifests |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
+| **Domain map / topology** | `docs/domain-map.md` (service→image→creds→storage→ingress→calls + Flux deploy-order DAG; auto-derived) | `cluster-ops` |
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
 | **Secrets / credentials** | `.claude/skills/secrets-graph/SKILL.md` (graph + reuse-before-mint) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
