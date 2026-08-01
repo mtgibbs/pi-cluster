@@ -30,10 +30,16 @@ and the PVC added to the `pvc-backup` allowlist (`new-horizons_new-horizons-data
 
 ### Human-gated prerequisites (before it goes green)
 1. **Mint a scoped LiteLLM virtual key** for new-horizons (coder models on the Beelink), store it at
-   `op://pi-cluster/new-horizons/litellm-key`. Same pattern as `review-hub/litellm-key`.
-2. **Build + publish the image:** `ghcr.io/mtgibbs/new-horizons:0.1.0` (Dockerfile + CI live in the
-   app repo), then flip the GHCR package **public** (`gh api PATCH /user/packages/container/new-horizons -f visibility=public`).
-3. **Seed the store** (optional): `kubectl cp` your existing `new-horizons.db`, or start empty and let
+   `op://pi-cluster/new-horizons/litellm-key`. Per-service on purpose — cost attribution + access
+   scope differ per consumer (same rationale as `review-hub/litellm-key`).
+2. **Build the image (keep it PRIVATE):** `ghcr.io/mtgibbs/new-horizons:0.1.0` (Dockerfile + CI in the
+   app repo). It bakes in `profile/` (PII), so do **not** flip it public — it's pulled via the shared
+   `ghcr-pull` secret (`external-secret-ghcr.yaml`).
+3. **The shared GHCR pull identity** (one-time, cluster-wide — reused by every future private image):
+   a read-only GitHub token at `op://pi-cluster/ghcr-pull/{username,token}`. New private service adds
+   the same `external-secret-ghcr.yaml` to its namespace + `imagePullSecrets: [ghcr-pull]` — zero new
+   identities.
+4. **Seed the store** (optional): `kubectl cp` your existing `new-horizons.db`, or start empty and let
    ingestion fill it.
 
 ## Phase 2 — the tracking surface (Grafana)  ⬜ next PR

@@ -4,5 +4,6 @@ namespace: new-horizons
 resources:
   - namespace.yaml
   - external-secret.yaml
+  - external-secret-ghcr.yaml
   - pvc.yaml
   - deployment.yaml

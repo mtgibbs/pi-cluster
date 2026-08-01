@@ -21,10 +21,14 @@ spec:
       labels:
         app: new-horizons
     spec:
+      # Image stays PRIVATE (it bakes in profile/ = résumé/accomplishments PII) — pulled via the
+      # shared, cluster-wide ghcr-pull identity (external-secret-ghcr.yaml), not a public package.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: nh
           # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
-          # PREREQ: build+push to GHCR and flip the package public before this pulls.
+          # PREREQ: publish ghcr.io/mtgibbs/new-horizons:0.1.0 (private is fine — see imagePullSecrets).
           image: ghcr.io/mtgibbs/new-horizons:0.1.0
           command: ["sleep", "infinity"]
           env:
