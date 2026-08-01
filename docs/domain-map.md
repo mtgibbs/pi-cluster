@@ -335,7 +335,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
   - creds: `renovate-secrets`  _(→ secrets-map.md)_
 
 ### review-hub  ·  Flux: `review-hub` (after: `external-secrets-config`)
-- **Deployment/review-hub** — `ghcr.io/mtgibbs/review-hub:0.7.2` 🔒priv
+- **Deployment/review-hub** — `ghcr.io/mtgibbs/review-hub:0.7.3` 🔒priv
   - creds: `review-hub-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
 
