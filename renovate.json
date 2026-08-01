@@ -7,6 +7,15 @@
   "kubernetes": {
     "managerFilePatterns": ["/clusters/pi-k3s/.+\\.ya?ml$/"]
   },
+  "postUpgradeTasks": {
+    "description": "Regenerate the auto-derived maps so an image-tag bump can't drift docs/domain-map.md (the domain map records image tags) and fail the required `drift` check. Runs once per branch after upgrades apply; the changed docs are folded into Renovate's commit. Must be allow-listed on the self-hosted runner via RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS (see clusters/pi-k3s/renovate/cronjob.yaml).",
+    "commands": [
+      "node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md",
+      "node scripts/gen-secrets-graph.mjs clusters --inject docs/secrets-map.md"
+    ],
+    "fileFilters": ["docs/domain-map.md", "docs/secrets-map.md"],
+    "executionMode": "branch"
+  },
   "flux": {
     "managerFilePatterns": ["/clusters/pi-k3s/.+\\.ya?ml$/"]
   },

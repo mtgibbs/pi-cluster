@@ -30,6 +30,12 @@ spec:
               env:
                 - name: RENOVATE_PLATFORM
                   value: github
+                  # Allow-list the postUpgradeTasks commands from renovate.json
+                  # (self-hosted security gate — repo config alone can't run
+                  # commands). Regenerates the auto-derived maps after a bump so
+                  # image-tag changes don't drift docs/domain-map.md.
+                - name: RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS
+                  value: "[\"^node scripts/gen-(domain-map|secrets-graph)\\\\.mjs .*$\"]"
                 - name: RENOVATE_AUTODISCOVER
                   value: "false"
                 - name: RENOVATE_REPOSITORIES
