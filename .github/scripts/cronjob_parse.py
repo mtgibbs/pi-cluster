@@ -32,6 +32,14 @@ def script_text(job_spec):
     return "\n".join(parts)
 
 
+def container_images(job_spec):
+    """Image refs across init + main containers. A job with no inline command/args
+    is not un-analysable — its behaviour IS its image's entrypoint, so the judge
+    needs the image to reason about a script-less (image-only) job."""
+    _, containers = _containers(job_spec)
+    return [c.get("image", "?") for c in containers if c.get("image")]
+
+
 def writable_shared_volumes(job_spec):
     """Names of NFS/PVC volumes mounted writable somewhere in the pod.
 

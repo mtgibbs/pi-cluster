@@ -50,6 +50,21 @@ RE-RUNS the job, and something breaks.
 checked SEPARATELY by a deterministic lint. It is NOT your concern: do NOT fail
 a job, and do NOT list any criterion, merely because a deadline is missing.)
 
+IMAGE-ONLY JOBS (no inline script)
+Some jobs have no command/args — the "container script" section will say NONE —
+because their behaviour is the ENTRYPOINT of a known image. **Do NOT `flag`
+merely because there is no script to read.** Judge from the image's documented
+behaviour PLUS the manifest signals (image, concurrencyPolicy, writable shared
+volumes):
+- A widely-known tool that is idempotent and re-run-safe by design — e.g.
+  `renovate/renovate` (every run re-evaluates and dedupes its branches), a backup
+  image writing to a date-stamped path, a `curlimages/curl` doing a single GET —
+  running with NO writable shared (NFS/PVC) volume is `pass`. `concurrencyPolicy:
+  Forbid` supports (but does not by itself prove) this.
+- Only `flag` if the image is genuinely unknown or opaque and you cannot reason
+  about whether a re-run or an overlap is safe. An unknown image is `flag`
+  (cannot-prove-safe), NOT `fail` (no demonstrated violation) and NOT `pass`.
+
 HOW TO JUDGE
 - For criteria 1-3, be ADVERSARIAL: actively try to construct a concrete failure
   — a specific interleaving of two overlapping runs, or a specific re-run — that
