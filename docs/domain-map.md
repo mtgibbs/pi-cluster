@@ -277,7 +277,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 - **Deployment/lazylibrarian** — `lscr.io/linuxserver/lazylibrarian:6324496a-ls298`
 - **Deployment/lidarr** — `linuxserver/lidarr:3.1.0`
 - **Deployment/prowlarr** — `linuxserver/prowlarr:2.3.5`
-- **Deployment/qbittorrent** — `qmcgaw/gluetun:v3.41.1`, `linuxserver/qbittorrent:5.2.3`
+- **Deployment/qbittorrent** — `qmcgaw/gluetun:v3.41.3`, `linuxserver/qbittorrent:5.2.3`
 - **Deployment/radarr** — `linuxserver/radarr:6.1.1`
 - **Deployment/readarr** — `linuxserver/readarr:0.4.18-develop`
 - **Deployment/sabnzbd** — `linuxserver/sabnzbd:5.0.4`
