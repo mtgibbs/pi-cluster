@@ -1,51 +1,26 @@
 ---
-description: Quick cluster health check - nodes, pods, resources
-allowed-tools: Bash(KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl:*)
+description: Quick cluster health check - nodes, pods, PVCs, secrets
+allowed-tools: mcp__homelab__get_cluster_health, mcp__homelab__get_pvcs, mcp__homelab__get_secrets_status
 ---
 
 # Cluster Health Check
 
-Quick overview of K3s cluster health.
+Quick overview of K3s cluster health, via the homelab MCP (no kubectl needed).
 
 ## Checks to Run
 
-1. **Node status**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl get nodes -o wide
-   ```
+Call these three in **one message** — they're independent:
 
-2. **Resource usage**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl top nodes
-   ```
-
-3. **Non-running pods**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
-   ```
-
-4. **Recent events** (warnings/errors only):
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl get events -A --field-selector type!=Normal --sort-by='.lastTimestamp' | tail -20
-   ```
-
-5. **PVC status**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl get pvc -A
-   ```
-
-6. **ExternalSecrets sync**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl get externalsecrets -A
-   ```
+1. `get_cluster_health` — nodes, resource usage, problem pods, and warning events in one shot.
+   Covers what `kubectl get nodes` + `top nodes` + non-running pods + recent events used to.
+2. `get_pvcs` — PVC status, capacity, storage class, bound volume. Omit `namespace` for all.
+3. `get_secrets_status` — ExternalSecrets sync state.
 
 ## Output Format
 
-Provide a health summary:
-
 | Component | Status | Details |
 |-----------|--------|---------|
-| Node | OK/WARN/CRIT | Memory %, CPU % |
+| Nodes | OK/WARN/CRIT | Memory %, CPU % |
 | Pods | OK/WARN | X running, Y issues |
 | PVCs | OK/WARN | X bound, Y pending |
 | Secrets | OK/WARN | X synced, Y failed |
@@ -53,4 +28,10 @@ Provide a health summary:
 
 **Overall**: GREEN / YELLOW / RED
 
-**Action needed**: List any issues requiring attention
+**Action needed**: List any issues requiring attention.
+
+## If something is broken
+
+This command is a **Read** — a snapshot, nothing more. If it turns up an actual fault, don't
+start troubleshooting inline: that's an **Investigate**, so fan out the `cluster-diagnostics`
+agent one-per-layer (see `CLAUDE.md` → Route the work).

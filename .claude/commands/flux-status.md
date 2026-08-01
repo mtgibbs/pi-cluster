@@ -1,24 +1,27 @@
 ---
 description: Show Flux GitOps synchronization status for all resources
-allowed-tools: Bash(KUBECONFIG=~/dev/pi-cluster/kubeconfig flux:*), Bash(KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl:*)
+allowed-tools: mcp__homelab__get_flux_status
 ---
 
 # Flux Status Check
 
 Show the current state of Flux GitOps synchronization.
 
-## Commands to Run
+## Command to Run
 
-Run these commands and summarize the results:
-
-1. Git source status: `KUBECONFIG=~/dev/pi-cluster/kubeconfig flux get source git flux-system`
-2. All Kustomizations: `KUBECONFIG=~/dev/pi-cluster/kubeconfig flux get kustomizations`
-3. All HelmReleases: `KUBECONFIG=~/dev/pi-cluster/kubeconfig flux get helmrelease -A`
+`get_flux_status` — returns Kustomization and HelmRelease sync state in one call (no args).
 
 ## Output Format
 
-Provide a concise summary:
 1. **Git Sync**: Last sync time, revision
 2. **Kustomizations**: Count ready/total, list any failed
 3. **HelmReleases**: Count ready/total, list any failed
 4. **Action needed**: Yes/No with details if yes
+
+## Notes
+
+- To force a sync, use `reconcile_flux` (omit `resource` for everything, or pass
+  `"kustomization/flux-system/<name>"` for one). **Reconcile the *source* first** — see the
+  gotcha in `docs/flux-gitops.md`.
+- A Kustomization stuck "not ready" is an **Investigate**, not a re-reconcile loop: check
+  `dependsOn`, the namespace, and ExternalSecret sync before forcing again.
