@@ -22,9 +22,10 @@ spec:
         app: new-horizons
     spec:
       # Image stays PRIVATE (it bakes in profile/ = résumé/accomplishments PII) — pulled via the
-      # shared, cluster-wide ghcr-pull identity (external-secret-ghcr.yaml), not a public package.
+      # cluster's EXISTING shared ghcr-pull-secret (external-secret-ghcr.yaml, from the ghcr-read-token
+      # 1Password item; same one Flux + private-exit-node use). No new credential.
       imagePullSecrets:
-        - name: ghcr-pull
+        - name: ghcr-pull-secret
       containers:
         - name: nh
           # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
