@@ -3,67 +3,65 @@
 ## Project Goal
 Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound, with observability (Grafana/Prometheus), using proper IaC practices. Managed via GitOps (Flux) with secrets from 1Password.
 
-## Core Mandates
+## Operating context
 
-### 1. Security First
--   **Never request secrets in conversation.**
--   **Always use 1Password** (`pi-cluster` vault).
--   **Use ExternalSecrets** for Kubernetes integration.
+You run as the **coding-harness** (a container), not the laptop. You reach the cluster through the
+**homelab MCP** (`mcp__homelab__*`) — full reads plus bounded mutations — and can drive the local
+**qwen / Beelink** model via `mcp__local-llm__*` and `oc`. You do **not** have `kubectl`, `op`/1Password,
+`ssh`, or `docker` in-container: anything needing those is either a manifest change (PR-gated, via
+`cluster-ops`) or a laptop/base-image change (report it, don't self-patch). Everything reaches the cluster
+through **Git — PR-gated**, never a direct hand edit. If an MCP call errors, check the tool name
+(`mcp__homelab__<tool>`, not the bare name) before concluding the server is down.
 
-### 2. Diagnostic Discipline (CRITICAL)
-When a user reports something isn't working:
-1. **Prove the server path first.** Check the full backend chain (pod health, logs, upstream deps) BEFORE suggesting client-side causes.
-2. **Cached success ≠ proof.** Stale cache can mask failures. Use tools that bypass caches (e.g., `diagnose_dns` over `test_dns_query`).
-3. **Check every layer.** One green light doesn't prove the layers behind it are healthy.
+## How to work here
 
-### 3. The "Receptionist" Protocol (CRITICAL)
-You are the **Router**. You do not perform technical operations yourself.
-If a user asks how to configure, deploy, or fix something, **YOU MUST**:
+Four principles, in priority order — guidance for judgment, not a script. Apply them; don't recite them.
 
-1.  **Identify the Service** in the index below.
-2.  **Read the Expert Skill** file to load the context.
-3.  **OR Delegate** to the `cluster-ops` agent for execution.
+### 1. Security first
+- **Never request or paste secrets in conversation.** Source of truth is 1Password (`pi-cluster` vault);
+  only `op://` paths live in Git, delivered by ExternalSecrets.
+- **Reuse before mint.** Before adding any credential, load the **`secrets-graph`** skill / read
+  `docs/secrets-map.md` and walk the graph (1Password item → ExternalSecret → k8s Secret → workload).
+  Shared identities are one-per-role: private-image pulls reuse `ghcr-read-token` → `ghcr-pull-secret`,
+  alerts reuse the ntfy/Discord identity. Only genuinely per-workload creds (a service's own DB password,
+  its scoped LiteLLM key) get a new item.
 
-**DO NOT** attempt to answer technical questions from your general knowledge. **ALWAYS** load the skill first.
+### 2. Route the work — Read · Investigate · Change
+The skills hold cluster-specific truth that generic knowledge gets wrong. Reach for the expert instead of
+winging it — *which* expert depends on the verb:
+- **Read** — a one-off status/log/queue check: call the `mcp__homelab__*` tool **directly**. No skill, no agent.
+- **Investigate** — anything multi-layer ("X is broken/slow/down"): fan out the **`cluster-diagnostics`**
+  agent, **one per layer, in parallel**, then synthesize their verdicts. Don't walk the layers serially in
+  the main thread. It carries the Diagnostic Discipline, the MCP gotchas, and pre-built layer-sets
+  (`.claude/skills/cluster-diagnostics/`).
+- **Change** — manifests, deploys, git, `kubectl apply/scale/exec`: load the service's skill for context,
+  then hand the edit/deploy to **`cluster-ops`** (the mutation executor). PR-gated.
 
-**Exception**: For simple MCP status checks and actions (restart, queue check, flux reconcile), call MCP tools directly without loading a skill. Load the skill when the task requires config changes, multi-step troubleshooting, or service architecture knowledge.
+When a task needs a service's architecture (how it's wired, its gotchas), load that service's skill from
+the [Service Index](#service-index) first, and prefer the loaded skill over your priors when they conflict.
 
-### 4. MCP-First Protocol (CRITICAL)
-MCP homelab tools (`mcp__homelab__*`) provide direct, structured access to cluster data.
+### 3. Diagnostic discipline
+Prove the server path first (pod → logs → upstream) before blaming the client. **Cached success ≠ proof** —
+use cache-bypassing tools (`diagnose_dns`, not `test_dns_query`). One green light doesn't prove the layers
+behind it. A clean server trace is a *finding* that points elsewhere, not a dead end. Full discipline + the
+non-obvious tool traps live in the `cluster-diagnostics` skill.
 
-**NEVER use kubectl via `cluster-ops` or Bash when an MCP tool exists for the operation.**
-Only fall back to kubectl for operations with NO MCP equivalent.
-
-#### DNS & Pi-hole
-| Operation | MCP Tool | Status |
-| :--- | :--- | :--- |
-| DNS / Pi-hole status | `get_dns_status` | ⚠️ Stats broken ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) |
-| **Full DNS diagnostic** | **`diagnose_dns`** | ✅ **USE THIS for troubleshooting** (tests Pi-hole + both Unbounds + DNSSEC) |
-| DNS resolution test (cached) | `test_dns_query` | ⚠️ May return stale cache — prefer `diagnose_dns` |
-| Pi-hole query log | `get_pihole_queries` | ✅ |
-| Pi-hole whitelist | `get_pihole_whitelist` | ✅ |
-| Gravity update | `update_pihole_gravity` | ✅ |
-
-#### Other MCP Tools (self-documenting — call directly)
-- **Cluster**: `get_cluster_health`, `get_pod_logs`, `restart_deployment`, `describe_resource`, `get_pvcs`, `get_cronjob_details`, `get_job_logs`
-- **GitOps & Secrets**: `get_flux_status`, `reconcile_flux`, `get_secrets_status`, `refresh_secret`
-- **Infrastructure**: `get_certificate_status`, `get_ingress_status`, `get_tailscale_status`, `get_backup_status`, `trigger_backup`
-- **Media**: `get_media_status`, `fix_jellyfin_metadata`, `touch_nas_path`, `get_subtitle_status`, `get_subtitle_history`, `search_subtitles`
-- **Sonarr/Radarr/SABnzbd**: `get_sonarr_queue`, `get_sonarr_history`, `search_sonarr_episode`, `get_radarr_queue`, `get_radarr_history`, `search_radarr_movie`, `get_sabnzbd_queue`, `get_sabnzbd_history`, `retry_sabnzbd_download`, `pause_resume_sabnzbd`, `get_quality_profile`, `reject_and_search`
-- **Recipes (Mealie)**: `get_mealie_status`, `search_mealie_recipes`, `get_mealie_recipe`, `import_mealie_recipe_url`
-- **Network**: `get_node_networking`, `get_iptables_rules`, `get_conntrack_entries`, `curl_ingress`, `test_pod_connectivity`
-- **UniFi Network** (local stdio): `tool_index`, `execute`, `batch` (go-unifi-mcp, lazy mode)
-
-**Delegate to `cluster-ops` only when you need:**
-- Editing manifests / GitOps files
-- Git operations (commit, push)
-- kubectl commands with NO MCP equivalent (e.g., `scale`, `exec`, `apply`)
-- Complex multi-step troubleshooting requiring shell pipelines
+### 4. MCP over kubectl
+Prefer `mcp__homelab__*` (structured, safe) over shell/kubectl whenever a tool exists; fall back to
+`cluster-ops` + kubectl only for operations with **no** MCP equivalent (`scale`, `exec`, `apply`). The tool
+set is self-documenting — list it via the MCP; this file no longer carries a catalog. The traps that aren't
+obvious (`get_dns_status` stats broken, `get_tailscale_status` false-negative, `test_dns_query` stale cache)
+live in the `cluster-diagnostics` skill.
 
 ## Service Index
 
-| Service | Expert Skill (READ THIS FIRST) | Agent to Use |
+Load the skill when a task needs a service's architecture. The **"Change agent"** column is who executes
+*mutations* (`cluster-ops` unless noted); for *investigation* ("X is broken"), fan out `cluster-diagnostics`
+regardless of service (see [Route the work](#2-route-the-work--read--investigate--change)).
+
+| Service | Expert Skill (READ THIS FIRST) | Change agent |
 | :--- | :--- | :--- |
+| **Cluster diagnostics (any "X is broken")** | `.claude/skills/cluster-diagnostics/SKILL.md` | `cluster-diagnostics` (fan-out, read-only) |
 | **Pi-hole / DNS** | `.claude/skills/dns-ops/SKILL.md` | `cluster-ops` |
 | **Tailscale / VPN** | `.claude/skills/tailscale-ops/SKILL.md` | `cluster-ops` |
 | **Prometheus / Grafana** | `.claude/skills/monitoring-ops/SKILL.md` | `cluster-ops` |
@@ -73,7 +71,9 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Mealie / Recipes** | `docs/recipecate.md` (build plan + AI-provider mechanics) | MCP direct; `cluster-ops` for manifests |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
+| **Domain map / topology** | `docs/domain-map.md` (service→image→creds→storage→ingress→calls + Flux deploy-order DAG; auto-derived) | `cluster-ops` |
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
+| **Secrets / credentials** | `.claude/skills/secrets-graph/SKILL.md` (graph + reuse-before-mint) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
@@ -100,7 +100,11 @@ pi-cluster/
 ## Agents & Commands
 
 ### Sub-Agents
-*   **`cluster-ops`**: The Engineer. Handles ALL kubectl/flux/terminal operations.
+*   **`cluster-diagnostics`**: The Investigator (read-only). Fans out one-per-layer to diagnose
+    "X is broken/slow" via the homelab MCP; returns verdicts, never mutates. Can offload heavy log
+    reasoning to the Beelink qwen. Loads `.claude/skills/cluster-diagnostics/`.
+*   **`cluster-ops`**: The Engineer (mutations). Executes manifest edits, deploys, git, and
+    kubectl-with-no-MCP-equivalent (`scale`/`exec`/`apply`). Sequential, PR-gated. Not for diagnosis.
 *   **`recap-architect`**: The Historian. Summarizes sessions and updates docs.
 
 > **Project-local agent:** `board-designer` (Family Board frontend) lives *inside* its
