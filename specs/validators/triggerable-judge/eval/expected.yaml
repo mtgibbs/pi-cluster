@@ -159,3 +159,16 @@ cases:
       overlapping the scheduled one can double-POST ManualImport for the same
       downloadId. Shared state is the Sonarr/Radarr queue (external API), invisible
       to the lint. Not a clear fail, but the judge should escalate, not wave through.
+
+  - id: 16-image-only-opaque
+    source: specs/validators/triggerable-judge/eval/synthetic/16-image-only-opaque-flag.yaml
+    verdict: flag
+    criteria: [idempotent, concurrency-tolerant]
+    lint: pass
+    judge_value: judge-only
+    why: >
+      Image-only (no script) running an obscure, undocumented image — re-run/overlap
+      behaviour is unknowable from the manifest. Discriminator for the image-only rule:
+      escalate (cannot-prove-safe), NOT auto-pass just because there's no script, and
+      NOT fail (no demonstrated violation). 01-renovate is the same shape with a
+      KNOWN-idempotent image and must pass.
