@@ -1,10 +1,19 @@
 ---
 name: secrets-management
-description: Manage secrets using External Secrets Operator and 1Password. Use when creating ExternalSecrets, troubleshooting secret sync, configuring 1Password items, or bootstrapping the secrets infrastructure.
+description: >
+  AUTHORING and troubleshooting secrets — how to write an ExternalSecret, structure the 1Password
+  item, wire it into a Deployment, debug a failed sync, and bootstrap ESO on a fresh cluster.
+  Pairs with `secrets-graph`: load THAT one first to decide *which* credential to use (reuse
+  before mint, blast radius); load THIS one to actually write and debug the manifest.
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 ---
 
 # Secrets Management with ESO + 1Password
+
+> **Decide before you author.** If the question is "do we already have a credential for this?" or
+> "what breaks if I rotate this?", that's `[[secrets-graph]]` + `docs/secrets-map.md` — go there
+> first. **Reuse before mint.** This skill assumes the decision is made and you're writing the
+> manifest.
 
 ## MCP Quick Actions (USE FIRST)
 
@@ -22,11 +31,13 @@ Use this skill when:
 - Bootstrapping the cluster secrets infrastructure
 - Verifying secret sync status
 
-## Environment
+## Environment — where you're running matters
 
-```bash
-export KUBECONFIG=~/dev/pi-cluster/kubeconfig
-```
+**In the coding-harness container there is no `kubectl`, and no `op`/1Password CLI.** You can author
+the ExternalSecret manifest (Edit/Write + PR) and check sync via `get_secrets_status` /
+`refresh_secret`. You **cannot** create or read the 1Password item itself — that needs `op` from the
+laptop. So the usual split is: you write the manifest and name the exact `op://` path and fields
+required; the user (or laptop agent) mints the item. Say which half you did.
 
 ## Architecture
 

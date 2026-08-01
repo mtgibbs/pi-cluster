@@ -15,7 +15,7 @@ through **Git — PR-gated**, never a direct hand edit. If an MCP call errors, c
 
 ## How to work here
 
-Four principles, in priority order — guidance for judgment, not a script. Apply them; don't recite them.
+Five principles, in priority order — guidance for judgment, not a script. Apply them; don't recite them.
 
 ### 1. Security first
 - **Never request or paste secrets in conversation.** Source of truth is 1Password (`pi-cluster` vault);
@@ -47,11 +47,21 @@ behind it. A clean server trace is a *finding* that points elsewhere, not a dead
 non-obvious tool traps live in the `cluster-diagnostics` skill.
 
 ### 4. MCP over kubectl
-Prefer `mcp__homelab__*` (structured, safe) over shell/kubectl whenever a tool exists; fall back to
-`cluster-ops` + kubectl only for operations with **no** MCP equivalent (`scale`, `exec`, `apply`). The tool
-set is self-documenting — list it via the MCP; this file no longer carries a catalog. The traps that aren't
-obvious (`get_dns_status` stats broken, `get_tailscale_status` false-negative, `test_dns_query` stale cache)
-live in the `cluster-diagnostics` skill.
+Prefer `mcp__homelab__*` (structured, safe) over shell/kubectl whenever a tool exists. Operations with
+**no** MCP equivalent (`scale`, `exec`, `apply`, `op`, `ssh`) can't run from this container at all —
+name them and hand them back rather than approximating them. The tool set is self-documenting — list it
+via the MCP; this file no longer carries a catalog. The traps that aren't obvious (`test_dns_query` stale
+cache, `get_dns_status`'s `healthy` flag going false on a mere *stats* error, `get_tailscale_status`
+false-negative) live in the `cluster-diagnostics` skill — and **verify a trap when it matters** rather
+than quoting it; that table describes live behaviour and has been wrong in both directions.
+
+### 5. Generated docs are generated — regenerate, never hand-edit
+`docs/secrets-map.md` (its `## Connectivity graph` block) and `docs/domain-map.md` are **derived from the
+manifests** by `scripts/gen-secrets-graph.mjs` / `scripts/gen-domain-map.mjs`, and CI
+(`generated-docs-drift.yml`) fails the PR if they drift. Change the *manifests*, then re-run the
+generator — a hand-edit is wasted work that CI will reject. `bash scripts/check-generated-docs.sh`
+reproduces the gate locally. Prefer this shape for any new cross-cutting map: derived beats curated
+because it can't rot.
 
 ## Service Index
 
@@ -70,10 +80,14 @@ regardless of service (see [Route the work](#2-route-the-work--read--investigate
 | **Backups** | `.claude/skills/backup-ops/SKILL.md` | `cluster-ops` |
 | **Certificates** | `.claude/skills/cert-tls/SKILL.md` | `cluster-ops` |
 | **Mealie / Recipes** | `docs/recipecate.md` (build plan + AI-provider mechanics) | MCP direct; `cluster-ops` for manifests |
-| **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
-| **Domain map / topology** | `docs/domain-map.md` (service→image→creds→storage→ingress→calls + Flux deploy-order DAG; auto-derived) | `cluster-ops` |
-| **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
-| **Secrets / credentials** | `.claude/skills/secrets-graph/SKILL.md` (graph + reuse-before-mint) | `cluster-ops` |
+| **Flux / GitOps — reference** | `docs/flux-gitops.md` (dependency chain, reconcile-source-first, PV mutability, branch protection) | `cluster-ops` |
+| **Flux / GitOps — doing it** | `.claude/skills/flux-deployment/SKILL.md` (deploy a Kustomization/HelmRelease, triage a failed sync) | `cluster-ops` |
+| **Adding a brand-new service** | `.claude/skills/add-service/SKILL.md` (full scaffold: ns/deploy/svc/ingress/ExternalSecret + Flux + Homepage + AutoKuma) | `cluster-ops` |
+| **Auto-deploy on image push** | `.claude/skills/image-automation/SKILL.md` (Flux ImageUpdateAutomation; the bot that commits tag bumps to `main`) | `cluster-ops` |
+| **Domain map / topology** | `docs/domain-map.md` (service→image→creds→storage→ingress→calls + Flux deploy-order DAG; **generated**) | `cluster-ops` |
+| **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` (also the only record of the non-GitOps UDM firewall + IPv6 DNS blackout config) | MCP direct (local stdio) |
+| **Secrets — which credential?** | `.claude/skills/secrets-graph/SKILL.md` + `docs/secrets-map.md` (**generated** graph; reuse-before-mint, blast radius) | `cluster-ops` |
+| **Secrets — writing the manifest** | `.claude/skills/secrets-management/SKILL.md` (author an ExternalSecret, 1Password item shape, debug a failed sync, ESO bootstrap) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
@@ -103,8 +117,9 @@ pi-cluster/
 *   **`cluster-diagnostics`**: The Investigator (read-only). Fans out one-per-layer to diagnose
     "X is broken/slow" via the homelab MCP; returns verdicts, never mutates. Can offload heavy log
     reasoning to the Beelink qwen. Loads `.claude/skills/cluster-diagnostics/`.
-*   **`cluster-ops`**: The Engineer (mutations). Executes manifest edits, deploys, git, and
-    kubectl-with-no-MCP-equivalent (`scale`/`exec`/`apply`). Sequential, PR-gated. Not for diagnosis.
+*   **`cluster-ops`**: The Engineer (mutations). Executes manifest edits, GitOps deploys, git+PR, and
+    the bounded MCP mutations. Sequential, PR-gated. Not for diagnosis. Runs in this container, so it
+    has no `kubectl`/`op`/`ssh` — it *names and escalates* those instead of running them.
 *   **`recap-architect`**: The Historian. Summarizes sessions and updates docs.
 
 > **Project-local agent:** `board-designer` (Family Board frontend) lives *inside* its
@@ -114,8 +129,13 @@ pi-cluster/
 > the nested `clusters/pi-k3s/family-board/CLAUDE.md` auto-loads when working in that dir.
 
 ### Slash Commands
-*   `/deploy` - Commit, push, and reconcile.
+All of these are **MCP-backed** (they were ported off kubectl/flux, which don't exist here).
+Each is a **Read** or a scoped action — if one surfaces a real fault, switch to Investigate and fan
+out `cluster-diagnostics` rather than troubleshooting inline.
+
+*   `/deploy [msg]` - Commit, open the PR, reconcile after merge.
 *   `/flux-status` - Check GitOps sync state.
-*   `/cluster-health` - Quick pod/node check.
-*   `/test-dns` - Verify resolution.
+*   `/cluster-health` - Nodes, pods, PVCs, secrets.
+*   `/test-dns [domain]` - Verify resolution (cache-bypassing).
+*   `/backup-now` - Trigger the `pvc-backup` CronJob to the QNAP.
 *   `/fix-jellyfin <name>` - Fix media not appearing in Jellyfin after download.

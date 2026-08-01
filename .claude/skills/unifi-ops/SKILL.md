@@ -1,3 +1,14 @@
+---
+name: unifi-ops
+description: >
+  UniFi / UDM Pro Max network operations via the local go-unifi-mcp stdio server. Load for
+  anything touching the gateway, firewall rules, VLANs, Wi-Fi/SSIDs, clients and their MAC
+  addresses, port forwards, DHCP/DNS advertisement, or the controller backup. Also the home
+  of the YouTube/short-form blackout enforcement — the firewall DNS lockdown and the IPv6
+  RA/RDNSS DNS advertisement, which are configured ON THE UDM and are deliberately NOT GitOps,
+  so this skill is their only record.
+---
+
 # UniFi Network Operations
 
 ## Overview
