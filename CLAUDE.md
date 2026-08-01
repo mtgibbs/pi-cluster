@@ -9,10 +9,12 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 -   **Never request secrets in conversation.**
 -   **Always use 1Password** (`pi-cluster` vault).
 -   **Use ExternalSecrets** for Kubernetes integration.
--   **Reuse before mint** — read `docs/secrets-map.md` **before** adding any credential. Shared
-    identities are one-per-role, not one-per-service: private-image pulls always reuse
-    `ghcr-read-token` → `ghcr-pull-secret`; alerts reuse the ntfy/Discord identity. Only genuinely
-    per-workload creds (this service's DB password, its own scoped LiteLLM key) get a new item.
+-   **Reuse before mint** — load the **`secrets-graph`** skill (`.claude/skills/secrets-graph/`) /
+    read `docs/secrets-map.md` **before** adding any credential. Walk the graph (1Password item →
+    ExternalSecret → k8s Secret → workload) to see if the cred already exists. Shared identities are
+    one-per-role, not one-per-service: private-image pulls always reuse `ghcr-read-token` →
+    `ghcr-pull-secret`; alerts reuse the ntfy/Discord identity. Only genuinely per-workload creds
+    (this service's DB password, its own scoped LiteLLM key) get a new item.
 
 ### 2. Diagnostic Discipline (CRITICAL)
 When a user reports something isn't working:
@@ -78,6 +80,7 @@ Only fall back to kubectl for operations with NO MCP equivalent.
 | **Mealie / Recipes** | `docs/recipecate.md` (build plan + AI-provider mechanics) | MCP direct; `cluster-ops` for manifests |
 | **Flux / GitOps** | `docs/flux-gitops.md` | `cluster-ops` |
 | **UniFi / Network** | `.claude/skills/unifi-ops/SKILL.md` | MCP direct (local stdio) |
+| **Secrets / credentials** | `.claude/skills/secrets-graph/SKILL.md` (graph + reuse-before-mint) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
