@@ -101,11 +101,14 @@ spec:
                       fi
                     done < /etc/pihole-config/adlists.txt
 
-                    # Add all adlists via API (batch add)
+                    # Add all adlists via API (batch add).
+                    # groups [0,1]: apply to BOTH Default(0) AND adults(1) so that
+                    # YouTube-blackout allowlisted devices (adults group) STILL get
+                    # ad-blocking. If this is [0] only, allowlisted devices see ads.
                     if [ -n "$URLS" ]; then
                       curl -s -X POST "http://localhost/api/lists?type=block&sid=${SID}" \
                         -H "Content-Type: application/json" \
-                        -d "{\"address\":[${URLS}],\"comment\":\"GitOps managed\",\"groups\":[0],\"enabled\":true}" \
+                        -d "{\"address\":[${URLS}],\"comment\":\"GitOps managed\",\"groups\":[0,1],\"enabled\":true}" \
                         || true
                     fi
 

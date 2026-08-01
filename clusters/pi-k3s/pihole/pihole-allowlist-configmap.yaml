@@ -36,6 +36,11 @@ data:
     # Wi-Fi Address) or a rotation silently drops its exemption.
     4e:2b:56:67:b1:68   # Matt iPhone
     8e:15:e9:d3:e0:cf   # Julia iPhone (reserved .91)
+
+    # --- Living-room TV (MAC-matched) — adult-controlled shared device ---
+    # No DHCP reservation, so MAC-match is the only robust identifier (covers both
+    # the IPv4 and IPv6 query paths regardless of the TV's current address).
+    20:17:42:d2:f7:6c   # LG webOS TV (LGwebOSTV) — exempt so it can play YouTube in the evenings
     #
     # KIDS — intentionally NOT exempt (removed 2026-07-01 so the blackout applies).
     # Do NOT re-add these — that reopens the YouTube/short-form hole:
