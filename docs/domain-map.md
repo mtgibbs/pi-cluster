@@ -181,7 +181,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 ### cert-manager-config  ·  Flux: `cert-manager-config` (after: `cert-manager`, `external-secrets-config`)
 
 ### cloudflare-tunnel  ·  Flux: `cloudflare-tunnel` (after: `external-secrets-config`)
-- **Deployment/cloudflared** — `alpine:3.24`, `cloudflare/cloudflared:2026.7.2`
+- **Deployment/cloudflared** — `alpine:3.24`, `cloudflare/cloudflared:2026.7.3`
   - creds: `cloudflare-tunnel`  _(→ secrets-map.md)_
   - calls: → `calendar`, → `log-aggregation`, → `mtgibbs-site`, → `n8n`, → `ntfy`, → `review-hub`
 
