@@ -205,8 +205,8 @@ if (flag("--json")) {
   process.stdout.write(JSON.stringify(graph, null, 2) + "\n");
 } else if (flag("--shared")) {
   process.stdout.write(sharedMermaid() + "\n");
-} else if (flag("--inject")) {
-  const target = flag("--inject");
+} else if (flag("--inject") || flag("--check")) {
+  const target = flag("--inject") || flag("--check");
   const BEGIN = "<!-- BEGIN GENERATED:secrets-graph -->";
   const END = "<!-- END GENERATED:secrets-graph -->";
   const block = [
@@ -230,8 +230,17 @@ if (flag("--json")) {
   const src = readFileSync(target, "utf8");
   const re = new RegExp(`${BEGIN}[\\s\\S]*?${END}`);
   const next = re.test(src) ? src.replace(re, block) : src.replace(/\s*$/, "\n\n" + block + "\n");
-  writeFileSync(target, next);
-  process.stderr.write(`[gen-secrets-graph] injected block into ${target}\n`);
+  if (flag("--check")) {
+    if (src !== next) {
+      process.stderr.write(`[gen-secrets-graph] DRIFT: ${target} is stale.\n` +
+        `  Run: node scripts/gen-secrets-graph.mjs clusters --inject ${target}\n`);
+      process.exit(1);
+    }
+    process.stderr.write(`[gen-secrets-graph] ok: ${target} up to date\n`);
+  } else {
+    writeFileSync(target, next);
+    process.stderr.write(`[gen-secrets-graph] injected block into ${target}\n`);
+  }
 } else {
   process.stdout.write(nodeIndex() + "\n");
 }

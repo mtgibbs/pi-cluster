@@ -175,8 +175,8 @@ if (flag("--json")) {
   process.stdout.write(JSON.stringify(out, null, 2) + "\n");
 } else if (flag("--deps")) {
   process.stdout.write(depsMermaid() + "\n");
-} else if (flag("--inject")) {
-  const target = flag("--inject");
+} else if (flag("--inject") || flag("--check")) {
+  const target = flag("--inject") || flag("--check");
   const BEGIN = "<!-- BEGIN GENERATED:domain-map -->";
   const END = "<!-- END GENERATED:domain-map -->";
   const block = [
@@ -203,8 +203,17 @@ if (flag("--json")) {
   const src = readFileSync(target, "utf8");
   const re = new RegExp(`${BEGIN}[\\s\\S]*?${END}`);
   const next = re.test(src) ? src.replace(re, block) : src.replace(/\s*$/, "\n\n" + block + "\n");
-  writeFileSync(target, next);
-  process.stderr.write(`[gen-domain-map] injected block into ${target}\n`);
+  if (flag("--check")) {
+    if (src !== next) {
+      process.stderr.write(`[gen-domain-map] DRIFT: ${target} is stale.\n` +
+        `  Run: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject ${target}\n`);
+      process.exit(1);
+    }
+    process.stderr.write(`[gen-domain-map] ok: ${target} up to date\n`);
+  } else {
+    writeFileSync(target, next);
+    process.stderr.write(`[gen-domain-map] injected block into ${target}\n`);
+  }
 } else {
   process.stdout.write(nodeIndex() + "\n");
 }

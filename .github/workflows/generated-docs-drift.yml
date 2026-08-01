@@ -1,0 +1,20 @@
+name: generated-docs-drift
+
+# Fails a PR if a generated doc (docs/secrets-map.md, docs/domain-map.md) has
+# drifted from the manifests it's derived from. Runs on EVERY pull request (no
+# path filter) so the `drift` status is always reported — required-check-safe.
+# Fix locally with `bash scripts/check-generated-docs.sh` (prints the exact
+# --inject command per stale doc).
+on:
+  pull_request:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check generated docs match the manifests
+        run: bash scripts/check-generated-docs.sh
