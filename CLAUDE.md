@@ -9,6 +9,10 @@ Build a learning Kubernetes cluster on a Raspberry Pi 5 to run Pi-hole + Unbound
 -   **Never request secrets in conversation.**
 -   **Always use 1Password** (`pi-cluster` vault).
 -   **Use ExternalSecrets** for Kubernetes integration.
+-   **Reuse before mint** — read `docs/secrets-map.md` **before** adding any credential. Shared
+    identities are one-per-role, not one-per-service: private-image pulls always reuse
+    `ghcr-read-token` → `ghcr-pull-secret`; alerts reuse the ntfy/Discord identity. Only genuinely
+    per-workload creds (this service's DB password, its own scoped LiteLLM key) get a new item.
 
 ### 2. Diagnostic Discipline (CRITICAL)
 When a user reports something isn't working:
