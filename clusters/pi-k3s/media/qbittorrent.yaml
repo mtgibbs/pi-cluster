@@ -25,7 +25,7 @@ spec:
       containers:
         # Gluetun VPN sidecar with Proton VPN
         - name: gluetun
-          image: qmcgaw/gluetun:v3.41.1
+          image: qmcgaw/gluetun:v3.41.3
           securityContext:
             capabilities:
               add:
