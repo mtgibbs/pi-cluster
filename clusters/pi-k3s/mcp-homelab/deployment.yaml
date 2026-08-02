@@ -14,6 +14,12 @@ spec:
     metadata:
       labels:
         app: mcp-homelab
+      annotations:
+        # Bump this value to force a pod roll via GitOps. 2026-08-02: roll so the pod
+        # re-reads the rotated Pi-hole password from mcp-homelab-secrets — Pi-hole v6
+        # /api/auth uses it as the password, and secretKeyRef env does not hot-reload.
+        # Context: pi-cluster-mcp#44 (silent auth degrade masked this as a stats 401).
+        pi-cluster.mtgibbs.dev/roll: "2026-08-02-pihole-cred"
     spec:
       serviceAccountName: mcp-homelab
       securityContext:
