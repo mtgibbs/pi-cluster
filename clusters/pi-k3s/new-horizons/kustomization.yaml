@@ -7,12 +7,11 @@ resources:
   # Materializes the SHARED ghcr-pull-secret. Dropped when phase 3 branched off phase 2 before this
   # file existed; without it the private image is an ImagePullBackOff.
   - external-secret-ghcr.yaml
-  # NO external-secret-push.yaml. The Phase-3 ntfy/Matrix tokens are not provisioned, and an
-  # ExternalSecret pointing at absent 1Password fields never syncs — it just sits red forever.
-  # Both refs are `optional: true` on the pod and the alerter skips an unconfigured backend, so
-  # the push path is dormant either way; this way it is dormant WITHOUT a standing false alarm.
-  # To enable pings: add op://pi-cluster/new-horizons/{ntfy-token,matrix-token}, restore the
-  # manifest (see git history for this path), and set MATRIX_ROOM_ID in deployment.yaml.
+  # Restored 2026-08-02, matrix-token only: the dedicated @new-horizons bot exists and
+  # op://pi-cluster/new-horizons/matrix-token is provisioned. ntfy-token remains out of the
+  # manifest (field not provisioned — an absent-field ref would sit red forever, the false
+  # alarm this file was once dropped for); see the header comment in the manifest itself.
+  - external-secret-push.yaml
   - pvc.yaml
   - deployment.yaml
   - service.yaml
