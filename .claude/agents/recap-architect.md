@@ -1,7 +1,13 @@
 ---
 name: recap-architect
-description: Use this agent when you need to document, summarize, or visualize the work that has been done in a session or over time. This includes: updating architecture diagrams after infrastructure changes, writing session recaps after completing features, maintaining project timelines and changelogs, documenting architectural decisions (ADRs), reviewing git commits to extract meaningful summaries, and answering retrospective questions about what was built and why. Examples:\n\n<example>\nContext: User has just finished implementing a new feature or making infrastructure changes.\nuser: "I just finished setting up the monitoring stack with Prometheus and Grafana"\nassistant: "Great work on the monitoring setup! Let me use the recap-architect agent to document what we accomplished and update our architecture documentation."\n<commentary>\nSince the user completed a significant piece of work, use the Task tool to launch the recap-architect agent to document the changes, update diagrams, and capture the decisions made.\n</commentary>\n</example>\n\n<example>\nContext: User wants to understand the history of changes made to the project.\nuser: "What have we done on this project over the last few weeks?"\nassistant: "I'll use the recap-architect agent to review our commit history and documentation to build a timeline of what we've accomplished."\n<commentary>\nThe user is asking for a retrospective view of project progress, which is exactly what the recap-architect agent is designed to handle.\n</commentary>\n</example>\n\n<example>\nContext: User has just finished a working session and wants to wrap up.\nuser: "Let's wrap up for today"\nassistant: "Before we finish, let me use the recap-architect agent to create a session recap documenting what we accomplished today."\n<commentary>\nAt the end of a session, proactively use the recap-architect agent to capture what was done while it's fresh.\n</commentary>\n</example>\n\n<example>\nContext: User modified the deployment architecture.\nuser: "We just changed Pi-hole to use hostNetwork instead of a LoadBalancer"\nassistant: "That's an important architectural change. Let me use the recap-architect agent to update our architecture diagrams and document why we made this decision."\n<commentary>\nArchitectural decisions should be documented with the What, Why, and How. Use the recap-architect agent to capture this.\n</commentary>\n</example>
-model: sonnet
+description: >
+  The Historian — documents work after the fact. Use proactively when a piece of work wraps up
+  ("let's wrap up for today", a feature or migration lands), when an architectural decision needs
+  capturing as an ADR, when ARCHITECTURE.md or the diagrams have fallen behind an infra change, or
+  when the user asks a retrospective question ("what have we done over the last few weeks?").
+  Reads git history and docs to extract What / Why / How. Writes documentation only — it never
+  changes the cluster; that's cluster-ops.
+model: inherit
 color: red
 ---
 

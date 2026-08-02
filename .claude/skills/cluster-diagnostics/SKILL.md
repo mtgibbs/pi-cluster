@@ -37,12 +37,18 @@ layer** and a root cause. Changes are handed to `cluster-ops` (the mutation exec
 | :--- | :--- |
 | DNS resolution | **`diagnose_dns`** — tests Pi-hole + BOTH Unbounds + DNSSEC in one shot, cache-bypassing. |
 | DNS "quick test" | `test_dns_query` may return **stale cache** — do NOT trust a green from it. Prefer `diagnose_dns`. |
-| Pi-hole stats | `get_dns_status` stats are **broken** ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) — don't read query counts from it. |
-| Tailscale health | `get_tailscale_status` reports `ready: false` even when healthy — **trust `kubectl describe connector.tailscale.com`** instead. |
-| Subtitles history | `get_subtitle_history` returns **HTML** (broken) — don't parse it. |
+| **`get_dns_status` says `healthy: false`** | **Read `statsError` before believing it.** The flag is dragged false by a *stats* failure even when every Pi-hole and Unbound pod is Running and ready. Judge DNS health from the `pihole[]`/`unbound[]` pod arrays plus `diagnose_dns` — never from the summary flag alone. |
+| Pi-hole query stats | Currently failing **401 Unauthorized** (verified 2026-08-01): the `PIHOLE_API_TOKEN` the MCP holds no longer matches Pi-hole's app password. That's a **credential** problem in *our* repo (1Password `mcp-homelab/pihole-api-token` → `mcp-homelab/external-secret.yaml`), not an MCP code bug — the older v6-API bug ([#17](https://github.com/mtgibbs/pi-cluster-mcp/issues/17)) is **closed/fixed**. Re-minting needs `op` from the laptop; the container can't. |
+| Tailscale health | `get_tailscale_status` reports connector `ready: false` even when healthy (still true 2026-08-01). No kubectl here, so judge from the **same payload**: `pods[]` all Running/ready + `activeRoutes` populated = healthy. Escalate for `kubectl describe connector.tailscale.com` only if those disagree. |
+| Subtitles history | `get_subtitle_history` returns **HTML** (broken) — don't parse it. Tracked in [#31](https://github.com/mtgibbs/pi-cluster-mcp/issues/31). |
 | Any "it works for me" | that's a cached success. Re-check with a cache-bypassing path before closing. |
 
 Full tool list is self-documenting via the MCP — don't memorize it; this table is only the traps.
+
+**Keep this table honest.** Every row is a claim about live behaviour, so it rots in both directions —
+a bug gets fixed upstream and we keep teaching the workaround, or the cause changes underneath a
+still-true symptom. Both happened to the `get_dns_status` row. When a row actually matters to a
+diagnosis, **verify it in the moment** instead of quoting it, and correct it here when it's wrong.
 
 ## Fan-out patterns (pre-built layer-sets)
 
@@ -51,6 +57,9 @@ Each is a scenario with its independent layers. Load the one that matches the re
 - **[patterns/dns.md](patterns/dns.md)** — "DNS is down / a domain won't resolve / ad-blocking broke."
 - **[patterns/streaming.md](patterns/streaming.md)** — "Jellyfin/Infuse drops mid-stream / playback stalls."
 - **[patterns/deploy-health.md](patterns/deploy-health.md)** — "did my deploy actually come up healthy?"
+- **[patterns/pod-health.md](patterns/pod-health.md)** — "a pod is crashing/Pending, a Service is
+  unreachable" with no recent deploy to blame. Carries the pod-state table and the Pi-specific
+  constraints (8GB nodes, the 1GB pi3, ARM64-only, hostNetwork, node-bound `local-path` PVCs).
 
 **How to run a pattern:**
 - *Claude:* spawn one `cluster-diagnostics` agent per layer in a single message (parallel), or a

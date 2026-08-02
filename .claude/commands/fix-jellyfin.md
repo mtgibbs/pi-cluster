@@ -1,63 +1,46 @@
 ---
 description: Fix media not appearing in Jellyfin after download
-allowed-tools: Bash(KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl:*)
+allowed-tools: mcp__homelab__fix_jellyfin_metadata, mcp__homelab__get_media_status, mcp__homelab__touch_nas_path
+argument-hint: [show or movie name]
 ---
 
 # Fix Jellyfin Media
 
-Troubleshoots and fixes media that was downloaded but isn't appearing in Jellyfin.
+Media was downloaded but isn't appearing in Jellyfin (or shows with missing artwork/metadata).
 
 **Usage**: `/fix-jellyfin <show or movie name>`
 
 ## Steps
 
-1. **Search for the item in Jellyfin's database**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl -n jellyfin exec -it deploy/jellyfin -- \
-     sqlite3 /config/data/library.db \
-     "SELECT Id, Name, Type, DateLastRefreshed FROM TypedBaseItems WHERE Name LIKE '%SEARCH_TERM%' AND Type IN ('MediaBrowser.Controller.Entities.TV.Series', 'MediaBrowser.Controller.Entities.Movies.Movie');"
-   ```
-   Replace `SEARCH_TERM` with the user's input (use `%` wildcards for partial matching).
+1. **Search + refresh in one call**: `fix_jellyfin_metadata(name="$ARGUMENTS")`.
+   It searches Jellyfin for the item and triggers a metadata refresh. If the item is found but
+   metadata is still wrong afterwards, re-run with `replaceAll=true` to discard and re-fetch
+   existing metadata and images. If you already know the ID, pass `itemId` to skip the search.
 
-2. **Check if metadata is incomplete**:
-   - If `DateLastRefreshed` is NULL or empty, the metadata fetch failed
-   - This is why the item doesn't appear in the UI
+2. **If the item isn't found at all**, the problem is upstream of metadata — the file isn't in
+   the library yet. Check, in this order:
+   - `get_media_status` — is Jellyfin itself healthy, and do the library counts look right?
+   - `touch_nas_path(path)` — bump the mtime on the media directory. **inotify does not work over
+     NFS**, so Jellyfin never sees new files by itself; the library scan is what picks them up.
+   - The scan runs **daily at 04:00** (moved off the old 15-minute schedule on 2026-05-29 —
+     frequent scans caused disk-seek contention that dropped streams mid-playback). So a fresh
+     download legitimately may not appear until the next scan. Don't "fix" this by making the
+     scan frequent again.
 
-3. **Get API key from the secret**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl -n jellyfin get secret jellyfin-api-key -o jsonpath='{.data.api-key}' | base64 -d
-   ```
-   If no secret exists, tell user to get it from: Jellyfin Dashboard → API Keys
-
-4. **Trigger full metadata refresh**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl -n jellyfin exec -it deploy/jellyfin -- \
-     curl -s -X POST "http://localhost:8096/Items/ITEM_ID/Refresh?metadataRefreshMode=FullRefresh&imageRefreshMode=FullRefresh" \
-     -H "X-Emby-Token: API_KEY"
-   ```
-   Replace `ITEM_ID` with the ID from step 1 and `API_KEY` from step 3.
-
-5. **Verify the fix**:
-   ```bash
-   KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl -n jellyfin exec -it deploy/jellyfin -- \
-     curl -s "http://localhost:8096/Items/ITEM_ID?api_key=API_KEY" | head -c 500
-   ```
-   Check that metadata fields are now populated.
+3. **If the file isn't where it should be**, this is an import problem, not a Jellyfin problem —
+   check the *arr side (`get_sonarr_queue` / `get_radarr_queue` / `get_sabnzbd_history`) and see
+   the orphaned-download recipe in the `media-services` skill.
 
 ## Output
 
-Report to user:
-- Whether item was found in database
-- What the issue was (NULL metadata, missing entirely, etc.)
-- Whether the fix was successful
-- Tell them to refresh their browser to see the item
+Report:
+- Whether the item was found in Jellyfin
+- What the issue was (missing metadata / not imported / not scanned yet)
+- What was done and whether it worked
+- If a scan is pending, say when it will run rather than implying it's broken
 
-## If Item Not Found in Database
+## Depth
 
-The files may not be in the expected location. Check:
-```bash
-KUBECONFIG=~/dev/pi-cluster/kubeconfig kubectl -n jellyfin exec -it deploy/jellyfin -- \
-  ls -la "/media/tv/" | grep -i "SEARCH_TERM"
-```
-
-If files exist but aren't in database, a library scan is needed first, then run this command again.
+For anything beyond a single refresh — playback stalls, mid-stream drops, library-wide gaps —
+stop and load the `media-services` skill, and treat it as an **Investigate** (fan out
+`cluster-diagnostics` with `patterns/streaming.md`).

@@ -24,50 +24,47 @@ Use this skill when:
 - Adding new services to the GitOps workflow
 - Debugging ExternalSecret synchronization issues
 
-## Environment
+## Environment — where you're running matters
+
+**In the coding-harness container there is no `flux` or `kubectl` CLI and no kubeconfig.** Use the
+MCP table above; that covers status and reconcile, which is most of this skill. The `flux`/`kubectl`
+snippets below are **reference for the laptop path** (or for telling the user what to run) — not
+commands to attempt from here. Don't `export KUBECONFIG=...`; there's no file to point at.
+
+## Key Commands (laptop path)
 
 ```bash
-export KUBECONFIG=~/dev/pi-cluster/kubeconfig
-```
-
-## Key Commands
-
-```bash
-# Check overall Flux status
+# Check overall Flux status          [MCP: get_flux_status]
 flux get all
 flux get kustomizations
 flux get helmrelease -A
 
-# Force reconciliation
+# Force reconciliation               [MCP: reconcile_flux]
 flux reconcile source git flux-system
 flux reconcile kustomization <name>
 flux reconcile helmrelease <name> -n <namespace>
 
-# Debug failed resources
+# Debug failed resources             [no MCP equivalent — laptop only]
 kubectl describe kustomization <name> -n flux-system
 kubectl logs -n flux-system deploy/kustomize-controller
 kubectl logs -n flux-system deploy/helm-controller
 kubectl logs -n flux-system deploy/source-controller
 
-# Check Git sync status
+# Check Git sync status              [MCP: get_flux_status]
 flux get source git flux-system
 ```
 
 ## Dependency Chain
 
-The cluster uses this order (defined in `flux-system/infrastructure.yaml`):
+**Single source of truth: [`docs/flux-gitops.md`](../../../docs/flux-gitops.md).** The chain used to
+be duplicated here and drifted out of date; read it there. The generated deploy-order DAG in
+[`docs/domain-map.md`](../../../docs/domain-map.md) is derived from the actual `dependsOn` fields in
+`flux-system/infrastructure.yaml`, so it's the authoritative version — this skill deliberately no
+longer carries a hand-maintained copy.
 
-1. **external-secrets** → ESO operator + CRDs
-2. **external-secrets-config** → ClusterSecretStore (depends on #1)
-3. **ingress** → nginx-ingress controller
-4. **cert-manager** → cert-manager CRDs + controllers
-5. **cert-manager-config** → ClusterIssuers + Cloudflare secret (depends on #2, #4)
-6. **pihole** → ExternalSecret + workloads (depends on #2)
-7. **monitoring** → kube-prometheus-stack (depends on #2, #3, #5)
-8. **uptime-kuma** → Status page (depends on #2, #3, #5)
-9. **homepage** → Dashboard (depends on #3, #5)
-10. **external-services** → Reverse proxies (depends on #3, #5)
-11. **backup-jobs** → Weekly backups (depends on #6, #7, #8)
+That doc also holds the deep gotchas this skill doesn't repeat: **reconcile the source before the
+Kustomization**, which PV fields are mutable vs immutable (`mountOptions` yes, `nfs.server`/`nfs.path`
+no), the Kustomize namespace-transformer rule, and why `main` is force-push-guarded but not PR-required.
 
 ## Adding New Service to Flux
 
