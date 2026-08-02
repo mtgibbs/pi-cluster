@@ -134,6 +134,29 @@ Root cause: the MCP tool is likely reading a printer column or stale field from 
 
 The Bazarr subtitle history endpoint returns HTML rather than JSON when called via MCP. Use `get_subtitle_status` as the authoritative signal for subtitle state instead.
 
-### `get_dns_status` stats broken
+### `get_dns_status` stats — fixed 2026-08-02 (history worth keeping)
 
-DNS stats via `get_dns_status` are unreliable (see issue #17 in `mtgibbs/pi-cluster-mcp`). Use `diagnose_dns` for any troubleshooting work — it tests the full path including both Unbound instances directly.
+Stats were broken for months and the cause was misdiagnosed twice, so the trail matters more than
+the verdict. Regardless, `diagnose_dns` remains the right tool for troubleshooting — it tests the
+full path including both Unbound instances directly, cache-bypassing.
+
+- **#17** — the original Pi-hole v6 API break. Closed/fixed.
+- **#44** — the `401` that followed. Long recorded (here and in `cluster-diagnostics`) as a stale
+  credential. It wasn't. `stats/summary` was fetched with `requiresAuth = false` — true in v5, not
+  v6 — *and* `authenticate()` swallowed failures and silently degraded to an unauthenticated
+  request, so a perfectly valid password produced a byte-identical `401`. Two defects, one
+  symptom, each masking the other. Fixed in 0.1.25.
+- **#48 / [#49](https://github.com/mtgibbs/pi-cluster-mcp/pull/49)** — 0.1.25 then surfaced a
+  `429`: concurrent requests each fired their own `POST /api/auth` (nothing dedup'd in-flight
+  logins), tripping FTL's login rate limiter, which every retry re-armed — so it never drained on
+  its own. Fixed by single-flighting the login + backing off on 429, **released in 0.1.26**.
+  **If a 429 ever comes back: it is throttling, not a bad credential. Do not rotate the password
+  on it.**
+
+**Current state (verified live 2026-08-02, 0.1.26):** a cold `get_dns_status` — fresh pod, empty
+session cache, the exact condition that used to fail — returns `healthy: true` with full stats
+(395k queries, 17.7% blocked) and no `statsError`. The whole chain is closed.
+
+The recurring lesson: an error message that names a cause is not evidence of that cause. Both
+misdiagnoses came from believing the string instead of checking the Pi-hole side (`get_pod_logs`
+on the pihole pod showed `API: Rate-limiting login attempts` outright).
