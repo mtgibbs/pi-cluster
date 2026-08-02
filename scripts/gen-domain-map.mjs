@@ -26,6 +26,31 @@ const WORKLOAD_KINDS = new Set(["Deployment", "StatefulSet", "DaemonSet", "CronJ
 const SKIP_DIRS = new Set([".git", "node_modules", ".worktrees"]);
 const PRIVATE_RE = /^ghcr\.io\/mtgibbs\//;
 
+/**
+ * Drop the tag/digest from an image reference: `repo:1.2.3` and `repo@sha256:…` both become `repo`.
+ *
+ * DELIBERATE. This map records TOPOLOGY — what runs where, what it needs, who it calls — and a
+ * version number is none of those. Keeping tags made every image bump a map change, and Flux's
+ * ImageUpdateAutomation pushes those straight to main with a deploy key, bypassing the PR gate
+ * that would regenerate the map. So main carried a stale map and the NEXT, unrelated PR inherited
+ * a red `drift` and had to regenerate someone else's bump. That tax was paid twice on 2026-08-02
+ * alone (#125, #126).
+ *
+ * The deployed tag is a property of the CLUSTER, not of this repo, and is better read from the
+ * cluster (`get_flux_status`, `describe_resource`) than from a doc that can only ever be a
+ * snapshot of one moment. Please don't add tags back to make the map "more complete": it would
+ * reintroduce the drift treadmill in exchange for a field that is stale the moment it is written.
+ *
+ * Registry ports survive — the tag separator is only a `:` AFTER the last `/`, so
+ * `registry:5000/img` is untouched while `registry:5000/img:v2` loses just the `:v2`.
+ */
+function stripTag(image) {
+  const at = image.indexOf("@");
+  const ref = at === -1 ? image : image.slice(0, at);
+  const colon = ref.lastIndexOf(":");
+  return colon > ref.lastIndexOf("/") ? ref.slice(0, colon) : ref;
+}
+
 function walk(dir, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(join(dir, e.name), out); }
@@ -76,7 +101,9 @@ for (const file of walk(root)) {
     if (WORKLOAD_KINDS.has(kind)) {
       const s = S(service), name = metaName(d) ?? "?";
       if (/__\w+__/.test(name)) continue; // skip kustomize template placeholders (e.g. restore-__APP__)
-      const imgs = [...d.matchAll(/^[ \t]+image:[ \t]*["']?([^\s"']+)/gm)].map((m) => m[1]);
+      // Tag-stripped at the PARSE boundary, so no downstream consumer — node index, --json,
+      // private-image detection — can leak a version and put us back on the drift treadmill.
+      const imgs = [...d.matchAll(/^[ \t]+image:[ \t]*["']?([^\s"']+)/gm)].map((m) => stripTag(m[1]));
       for (const i of imgs) { s.images.add(i); if (PRIVATE_RE.test(i)) s.privateImages.add(i); }
       s.workloads.push({ kind, name, images: [...new Set(imgs)] });
       // creds consumed
@@ -195,6 +222,8 @@ if (flag("--json")) {
     "## Services",
     "",
     "_Per service: what it runs (🔒priv = private image), needs (creds → `secrets-map.md`, storage), how it's reached (ingress), and who it talks to (calls)._",
+    "",
+    "_Images are listed **without tags** on purpose — this map is topology, and the deployed version is a property of the cluster, not of this repo. Read the live tag with `get_flux_status` / `describe_resource`. (Tags here made every bot image bump a map change, and image-automation pushes bypass the PR gate that regenerates it, so unrelated PRs inherited a red `drift`.)_",
     "",
     nodeIndex(),
     "",

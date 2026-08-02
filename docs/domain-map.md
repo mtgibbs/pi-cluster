@@ -160,22 +160,24 @@ graph LR
 
 _Per service: what it runs (🔒priv = private image), needs (creds → `secrets-map.md`, storage), how it's reached (ingress), and who it talks to (calls)._
 
+_Images are listed **without tags** on purpose — this map is topology, and the deployed version is a property of the cluster, not of this repo. Read the live tag with `get_flux_status` / `describe_resource`. (Tags here made every bot image bump a map change, and image-automation pushes bypass the PR gate that regenerates it, so unrelated PRs inherited a red `drift`.)_
+
 ### backup-jobs  ·  Flux: `backup-jobs` (after: `external-secrets-config`, `pihole`, `monitoring`, `uptime-kuma`)
-- **CronJob/git-mirror-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/k3s-datastore-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/mariadb-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/media-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/postgres-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/pvc-backup** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/restore-test** — `instrumentisto/rsync-ssh:alpine`
-- **CronJob/unifi-backup** — `alpine:3.24`
-- **CronJob/worker2-backup** — `instrumentisto/rsync-ssh:alpine`
+- **CronJob/git-mirror-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/k3s-datastore-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/mariadb-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/media-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/postgres-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/pvc-backup** — `instrumentisto/rsync-ssh`
+- **CronJob/restore-test** — `instrumentisto/rsync-ssh`
+- **CronJob/unifi-backup** — `alpine`
+- **CronJob/worker2-backup** — `instrumentisto/rsync-ssh`
   - creds: `immich-db-password`, `matrix-db-password`, `mealie-db-password`, `n8n-db-password`, `romm-db-password`, `unifi-credentials`  _(→ secrets-map.md)_
   - storage: `restore-canary`
   - calls: → `immich`, → `matrix`, → `mealie`, → `n8n`, → `romm`
 
 ### calendar  ·  Flux: `calendar` (after: `external-secrets-config`)
-- **Deployment/calendar** — `nginx:1.27-alpine`
+- **Deployment/calendar** — `nginx`
   - storage: `calendar-data`
 
 ### cert-manager  ·  Flux: `cert-manager`
@@ -183,12 +185,12 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 ### cert-manager-config  ·  Flux: `cert-manager-config` (after: `cert-manager`, `external-secrets-config`)
 
 ### cloudflare-tunnel  ·  Flux: `cloudflare-tunnel` (after: `external-secrets-config`)
-- **Deployment/cloudflared** — `alpine:3.24`, `cloudflare/cloudflared:2026.7.3`
+- **Deployment/cloudflared** — `alpine`, `cloudflare/cloudflared`
   - creds: `cloudflare-tunnel`  _(→ secrets-map.md)_
   - calls: → `calendar`, → `log-aggregation`, → `mtgibbs-site`, → `n8n`, → `ntfy`, → `review-hub`
 
 ### coredns-custom  ·  Flux: `coredns-custom`
-- **DaemonSet/pi-k3s-hosts-overrides** — `alpine:3.24`
+- **DaemonSet/pi-k3s-hosts-overrides** — `alpine`
 
 ### external-secrets  ·  Flux: `external-secrets`
 
@@ -198,92 +200,92 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
   - ingress: `qnap.lab.mtgibbs.dev`, `unifi.lab.mtgibbs.dev`
 
 ### family-board  ·  Flux: `family-board` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/family-board** — `nginx:1.27-alpine`
+- **Deployment/family-board** — `nginx`
   - creds: `family-board-feed`  _(→ secrets-map.md)_
   - ingress: `board.lab.mtgibbs.dev`
 
 ### flux-notifications  ·  Flux: `flux-notifications` (after: `external-secrets-config`)
 
 ### homepage  ·  Flux: `homepage` (after: `ingress`, `cert-manager-config`)
-- **Deployment/homepage** — `busybox:1.38.0`, `ghcr.io/gethomepage/homepage:v1.13.2`
+- **Deployment/homepage** — `busybox`, `ghcr.io/gethomepage/homepage`
   - creds: `homepage-ai-controlpanel`, `homepage-immich`, `homepage-jellyfin`, `homepage-pihole`, `homepage-pihole-secondary`, `homepage-servarr`, `homepage-tailscale`, `homepage-unifi`  _(→ secrets-map.md)_
   - ingress: `home.lab.mtgibbs.dev`
   - calls: → `immich`, → `jellyfin`, → `log-aggregation`, → `media`, → `monitoring`, → `pihole`, → `uptime-kuma`
 
 ### immich  ·  Flux: `immich` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/immich-postgresql** — `ghcr.io/immich-app/postgres:14-vectorchord0.3.0`
+- **Deployment/immich-postgresql** — `ghcr.io/immich-app/postgres`
   - creds: `immich-secret`  _(→ secrets-map.md)_
   - storage: `immich-postgresql-data`
 
 ### ingress  ·  Flux: `ingress`
 
 ### jellyfin  ·  Flux: `jellyfin` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/jellyfin** — `jellyfin/jellyfin:10.11.11`
+- **Deployment/jellyfin** — `jellyfin/jellyfin`
   - storage: `jellyfin-config`, `jellyfin-video`
   - ingress: `jellyfin.lab.mtgibbs.dev`
 
 ### kiwix  ·  Flux: `kiwix` (after: `ingress`, `cert-manager-config`)
-- **Deployment/kiwix** — `ghcr.io/kiwix/kiwix-tools:3.8.2`
-- **Job/kiwix-seed** — `curlimages/curl:8.21.0`, `ghcr.io/kiwix/kiwix-tools:3.8.2`
+- **Deployment/kiwix** — `ghcr.io/kiwix/kiwix-tools`
+- **Job/kiwix-seed** — `curlimages/curl`, `ghcr.io/kiwix/kiwix-tools`
   - storage: `kiwix-zim`
   - ingress: `kiwix.lab.mtgibbs.dev`
 
 ### kiwix-mcp  ·  Flux: `kiwix-mcp` (after: `external-secrets-config`, `ingress`, `cert-manager-config`, `kiwix`)
-- **Deployment/kiwix-mcp** — `ghcr.io/mtgibbs/kiwix-mcp:0.1.3` 🔒priv
+- **Deployment/kiwix-mcp** — `ghcr.io/mtgibbs/kiwix-mcp` 🔒priv
   - creds: `kiwix-mcp-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `kiwix-mcp.lab.mtgibbs.dev`
   - calls: → `kiwix`
 
 ### local-llm-mcp  ·  Flux: `local-llm-mcp` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/local-llm-mcp** — `ghcr.io/mtgibbs/local-llm-mcp:0.1.1` 🔒priv
+- **Deployment/local-llm-mcp** — `ghcr.io/mtgibbs/local-llm-mcp` 🔒priv
   - creds: `local-llm-mcp-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `local-llm-mcp.lab.mtgibbs.dev`
 
 ### log-aggregation  ·  Flux: `log-aggregation` (after: `cloudflare-tunnel`, `monitoring`)
-- **Deployment/vector** — `timberio/vector:0.56.0-alpine`
+- **Deployment/vector** — `timberio/vector`
   - creds: `vector-ntfy`  _(→ secrets-map.md)_
   - calls: → `ntfy`
 
 ### matrix  ·  Flux: `matrix` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/element-web** — `vectorim/element-web:v1.12.23`
-- **Deployment/matrix-postgresql** — `postgres:16-alpine`
-- **Deployment/synapse** — `matrixdotorg/synapse:v1.156.0`
+- **Deployment/element-web** — `vectorim/element-web`
+- **Deployment/matrix-postgresql** — `postgres`
+- **Deployment/synapse** — `matrixdotorg/synapse`
   - creds: `matrix-secret`  _(→ secrets-map.md)_
   - storage: `matrix-postgresql-data`, `synapse-data`
   - ingress: `element.lab.mtgibbs.dev`, `matrix.lab.mtgibbs.dev`
 
 ### mcp-homelab  ·  Flux: `mcp-homelab` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **DaemonSet/mcp-debug-agent** — `nicolaka/netshoot:v0.13`
-- **Deployment/mcp-homelab** — `ghcr.io/mtgibbs/pi-cluster-mcp:0.1.26` 🔒priv
+- **DaemonSet/mcp-debug-agent** — `nicolaka/netshoot`
+- **Deployment/mcp-homelab** — `ghcr.io/mtgibbs/pi-cluster-mcp` 🔒priv
   - creds: `mcp-homelab-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `mcp.lab.mtgibbs.dev`
 
 ### mealie  ·  Flux: `mealie` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/mealie** — `ghcr.io/mealie-recipes/mealie:v3.20.1`
-- **Deployment/mealie-postgresql** — `postgres:16-alpine`
-- **Job/mealie-ai-provider-bootstrap-v3** — `python:3.12-alpine`
+- **Deployment/mealie** — `ghcr.io/mealie-recipes/mealie`
+- **Deployment/mealie-postgresql** — `postgres`
+- **Job/mealie-ai-provider-bootstrap-v3** — `python`
   - creds: `mealie-ai-secret`, `mealie-secret`  _(→ secrets-map.md)_
   - storage: `mealie-data`, `mealie-postgresql-data`
   - ingress: `recipes.lab.mtgibbs.dev`
 
 ### media  ·  Flux: `media` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **CronJob/import-resolver** — `alpine:3.24`
-- **CronJob/orphan-sweep** — `alpine:3.24`
-- **Deployment/bazarr** — `linuxserver/bazarr:1.5.6`
-- **Deployment/calibre-web** — `lscr.io/linuxserver/calibre-web:0.6.26`
-- **Deployment/flaresolverr** — `ghcr.io/flaresolverr/flaresolverr:v3.5.0`
-- **Deployment/jellyseerr** — `fallenbagel/jellyseerr:2.7.3`
-- **Deployment/lazylibrarian** — `lscr.io/linuxserver/lazylibrarian:6324496a-ls298`
-- **Deployment/lidarr** — `linuxserver/lidarr:3.1.0`
-- **Deployment/prowlarr** — `linuxserver/prowlarr:2.3.5`
-- **Deployment/qbittorrent** — `qmcgaw/gluetun:v3.41.3`, `linuxserver/qbittorrent:5.2.3`
-- **Deployment/radarr** — `linuxserver/radarr:6.1.1`
-- **Deployment/readarr** — `linuxserver/readarr:0.4.18-develop`
-- **Deployment/sabnzbd** — `linuxserver/sabnzbd:5.0.4`
-- **Deployment/sonarr** — `linuxserver/sonarr:4.0.17`
+- **CronJob/import-resolver** — `alpine`
+- **CronJob/orphan-sweep** — `alpine`
+- **Deployment/bazarr** — `linuxserver/bazarr`
+- **Deployment/calibre-web** — `lscr.io/linuxserver/calibre-web`
+- **Deployment/flaresolverr** — `ghcr.io/flaresolverr/flaresolverr`
+- **Deployment/jellyseerr** — `fallenbagel/jellyseerr`
+- **Deployment/lazylibrarian** — `lscr.io/linuxserver/lazylibrarian`
+- **Deployment/lidarr** — `linuxserver/lidarr`
+- **Deployment/prowlarr** — `linuxserver/prowlarr`
+- **Deployment/qbittorrent** — `qmcgaw/gluetun`, `linuxserver/qbittorrent`
+- **Deployment/radarr** — `linuxserver/radarr`
+- **Deployment/readarr** — `linuxserver/readarr`
+- **Deployment/sabnzbd** — `linuxserver/sabnzbd`
+- **Deployment/sonarr** — `linuxserver/sonarr`
   - creds: `protonvpn-credentials`, `qbittorrent-credentials`, `servarr-api-keys`  _(→ secrets-map.md)_
   - storage: `bazarr-config`, `calibre-web-config`, `jellyseerr-config`, `lazylibrarian-config`, `lidarr-config`, `media-books`, `media-downloads`, `media-library`, `media-music`, `prowlarr-config`, `qbittorrent-config`, `radarr-config`, `readarr-config`, `sabnzbd-config`, `sonarr-config`
   - ingress: `bazarr.lab.mtgibbs.dev`, `calibre.lab.mtgibbs.dev`, `lazylibrarian.lab.mtgibbs.dev`, `lidarr.lab.mtgibbs.dev`, `prowlarr.lab.mtgibbs.dev`, `qbit.lab.mtgibbs.dev`, `radarr.lab.mtgibbs.dev`, `readarr.lab.mtgibbs.dev`, `requests.lab.mtgibbs.dev`, `sabnzbd.lab.mtgibbs.dev`, `sonarr.lab.mtgibbs.dev`
@@ -293,63 +295,63 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
   - calls: → `log-aggregation`
 
 ### mtgibbs-site  ·  Flux: `mtgibbs-site` (after: `ingress`, `cert-manager-config`)
-- **Deployment/mtgibbs-site** — `ghcr.io/mtgibbs/mtgibbs.xyz:20260709154535` 🔒priv
+- **Deployment/mtgibbs-site** — `ghcr.io/mtgibbs/mtgibbs.xyz` 🔒priv
   - creds: `mtgibbs-github`, `mtgibbs-spotify`, `mtgibbs-tracking`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `site.lab.mtgibbs.dev`
 
 ### n8n  ·  Flux: `n8n` (after: `external-secrets-config`, `ingress`, `cert-manager-config`, `calendar`)
-- **Deployment/n8n** — `n8nio/n8n:2.23.4`
-- **Deployment/n8n-postgresql** — `postgres:16-alpine`
-- **Deployment/n8n-valkey** — `valkey/valkey:8-alpine`
-- **Deployment/n8n-webhook** — `n8nio/n8n:2.23.4`
-- **Deployment/n8n-worker** — `n8nio/n8n:2.23.4`
+- **Deployment/n8n** — `n8nio/n8n`
+- **Deployment/n8n-postgresql** — `postgres`
+- **Deployment/n8n-valkey** — `valkey/valkey`
+- **Deployment/n8n-webhook** — `n8nio/n8n`
+- **Deployment/n8n-worker** — `n8nio/n8n`
   - creds: `n8n-secret`  _(→ secrets-map.md)_
   - storage: `n8n-calendar`, `n8n-data`, `n8n-postgresql-data`, `n8n-valkey-data`
   - ingress: `n8n.lab.mtgibbs.dev`
 
 ### new-horizons  ·  Flux: `new-horizons` (after: `external-secrets-config`)
-- **Deployment/new-horizons** — `ghcr.io/mtgibbs/new-horizons:0.1.0` 🔒priv
+- **Deployment/new-horizons** — `ghcr.io/mtgibbs/new-horizons` 🔒priv
   - creds: `ghcr-pull-secret`, `new-horizons-secrets`  _(→ secrets-map.md)_
   - storage: `new-horizons-data`
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
 
 ### ntfy  ·  Flux: `ntfy` (after: `external-secrets-config`)
-- **Deployment/ntfy** — `binwiederhier/ntfy:v2.26.3`
+- **Deployment/ntfy** — `binwiederhier/ntfy`
   - creds: `ntfy-secret`  _(→ secrets-map.md)_
   - storage: `ntfy-data`
 
 ### pihole  ·  Flux: `pihole` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **CronJob/pihole-brainrot-allow** — `alpine:3.24`
-- **CronJob/pihole-brainrot-block** — `alpine:3.24`
-- **Deployment/pihole** — `pihole/pihole:2026.05.0`
-- **Deployment/pihole-exporter** — `ekofr/pihole-exporter:v1.2.0`
-- **Deployment/pihole-exporter-secondary** — `ekofr/pihole-exporter:v1.2.0`
-- **Deployment/pihole-secondary** — `pihole/pihole:2026.05.0`
-- **Deployment/unbound** — `madnuttah/unbound:1.19.0`
-- **Deployment/unbound-secondary** — `madnuttah/unbound:1.19.0`
-- **Job/pihole-brainrot-setup-adgroups-2** — `alpine:3.24`
+- **CronJob/pihole-brainrot-allow** — `alpine`
+- **CronJob/pihole-brainrot-block** — `alpine`
+- **Deployment/pihole** — `pihole/pihole`
+- **Deployment/pihole-exporter** — `ekofr/pihole-exporter`
+- **Deployment/pihole-exporter-secondary** — `ekofr/pihole-exporter`
+- **Deployment/pihole-secondary** — `pihole/pihole`
+- **Deployment/unbound** — `madnuttah/unbound`
+- **Deployment/unbound-secondary** — `madnuttah/unbound`
+- **Job/pihole-brainrot-setup-adgroups-2** — `alpine`
   - creds: `pihole-secret`  _(→ secrets-map.md)_
   - storage: `pihole-dnsmasq`, `pihole-dnsmasq-secondary`, `pihole-etc`, `pihole-etc-secondary`
   - ingress: `pihole.lab.mtgibbs.dev`
 
 ### private-exit-node  ·  Flux: `private-exit-node` (after: `external-secrets-config`)
-- **Deployment/exit-node-gateway** — `ghcr.io/mtgibbs/private-exit-node:0.1.0` 🔒priv
+- **Deployment/exit-node-gateway** — `ghcr.io/mtgibbs/private-exit-node` 🔒priv
   - creds: `exit-node-secrets`, `ghcr-pull-secret`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
 
 ### renovate  ·  Flux: `renovate` (after: `external-secrets-config`)
-- **CronJob/renovate** — `renovate/renovate:43`
+- **CronJob/renovate** — `renovate/renovate`
   - creds: `renovate-secrets`  _(→ secrets-map.md)_
 
 ### review-hub  ·  Flux: `review-hub` (after: `external-secrets-config`)
-- **Deployment/review-hub** — `ghcr.io/mtgibbs/review-hub:0.7.3` 🔒priv
+- **Deployment/review-hub** — `ghcr.io/mtgibbs/review-hub` 🔒priv
   - creds: `review-hub-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
 
 ### romm  ·  Flux: `romm` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/romm** — `rommapp/romm:4.9.2`
-- **Deployment/romm-mariadb** — `mariadb:11.4`
+- **Deployment/romm** — `rommapp/romm`
+- **Deployment/romm-mariadb** — `mariadb`
   - creds: `romm-secret`  _(→ secrets-map.md)_
   - storage: `romm-config`, `romm-games`, `romm-mariadb-data`, `romm-redis-data`
   - ingress: `romm.lab.mtgibbs.dev`
@@ -359,8 +361,8 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 ### tailscale-config  ·  Flux: `tailscale-config` (after: `tailscale`, `pihole`)
 
 ### uptime-kuma  ·  Flux: `uptime-kuma` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
-- **Deployment/autokuma** — `alpine:3.24`, `ghcr.io/bigboot/autokuma:2.0.0@sha256:8acbd3ad3ec8cb6c066aa0ee541154921283ec78159015937128541921c47974`
-- **Deployment/uptime-kuma** — `louislam/uptime-kuma:2`
+- **Deployment/autokuma** — `alpine`, `ghcr.io/bigboot/autokuma`
+- **Deployment/uptime-kuma** — `louislam/uptime-kuma`
   - creds: `uptime-kuma-secret`  _(→ secrets-map.md)_
   - storage: `autokuma-data`, `uptime-kuma-data`
   - ingress: `status.lab.mtgibbs.dev`
