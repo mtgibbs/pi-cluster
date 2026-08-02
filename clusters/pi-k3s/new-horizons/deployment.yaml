@@ -26,6 +26,25 @@ spec:
       # 1Password item; the same one Flux image-automation + private-exit-node use). No new credential.
       imagePullSecrets:
         - name: ghcr-pull-secret
+      # Create the schema before anything reads it. Every other container SELECTs from `leads`:
+      # on a fresh PVC that table does not exist, so `nh alert` threw
+      # `sqlite3.OperationalError: no such table: leads` every cycle and `nh serve-metrics` would
+      # have failed its probes the same way. "Start empty" only works if something runs `nh init`.
+      # Idempotent (CREATE TABLE IF NOT EXISTS), so it is a no-op on an existing store — including
+      # a restored backup — and a from-scratch rebuild needs no manual step.
+      initContainers:
+        - name: init-store
+          image: ghcr.io/mtgibbs/new-horizons:0.1.0
+          command: ["nh", "init"]
+          env:
+            - name: NH_DB
+              value: "/data/new-horizons.db"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { memory: "32Mi", cpu: "10m" }
+            limits: { memory: "128Mi", cpu: "100m" }
       containers:
         - name: nh
           # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
