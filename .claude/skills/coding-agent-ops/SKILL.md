@@ -264,6 +264,21 @@ SKILL.md), gated by the same tailnet ACLs as everything else on the Beelink.
   a `/tmp` tmpfs. Everything else — including `entrypoint.sh`/`run-task.sh`
   themselves — lives outside `$HOME` specifically so the empty bind mount can
   never shadow them on first boot.
+- **The `/tmp` tmpfs is `noexec`** (Docker tmpfs default — kept deliberately). In
+  the claude containers, Claude Code's scratchpad + EnterWorktree worktrees are
+  therefore redirected to `CLAUDE_CODE_TEMP_DIR=/home/agent/tmp` and
+  `CLAUDE_CODE_WORKTREE_DIR=/home/agent/worktrees` (baked into the image,
+  beelink-ansible#21, 2026-08-02) — exec-capable and disk-backed, NOT an exec
+  tmpfs, because the Beelink's RAM is contended. Symptom if this regresses:
+  `npm ci` dies with EACCES spawning a `node_modules` binary while `npx`-cached
+  tools still run (they cache under `/home/agent`) — builds break, tests
+  half-work, the "writes code it can't test" trap.
+- **Dependency-install policy (Matt, 2026-08-02):** inside the harness
+  containers, `npm ci`/dep installs (postinstall scripts included) are allowed
+  for **`mtgibbs/*` repos with a committed lockfile** — a considered risk for
+  our own code. Don't install deps for third-party repos in there without
+  asking first. (Egress from the containers is currently open — the known gap
+  above — so this policy is the binding line, not a network rule.)
 - `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, non-root (uid 1000),
   `mem_limit`/`cpus` caps.
 - Model access: `http://litellm:4000`, model alias `hot-coder` — same
