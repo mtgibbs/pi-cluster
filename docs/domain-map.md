@@ -256,7 +256,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 
 ### mcp-homelab  ·  Flux: `mcp-homelab` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
 - **DaemonSet/mcp-debug-agent** — `nicolaka/netshoot:v0.13`
-- **Deployment/mcp-homelab** — `ghcr.io/mtgibbs/pi-cluster-mcp:0.1.24` 🔒priv
+- **Deployment/mcp-homelab** — `ghcr.io/mtgibbs/pi-cluster-mcp:0.1.25` 🔒priv
   - creds: `mcp-homelab-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `mcp.lab.mtgibbs.dev`
