@@ -119,6 +119,7 @@ graph LR
   n1roymf4 --> n8qc14h
   n1k98biw["homepage-pihole-secondary<br/>(homepage)"]
   n1roymf4 --> n1k98biw
+  n1roymf4 --> n1onwzk3
   n3et26g["pihole-secret<br/>(pihole)"]
   n1roymf4 --> n3et26g
   n1ivmgwl(["🔑 radarr.lab.mtgibbs.dev"])
@@ -214,9 +215,10 @@ graph LR
     - `ntfy/ntfy-secret`
 - **opensubtitles** → 1 ExternalSecret(s):
     - `media/opensubtitles-credentials`
-- **pihole** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **pihole** → 4 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `homepage/homepage-pihole`
     - `homepage/homepage-pihole-secondary`
+    - `mcp-homelab/mcp-homelab-secrets`
     - `pihole/pihole-secret`
 - **private-exit-node** → 1 ExternalSecret(s):
     - `private-exit-node/exit-node-secrets`
@@ -344,7 +346,7 @@ graph LR
   produces Secret `matrix-secret` in `matrix`
     → `matrix/matrix-postgresql` (Deployment, env)
     → `matrix/synapse` (Deployment, volume)
-- **`mcp-homelab/mcp-homelab-secrets`** ← `mcp-homelab`
+- **`mcp-homelab/mcp-homelab-secrets`** ← `mcp-homelab`, `pihole`
   produces Secret `mcp-homelab-secrets` in `mcp-homelab`
     → `mcp-homelab/mcp-homelab` (Deployment, env)
     → `mcp-homelab/mcp-homelab` (Deployment, volume)
