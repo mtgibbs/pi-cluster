@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: new-horizons
+resources:
+  - namespace.yaml
+  - external-secret.yaml
+  # Materializes the SHARED ghcr-pull-secret. Dropped when phase 3 branched off phase 2 before this
+  # file existed; without it the private image is an ImagePullBackOff.
+  - external-secret-ghcr.yaml
+  - external-secret-push.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml
+
+# alerter.py (the Phase-3 push sidecar's script) as a stable-named ConfigMap.
+configMapGenerator:
+  - name: new-horizons-alerter
+    files:
+      - alerter/alerter.py
+generatorOptions:
+  disableNameSuffixHash: true

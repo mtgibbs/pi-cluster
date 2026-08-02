@@ -47,7 +47,7 @@ spec:
                     ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/${BACKUP_DATE}"
 
                   # PVCs to backup (namespace_pvcname patterns)
-                  PVCS="uptime-kuma_uptime-kuma-data uptime-kuma_autokuma-data pihole_pihole-etc pihole_pihole-dnsmasq monitoring_kube-prometheus-grafana jellyfin_jellyfin-config"
+                  PVCS="uptime-kuma_uptime-kuma-data uptime-kuma_autokuma-data pihole_pihole-etc pihole_pihole-dnsmasq monitoring_kube-prometheus-grafana jellyfin_jellyfin-config new-horizons_new-horizons-data"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"

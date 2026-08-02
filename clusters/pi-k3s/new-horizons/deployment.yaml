@@ -1,0 +1,120 @@
+# new-horizons is a CLI over a single SQLite file, not a web server. This Deployment is a durable
+# RUNNER: it keeps the store PVC mounted and `nh` on PATH so you (or n8n, or a CronJob later) can
+#   kubectl exec -n new-horizons deploy/new-horizons -- nh list
+#   kubectl exec -n new-horizons deploy/new-horizons -- nh stats
+#   kubectl exec ... -- nh fetch-jd --all      # NH_LLM_* wired below for distill/score
+# Phase 2 swaps `sleep infinity` for a real read surface (Grafana exporter / thin UI).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-horizons
+  namespace: new-horizons
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single RWO PVC — never two pods writing the DB at once
+  selector:
+    matchLabels:
+      app: new-horizons
+  template:
+    metadata:
+      labels:
+        app: new-horizons
+    spec:
+      # Image stays PRIVATE (it bakes in profile/ = résumé/accomplishments PII) — pulled via the
+      # cluster's EXISTING shared ghcr-pull-secret (external-secret-ghcr.yaml, from the ghcr-read-token
+      # 1Password item; the same one Flux image-automation + private-exit-node use). No new credential.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: nh
+          # Built from the new-horizons repo (Dockerfile: python:slim + scripts/nh + profile/).
+          # PREREQ: publish ghcr.io/mtgibbs/new-horizons:0.1.0. Private is not merely acceptable, it is
+          # REQUIRED (PII) — see imagePullSecrets above. Do NOT flip this package public.
+          image: ghcr.io/mtgibbs/new-horizons:0.1.0
+          # Phase 2: the runner now SERVES metrics (Prometheus /metrics + /healthz), recomputed per
+          # scrape from the store. You can still `kubectl exec … -- nh list/stats/fetch-jd/score`.
+          command: ["nh", "serve-metrics", "--port", "9109"]
+          ports:
+            - name: metrics
+              containerPort: 9109
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          env:
+            - name: NH_DB
+              value: "/data/new-horizons.db"
+            - name: NH_PROFILE
+              value: "/app/profile/profile.yaml"     # baked into the image
+            - name: NH_LLM_URL
+              value: "https://ai.lab.mtgibbs.dev/v1/chat/completions"   # same Beelink LiteLLM as review-hub
+            - name: NH_LLM_MODEL
+              value: "hot-coder"
+            - name: NH_LLM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: new-horizons-secrets
+                  key: litellm-key
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+        # Phase 3: the push bridge. Shares the store PVC (same pod -> no RWO conflict), loops
+        # `nh alert --json` and pushes new 8+/10 leads to ntfy + Matrix. Idempotent (nh alert's
+        # state file on /data), best-effort, at-most-once. Reuses the nh image; alerter.py from a
+        # ConfigMap. Skips whichever of ntfy/Matrix is unconfigured.
+        - name: alerter
+          image: ghcr.io/mtgibbs/new-horizons:0.1.0
+          command: ["python3", "/etc/alerter/alerter.py"]
+          env:
+            - name: NH_DB
+              value: "/data/new-horizons.db"
+            - name: NH_ALERT_STATE
+              value: "/data/nh-alerted.json"
+            - name: NH_ALERT_MIN_SCORE
+              value: "8"
+            - name: NH_ALERT_INTERVAL
+              value: "900"           # 15 min bridge; the reactive n8n path (needs .eml) fires inline instead
+            # ntfy (unset URL -> skipped). PREREQ: pick a topic; token only if it's protected.
+            - name: NTFY_URL
+              value: "https://ntfy.lab.mtgibbs.dev"
+            - name: NTFY_TOPIC
+              value: "new-horizons"
+            - name: NTFY_TOKEN
+              valueFrom:
+                secretKeyRef: { name: new-horizons-push-secrets, key: ntfy-token, optional: true }
+            # Matrix (unset URL/room/token -> skipped). PREREQ: a bot access token + the room id.
+            - name: MATRIX_URL
+              value: "https://matrix.lab.mtgibbs.dev"
+            - name: MATRIX_ROOM_ID
+              value: ""              # set to the job-search room, e.g. !xxxx:lab.mtgibbs.dev
+            - name: MATRIX_TOKEN
+              valueFrom:
+                secretKeyRef: { name: new-horizons-push-secrets, key: matrix-token, optional: true }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: alerter-script
+              mountPath: /etc/alerter
+              readOnly: true
+          resources:
+            requests: { memory: "32Mi", cpu: "10m" }
+            limits: { memory: "128Mi", cpu: "100m" }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: new-horizons-data
+        - name: alerter-script
+          configMap:
+            name: new-horizons-alerter

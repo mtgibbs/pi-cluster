@@ -9,6 +9,7 @@ resources:
   - dashboard-beelink.yaml
   - dashboard-media-nfs.yaml
   - dashboard-dns-bypass.yaml
+  - dashboard-new-horizons.yaml
   - prometheusrule-beelink.yaml
   - prometheusrule-media-nfs.yaml
   - ingress.yaml

@@ -1,0 +1,17 @@
+# The lead store: one SQLite file (new-horizons.db). Small, single-writer -> local-path RWO.
+# prune:disabled so a Flux prune never deletes the job-search data. Backed up by the pvc-backup
+# CronJob (see clusters/pi-k3s/backup-jobs/backup-cronjob.yaml — new-horizons_new-horizons-data).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: new-horizons-data
+  namespace: new-horizons
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
