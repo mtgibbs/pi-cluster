@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-new-horizons
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  new-horizons.json: |
+    {
+      "annotations": { "list": [] },
+      "description": "new-horizons job search: pipeline funnel, fit-score distribution, and which résumé version gets replies. Source: nh serve-metrics (nh_* gauges).",
+      "editable": true,
+      "graphTooltip": 0,
+      "id": null,
+      "uid": "new-horizons",
+      "title": "Job Search — new-horizons",
+      "tags": ["new-horizons", "job-search"],
+      "schemaVersion": 39,
+      "version": 1,
+      "time": { "from": "now-30d", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "DS_PROMETHEUS",
+            "label": "Prometheus",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Total leads",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [ { "expr": "nh_leads_total", "refId": "A" } ],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] }
+        },
+        {
+          "id": 2, "type": "stat", "title": "Applied",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [ { "expr": "nh_applied_total", "refId": "A" } ],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } }, "overrides": [] }
+        },
+        {
+          "id": 3, "type": "bargauge", "title": "Pipeline funnel (by current stage)",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+          "targets": [ { "expr": "nh_leads_by_stage", "legendFormat": "{{stage}}", "refId": "A", "instant": true } ]
+        },
+        {
+          "id": 4, "type": "piechart", "title": "Fit-score distribution",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value"] } },
+          "targets": [ { "expr": "nh_leads_fit_score_bucket", "legendFormat": "{{bucket}}", "refId": "A", "instant": true } ]
+        },
+        {
+          "id": 5, "type": "table", "title": "Résumé version — applied vs positive (which angle gets replies)",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [
+            { "expr": "nh_resume_version_applied", "legendFormat": "{{version}}", "refId": "A", "instant": true, "format": "table" },
+            { "expr": "nh_resume_version_positive", "legendFormat": "{{version}}", "refId": "B", "instant": true, "format": "table" }
+          ]
+        }
+      ]
+    }

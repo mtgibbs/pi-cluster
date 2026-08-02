@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_35 services · 66 workloads · 36 Flux Kustomizations · 6 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_36 services · 67 workloads · 37 Flux Kustomizations · 7 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -129,6 +129,8 @@ graph LR
   kkuvy6m --> k6rwd
   k19g0j44 --> k6rwd
   kwdw79 --> k6rwd
+  k7t7fws["new-horizons"]
+  k1unc8vb --> k7t7fws
   k5v99c["ntfy"]
   k1unc8vb --> k5v99c
   k1unc8vb --> kfd8pog
@@ -305,6 +307,12 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
   - creds: `n8n-secret`  _(→ secrets-map.md)_
   - storage: `n8n-calendar`, `n8n-data`, `n8n-postgresql-data`, `n8n-valkey-data`
   - ingress: `n8n.lab.mtgibbs.dev`
+
+### new-horizons  ·  Flux: `new-horizons` (after: `external-secrets-config`)
+- **Deployment/new-horizons** — `ghcr.io/mtgibbs/new-horizons:0.1.0` 🔒priv
+  - creds: `ghcr-pull-secret`, `new-horizons-secrets`  _(→ secrets-map.md)_
+  - storage: `new-horizons-data`
+  - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
 
 ### ntfy  ·  Flux: `ntfy` (after: `external-secrets-config`)
 - **Deployment/ntfy** — `binwiederhier/ntfy:v2.26.3`

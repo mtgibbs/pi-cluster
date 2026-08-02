@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_53 ExternalSecrets · 40 1Password items · 64 consumer edges · 14 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_56 ExternalSecrets · 41 1Password items · 66 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -77,6 +77,8 @@ graph LR
   n1uid43c(["🔑 ghcr-read-token"])
   n1dgsmvl["ghcr-pull-secret<br/>(flux-system)"]
   n1uid43c --> n1dgsmvl
+  n1v7jq0b["ghcr-pull-secret<br/>(new-horizons)"]
+  n1uid43c --> n1v7jq0b
   nada4m5["ghcr-pull-secret<br/>(private-exit-node)"]
   n1uid43c --> nada4m5
   n1ofxib0(["🔑 immich"])
@@ -109,6 +111,11 @@ graph LR
   nez177h --> n12hamnt
   n1c98ym["n8n-secret<br/>(n8n)"]
   nez177h --> n1c98ym
+  nmyw6do(["🔑 new-horizons"])
+  nl73o2w["new-horizons-push-secrets<br/>(new-horizons)"]
+  nmyw6do --> nl73o2w
+  n15c4kkr["new-horizons-secrets<br/>(new-horizons)"]
+  nmyw6do --> n15c4kkr
   n11ze3z4(["🔑 ntfy"])
   nojsaoj["vector-ntfy<br/>(log-aggregation)"]
   n11ze3z4 --> nojsaoj
@@ -165,8 +172,9 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
-- **ghcr-read-token** `safe` → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **ghcr-read-token** `safe` → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
+    - `new-horizons/ghcr-pull-secret`
     - `private-exit-node/ghcr-pull-secret`
 - **github-mirror-token** → 1 ExternalSecret(s):
     - `backup-jobs/github-mirror-token`
@@ -208,6 +216,9 @@ graph LR
     - `family-board/family-board-feed`
 - **nas** `crown-jewel` → 1 ExternalSecret(s):
     - `flux-system/nfs-credentials`
+- **new-horizons** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `new-horizons/new-horizons-push-secrets`
+    - `new-horizons/new-horizons-secrets`
 - **newshosting** → 1 ExternalSecret(s):
     - `media/newshosting-credentials`
 - **ntfy** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
@@ -402,6 +413,15 @@ graph LR
     → `n8n/n8n-webhook` (Deployment, envFrom)
     → `n8n/n8n-worker` (Deployment, envFrom)
     → `n8n/n8n` (Deployment, envFrom)
+- **`new-horizons/ghcr-pull-secret`** ← `ghcr-read-token`
+  produces Secret `ghcr-pull-secret` in `new-horizons`
+    → `new-horizons/new-horizons` (Deployment, imagePull)
+- **`new-horizons/new-horizons-push-secrets`** ← `new-horizons`
+  produces Secret `new-horizons-push-secrets` in `new-horizons`
+    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
+- **`new-horizons/new-horizons-secrets`** ← `new-horizons`
+  produces Secret `new-horizons-secrets` in `new-horizons`
+    → `new-horizons/new-horizons` (Deployment, env)
 - **`ntfy/ntfy-secret`** ← `ntfy`
   produces Secret `ntfy-secret` in `ntfy`
     → `ntfy/ntfy` (Deployment, env)
