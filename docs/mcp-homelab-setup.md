@@ -147,9 +147,15 @@ full path including both Unbound instances directly, cache-bypassing.
   request, so a perfectly valid password produced a byte-identical `401`. Two defects, one
   symptom, each masking the other. Fixed in 0.1.25.
 - **#48 / [#49](https://github.com/mtgibbs/pi-cluster-mcp/pull/49)** — 0.1.25 then surfaced a
-  `429`: concurrent requests each fire their own `POST /api/auth` (nothing dedups in-flight
-  logins), tripping FTL's login rate limiter, which every retry re-arms — so it never drains on
-  its own. **A 429 here is throttling, not a bad credential. Do not rotate the password on it.**
+  `429`: concurrent requests each fired their own `POST /api/auth` (nothing dedup'd in-flight
+  logins), tripping FTL's login rate limiter, which every retry re-armed — so it never drained on
+  its own. Fixed by single-flighting the login + backing off on 429, **released in 0.1.26**.
+  **If a 429 ever comes back: it is throttling, not a bad credential. Do not rotate the password
+  on it.**
+
+**Current state (verified live 2026-08-02, 0.1.26):** a cold `get_dns_status` — fresh pod, empty
+session cache, the exact condition that used to fail — returns `healthy: true` with full stats
+(395k queries, 17.7% blocked) and no `statsError`. The whole chain is closed.
 
 The recurring lesson: an error message that names a cause is not evidence of that cause. Both
 misdiagnoses came from believing the string instead of checking the Pi-hole side (`get_pod_logs`
