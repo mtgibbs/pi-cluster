@@ -117,7 +117,10 @@ spec:
             - name: MATRIX_URL
               value: "https://matrix.lab.mtgibbs.dev"
             - name: MATRIX_ROOM_ID
-              value: ""              # set to the job-search room, e.g. !xxxx:lab.mtgibbs.dev
+              # #jobs room (alias #jobs:matrix.lab.mtgibbs.dev), created 2026-08-02; posts as
+              # the dedicated @new-horizons bot user (token via new-horizons-push-secrets).
+              # Room id is addressing, not a credential — knowing it grants no access.
+              value: "!rjPQEHZpfzgnOPBpjI:matrix.lab.mtgibbs.dev"
             - name: MATRIX_TOKEN
               valueFrom:
                 secretKeyRef: { name: new-horizons-push-secrets, key: matrix-token, optional: true }
