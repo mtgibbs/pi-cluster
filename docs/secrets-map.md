@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_56 ExternalSecrets · 41 1Password items · 66 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_55 ExternalSecrets · 41 1Password items · 66 consumer edges · 14 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -111,11 +111,6 @@ graph LR
   nez177h --> n12hamnt
   n1c98ym["n8n-secret<br/>(n8n)"]
   nez177h --> n1c98ym
-  nmyw6do(["🔑 new-horizons"])
-  nl73o2w["new-horizons-push-secrets<br/>(new-horizons)"]
-  nmyw6do --> nl73o2w
-  n15c4kkr["new-horizons-secrets<br/>(new-horizons)"]
-  nmyw6do --> n15c4kkr
   n11ze3z4(["🔑 ntfy"])
   nojsaoj["vector-ntfy<br/>(log-aggregation)"]
   n11ze3z4 --> nojsaoj
@@ -216,8 +211,7 @@ graph LR
     - `family-board/family-board-feed`
 - **nas** `crown-jewel` → 1 ExternalSecret(s):
     - `flux-system/nfs-credentials`
-- **new-horizons** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
-    - `new-horizons/new-horizons-push-secrets`
+- **new-horizons** → 1 ExternalSecret(s):
     - `new-horizons/new-horizons-secrets`
 - **newshosting** → 1 ExternalSecret(s):
     - `media/newshosting-credentials`
@@ -416,9 +410,6 @@ graph LR
 - **`new-horizons/ghcr-pull-secret`** ← `ghcr-read-token`
   produces Secret `ghcr-pull-secret` in `new-horizons`
     → `new-horizons/new-horizons` (Deployment, imagePull)
-- **`new-horizons/new-horizons-push-secrets`** ← `new-horizons`
-  produces Secret `new-horizons-push-secrets` in `new-horizons`
-    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
 - **`new-horizons/new-horizons-secrets`** ← `new-horizons`
   produces Secret `new-horizons-secrets` in `new-horizons`
     → `new-horizons/new-horizons` (Deployment, env)
