@@ -20,6 +20,11 @@ spec:
     metadata:
       labels:
         app: new-horizons
+      annotations:
+        # Bumped to roll the pod when a secret it consumes via optional secretKeyRef changes —
+        # env is captured at container start, so a secret created AFTER the pod came up is
+        # invisible until a roll. Same pattern as mcp-homelab (#123).
+        homelab.mtgibbs.dev/roll: "2026-08-02-matrix-token"
     spec:
       # Image stays PRIVATE (it bakes in profile/ = résumé/accomplishments PII) — pulled via the
       # cluster's EXISTING shared ghcr-pull-secret (external-secret-ghcr.yaml, from the ghcr-read-token
