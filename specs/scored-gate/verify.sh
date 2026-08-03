@@ -85,12 +85,22 @@ cat > "$FX/empty.sh" <<'FIX'
 echo "VERIFY nothing to see here"
 FIX
 
+# crash: every parsed line passes, then the process dies (a cleanup crash). The fail-open trap:
+# the parsed lines say converged; the exit status says broken. Expected: verify_rc=2, exit != 0.
+cat > "$FX/crash.sh" <<'FIX'
+#!/usr/bin/env bash
+echo "  PASS  one"
+echo "  PASS  two"
+exit 2
+FIX
+
 field(){ printf '%s\n' "$1" | sed -n "s/.*${2}=\\([^ ]*\\).*/\\1/p" | head -1; }
 
 m_out="$(bash "$GS" "$FX/mixed.sh" 2>&1)"; m_rc=$?
 a_out="$(bash "$GS" "$FX/allpass.sh" 2>&1)"; a_rc=$?
 e_out="$(bash "$GS" "$FX/empty.sh" 2>&1)"; e_rc=$?
 g_out="$(bash "$GS" /no/such/file/here 2>&1)"; g_rc=$?
+c_out="$(bash "$GS" "$FX/crash.sh" 2>&1)"; c_rc=$?
 
 # =====================================================================================
 # T1 — the core score line. Keyed on the `passed=` marker: absent => T1 unbuilt => PEND.
@@ -154,6 +164,28 @@ if [ "$g_rc" = 2 ]; then
   ok "T3/AC8-arg: unreadable gate path exits 2 with a usage error"
 else
   pend "T3: argument guard (missing/unreadable path -> exit 2)"
+fi
+
+# =====================================================================================
+# T4 — fail-closed verify_rc (amendment 2026-08-03; judge-loop planning check findings 2-3).
+# Keyed on the verify_rc= marker: absent => T4 unbuilt => PEND (multi-task contract shape).
+# =====================================================================================
+if printf '%s' "$a_out" | grep -q 'verify_rc='; then
+  avr=$(field "$a_out" verify_rc)
+  [ "$avr" = 0 ] && ok "AC9: clean gate exposes verify_rc=0" \
+    || no "AC9: verify_rc=$avr on a clean gate, expected 0"
+  cvr=$(field "$c_out" verify_rc)
+  [ "$cvr" = 2 ] && ok "AC9: crashing gate exposes verify_rc=2 (captured exit of bash \"\$V\")" \
+    || no "AC9: verify_rc=$cvr, expected 2 — capture the verifier's exit status"
+  if [ "$c_rc" != 0 ]; then
+    ok "AC9: all-PASS-then-crash exits nonzero (fail-closed; got $c_rc)"
+  else
+    no "AC9 FAIL-OPEN: verifier crashed (rc=2) but gate-score exited 0 — this would commit a broken build"
+  fi
+  [ "$a_rc" = 0 ] && ok "AC9: clean converged gate still exits 0 (no regression)" \
+    || no "AC9: regression — clean gate now exits $a_rc"
+else
+  pend "T4: verify_rc on the score line + fail-closed exit (amendment 2026-08-03)"
 fi
 
 echo
