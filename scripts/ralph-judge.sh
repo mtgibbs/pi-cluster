@@ -53,6 +53,8 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 1 "not inside a git w
 [ -f "$SPEC_DIR/spec.md" ] && [ -f "$SPEC_DIR/verify.sh" ] || die 1 "$SPEC_DIR lacks spec.md/verify.sh"
 command -v jq >/dev/null 2>&1 || die 1 "jq is required"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+[ -z "${RJ_EXPECTED_BRANCH:-}" ] || [ "$BRANCH" = "$RJ_EXPECTED_BRANCH" ] \
+  || die 1 "on branch $BRANCH, expected $RJ_EXPECTED_BRANCH"
 JUDGE_STATE_DIR="${JUDGE_STATE_DIR:-$(git rev-parse --git-path ralph-judge)}"
 mkdir -p "$JUDGE_STATE_DIR" || die 1 "cannot create JUDGE_STATE_DIR"
 LEDGER="$JUDGE_STATE_DIR/ledger.jsonl"; REPORT="$JUDGE_STATE_DIR/report.json"
@@ -115,37 +117,49 @@ s_base="$G_score"; total_base="$G_total"
 apply_cycle(){ # <finding-json> <round> -> 0 accepted, 1 rejected-continue; may die
   local f="$1" round="$2" id problem before_head erc res
   id="$(printf '%s' "$f" | jq -r .id)"; problem="$(printf '%s' "$f" | jq -r .problem)"
+  rejrec(){ printf '%s' "$f" | jq -c --arg reason "$1" --argjson r "$round" \
+    '{id:.id,decision:"rejected",reason:$reason,round:$r,finding:.}'; }
   before_head="$(git rev-parse HEAD)"
   run_bounded "$EXECUTOR_TIMEOUT" $EXECUTOR_CMD "$f"; erc=$?
   if [ "$erc" != 0 ]; then
     restore "$before_head"
-    ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"executor-error\",\"round\":$round}"
+    ledger_add "$(rejrec executor-error)"
     die 1 "executor failed/timed out (rc=$erc) — aborting fail-closed"
   fi
   if [ "$(git rev-parse HEAD)" != "$before_head" ]; then
     restore "$before_head"
-    ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"executor-committed\",\"round\":$round}"
+    ledger_add "$(rejrec executor-committed)"
     die 1 "executor committed — it must never commit"
   fi
-  gate || { restore "$before_head"; ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"gate-error\",\"round\":$round}"; die 1 "post-mutation gate failed to run"; }
+  # scope: any change outside the finding's declared file is a violation (spec §8.4).
+  # this also makes the later `git add -A` provably equivalent to scoped staging.
+  local want stray
+  want="$(printf '%s' "$f" | jq -r .file)"
+  stray="$(git status --porcelain | awk '{print $NF}' | grep -v -x "$want" || true)"
+  if [ -n "$stray" ]; then
+    restore "$before_head"
+    ledger_add "$(rejrec scope-violation)"
+    return 1
+  fi
+  gate || { restore "$before_head"; ledger_add "$(rejrec gate-error)"; die 1 "post-mutation gate failed to run"; }
   local p1="$G_tuple"
-  gate || { restore "$before_head"; ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"gate-error\",\"round\":$round}"; die 1 "post-mutation gate failed to run"; }
+  gate || { restore "$before_head"; ledger_add "$(rejrec gate-error)"; die 1 "post-mutation gate failed to run"; }
   if [ "$p1" != "$G_tuple" ]; then
     restore "$before_head"
-    ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"gate-unstable\",\"round\":$round}"
+    ledger_add "$(rejrec gate-unstable)"
     die 2 "gate-unstable after mutation — needs a human" "gate-unstable"
   fi
   if ! { [ "$G_vrc" = 0 ] && [ "$G_converged" = 1 ] && [ "$G_no_fail" = 1 ] \
          && [ "$G_total" = "$total_base" ] \
          && awk -v a="$G_score" -v b="$s_base" 'BEGIN{exit !(a>=b)}'; }; then
     restore "$before_head"
-    ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"gate-regressed\",\"round\":$round}"
+    ledger_add "$(rejrec gate-regressed)"
     return 1
   fi
   res="$(run_bounded "$JUDGE_TIMEOUT" $JUDGE_CMD --check-resolution "$f")"
   if ! printf '%s' "$res" | jq -e --arg id "$id" 'type=="object" and .id==$id and .resolved==true' >/dev/null 2>&1; then
     restore "$before_head"
-    ledger_add "{\"id\":\"$id\",\"decision\":\"rejected\",\"reason\":\"not-resolved\",\"round\":$round}"
+    ledger_add "$(rejrec not-resolved)"
     return 1
   fi
   [ "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] || die 1 "branch changed mid-run — refusing to commit"
@@ -162,11 +176,14 @@ validate_findings(){ # stdin: raw judge output; stdout: the validated lines; rc 
     [ -n "$line" ] || continue
     printf '%s' "$line" | jq -e '
       type=="object"
-      and (keys|sort == ["category","file","id","kind","problem","spec_anchor","suggested_change"])
+      and (keys|sort == ["category","file","id","kind","line","problem","spec_anchor","suggested_change"])
+      and (.line|type=="number" and .==(.|floor) and .>=1)
       and (.kind=="mutate" or .kind=="gate-gap")
       and (.category=="clarity" or .category=="naming" or .category=="spec-fidelity" or .category=="gate-gap")
       and (.file|type=="string" and (startswith("/")|not) and (split("/")|index("..")==null))
-      and (.problem|type=="string") and (.spec_anchor|type=="string") and (.suggested_change|type=="string")
+      and (.file|length>0)
+      and (.problem|type=="string" and length>0) and (.spec_anchor|type=="string" and length>0)
+      and (.suggested_change|type=="string" and length>0)
     ' >/dev/null 2>&1 || { rc=1; break; }
     id="$(printf '%s' "$line" | jq -r .id)"
     [[ "$id" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { rc=1; break; }
@@ -198,7 +215,7 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
     processed=$((processed+1)); [ "$processed" -gt "$MAX_FINDINGS_PER_ROUND" ] && break
     kind="$(printf '%s' "$line" | jq -r .kind)"
     if [ "$kind" = "gate-gap" ]; then
-      ledger_add "{\"id\":\"$id\",\"decision\":\"gate-gap\",\"round\":$round}"
+      ledger_add "$(printf '%s' "$line" | jq -c --argjson r "$round" '{id:.id,decision:"gate-gap",round:$r,finding:.}')"
       continue
     fi
     # first fresh mutate finding only; later ones wait for a future round against new HEAD
