@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # scripts/gate-score.sh — score a verify.sh gate's output.
-# §10 acceptance criteria + §8 safeguards compiled to runnable assertions: exit 0 = acceptable.
+# Wraps any spec's verify.sh: reruns it, classifies its check lines, and prints a machine-readable
+# score block after a ---GATE-SCORE--- sentinel. READ-ONLY — writes nothing into the tree.
+# (The old header here described fixture-synthesis this script never did — copied from the wrong
+# file, shipped at score 1.000, and became specs/judge-loop §1's founding example. Fixed.)
 #
-# PRESENCE-GATED, PER FEATURE (the ralph contract): runs after EVERY task and must pass, so a
-# check for a not-yet-built feature is PEND, never FAIL. CRITICAL LESSON (2026-07-27, the first
-# dogfood of this very spec): each block below keys its PEND on ITS OWN task's observable output —
-# T1 on the `passed=` line, T2 on the `FAIL:`/`TODO:` lines, T3 on the guard markers. An earlier
-# version keyed everything on "does any count line exist", so the moment T1 printed a partial
-# score line the gate demanded T2+T3 work and T1 could never pass. A presence-gated check MUST key
-# on its own task's output — see the identical warning in specs/harness-multi-repo/verify.sh.
+# THE PEND CONTRACT for the verify.sh gates this script scores (clarified 2026-08-03 after the
+# specs/export incident — evidence in specs/judge-loop/evidence/): a PEND may key ONLY on a
+# DEPENDENCY's observable (another task's deliverable, or an external precondition), NEVER on the
+# task-under-test's own deliverable.
+#   - MULTI-task spec: checks for not-yet-built tasks pend, each keyed on ITS OWN task's
+#     observable (the 2026-07-27 lesson stands — never "does any count line exist", or T1 can
+#     never pass before T2). The loop, not the gate, must demand progress between tasks.
+#   - SINGLE-task spec: a missing deliverable is a hard FAIL, never PEND — pend-on-your-own-task
+#     is exactly what scored "built nothing" as green (specs/export hole #1).
+#   - EVERY shape: scope/litter checks run FIRST and are FATAL. An early exit-0 pend path ahead
+#     of the scope check is the fail-open-ordering bug.
+#   Reference implementation: specs/export/verify.sh in mtgibbs/new-horizons#25.
 #
-# STATIC + SELF-CONTAINED: synthesizes throwaway fixture gates in a mktemp dir and runs the real
-# scripts/gate-score.sh against them. No network, no cluster, no repo mutation.
+# FAIL-CLOSED (amendment 2026-08-03; judge-loop planning-check findings 2-3): the verifier's own
+# exit status is captured and exposed as verify_rc=<n> on the score line, and this script exits
+# nonzero whenever the verifier did — a gate that prints PASS lines and then crashes is a FAILING
+# gate, not a converged one. NOTE for consumers (judge-loop et al.): also compare `total` against
+# your own baseline; score alone cannot detect check-deletion (10/10 and 1/1 both read 1.000).
 set -uo pipefail
 
 # ARG GUARD — if $1 is missing or is not a readable file, print a usage error to stderr naming the
@@ -24,8 +35,9 @@ fi
 V="$1"
 
 # Run the target gate capturing stdout AND stderr COMBINED (bash "$V" 2>&1 — FAIL lines are emitted
-# to stderr; a stdout-only capture scores every failing gate as passing).
-run="$(bash "$V" 2>&1)"
+# to stderr; a stdout-only capture scores every failing gate as passing) AND its exit status —
+# discarding $? here was fail-open bug #1: PASS lines + a crash during cleanup scored converged.
+run="$(bash "$V" 2>&1)"; vrc=$?
 
 # Print the raw captured output verbatim first (subtract nothing).
 printf '%s\n' "$run"
@@ -63,9 +75,9 @@ else
   score="$(awk -v p="$passed" -v t="$total" 'BEGIN{ printf "%.3f", p/t }')"; extra=""
 fi
 
-# Print the sentinel line and score line
+# Print the sentinel line and score line (verify_rc = the wrapped verifier's own exit status)
 echo "---GATE-SCORE---"
-echo "passed=$passed failed=$failed pending=$pending total=$total score=$score no_fail=$no_fail converged=$converged$extra"
+echo "passed=$passed failed=$failed pending=$pending total=$total score=$score no_fail=$no_fail converged=$converged verify_rc=$vrc$extra"
 
 # After the score line, print one "FAIL: <message>" line for every failed check and one "TODO: <message>"
 # line for every pending check, where <message> is the line with its leading token stripped (everything
@@ -86,8 +98,13 @@ printf '%s\n' "$run" | awk '
   }
 '
 
-# SCORE + EXIT: compute s EXACTLY as the "score line" WORKED EXAMPLE in section 6 — use awk float division
-# (score="$(awk -v p="$passed" -v t="$total" 'BEGIN{printf "%.3f", p/t}')"), NOT bash $((p/t)) which is integer
-# and always yields 0.000. When t>0, exit 0 when converged==1 else exit 1. When t==0 (the gate emitted no parseable checks)
-# you MUST print score=0.000 LITERALLY (never blank), ALSO include error=no-checks-parsed and exit 2.
-[ "$total" -eq 0 ] && exit 2 || [ "$converged" -eq 1 ] && exit 0 || exit 1
+# EXIT (fail-closed): t==0 -> exit 2 (no parseable checks — error=no-checks-parsed already on the
+# score line). Otherwise exit 0 ONLY when converged==1 AND verify_rc==0: a verifier that printed
+# green lines but exited nonzero is broken, not converged. Everything else -> exit 1.
+if [ "$total" -eq 0 ]; then
+  exit 2
+elif [ "$converged" -eq 1 ] && [ "$vrc" -eq 0 ]; then
+  exit 0
+else
+  exit 1
+fi

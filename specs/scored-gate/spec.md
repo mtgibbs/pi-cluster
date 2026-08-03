@@ -218,13 +218,20 @@ the gate.
    `  PASS  invalid repo exits non-zero`), the leading token **shall** decide its bucket — the
    body **shall not** change the count.
 8. **The** tool **shall not** modify the working tree (read-only).
+9. *(amendment 2026-08-03 — judge-loop planning-check findings 2–3)* **The** score line **shall**
+   include `verify_rc=<n>` carrying the wrapped verifier's own exit status, and **when** that
+   status is nonzero the tool **shall exit nonzero** even if every parsed check passed — a gate
+   that prints PASS lines and then crashes is failing, not converged. Consumers comparing runs
+   **shall** also compare `total` against their baseline (score alone cannot detect
+   check-deletion: 10/10 and 1/1 both read 1.000).
 
 ## 11. Verification (the harness)
 
 `./specs/scored-gate/verify.sh` — STATIC, offline, presence-gated. It synthesizes fixture gate
 scripts (a mixed one covering every spelling incl. the `ok`/`PEND` outliers and a body-with-"fail"
-trap; an all-pass one; an empty one) and asserts `gate-score.sh`'s counts, score, booleans, exit
-codes, and itemized lines against them. No network, no cluster.
+trap; an all-pass one; an empty one; an all-PASS-then-`exit 2` crash one) and asserts
+`gate-score.sh`'s counts, score, booleans, exit codes, `verify_rc`, and itemized lines against
+them. No network, no cluster.
 
 ## 12. Open questions
 
