@@ -141,3 +141,28 @@ agent-bus upload ./plan.md agents                  # upload a file + post the li
 **Dependency:** `jq` (the only thing beyond `curl`) — add it to any harness container that
 runs the CLI. Requires the account bootstrap (see `docs/agent-bus.md`) to have populated the
 `agent-bus-<name>` 1Password items.
+
+## `ralph-judge.sh` — the post-convergence judge loop (+ its bindings)
+
+Runs AFTER a spec's gate is green: an independent judge proposes findings against the spec's
+*intent*, an executor applies one mutation per round, and the deterministic gate arbitrates
+every change (spec: `specs/judge-loop/`). Command bindings are REQUIRED and explicit — they
+live at this operator layer by design (first-run triage #3), so the loop never bakes in a
+host's tool paths:
+
+- **`ralph-judge-codex.sh`** — `JUDGE_CMD`: Codex (read-only) emits findings JSONL; also
+  serves `--check-resolution`. A different model family from the executor, on a separate
+  billing lane.
+- **`ralph-judge-exec-qwen.sh`** — `EXECUTOR_CMD`: qwen via `oc run` applies exactly one
+  finding; never commits, never leaves the finding's file.
+
+**Use** (from a clean worktree on a throwaway branch — copy the gitignored `opencode.json`
+in first, or headless `oc` auto-rejects every tool call):
+
+```bash
+JUDGE_CMD=scripts/ralph-judge-codex.sh EXECUTOR_CMD=scripts/ralph-judge-exec-qwen.sh \
+  scripts/ralph-judge.sh specs/<feature>
+```
+
+State + report land under the worktree's git-dir (`ralph-judge/ledger.jsonl`, `report.json`);
+exit 0 = completed (see report), 1 = aborted fail-closed, 2 = gate-unstable/needs a human.
