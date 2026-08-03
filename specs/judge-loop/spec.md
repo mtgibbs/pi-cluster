@@ -1,8 +1,10 @@
 # Spec: judge loop — climb above the deterministic gate toward "good"
 
-- **Status:** **Draft v0.2 — revised per the 2026-08-02 Codex planning check**
+- **Status:** **Draft v0.3** — v0.2 folded in the 2026-08-02 Codex planning check
   (`reviews/2026-08-02-codex-planning-check.md`; verdict NEEDS-REVISION, all four BLOCKERs
-  independently verified and folded in). §12's open questions are now RESOLVED. `tasks.txt` +
+  independently verified); v0.3 folds in **field evidence from production**
+  (`evidence/2026-08-03-harness-gate-gap-evidence.md` — four reproduced gate-gap classes from
+  `specs/export` in new-horizons#25). §12's open questions are RESOLVED. `tasks.txt` +
   `verify.sh` remain deferred until the **§6 gate-score interface fix lands** — that is the one
   hard prerequisite.
 - **Owner:** Matt (design by Claude; adversarial review by Codex; executor TBD)
@@ -27,6 +29,14 @@ encoded) is where quality lives.
 This is the judge/gradient layer from the original eval-loop discussion: an **independent reviewer
 that proposes improvements and keeps mutating the solution toward the spec's intent** — bounded so
 it converges instead of bikeshedding forever.
+
+Production proof this layer is necessary (`evidence/2026-08-03-harness-gate-gap-evidence.md`): the
+`specs/export` gate was validated **two ways before handoff** — a reference implementation (15/15)
+and mutation testing (5/5 caught) — and still missed **four distinct defect classes**, every one
+found by reading the diff above a green gate. Both validation techniques share a structural blind
+spot: they only ever run the gate against implementations that *attempted the task*. **A gate
+cannot validate its own blind spots.** That is exactly the gap a judge fills — and why the judge
+reads the **diff against spec intent**, never the gate's verdict.
 
 ## 2. Outcomes (Definition of Done) · [R]
 
@@ -62,6 +72,19 @@ the Finding schema. The **entire judge invocation is rejected before any mutatio
 JSON, missing/extra fields, invalid enums, non-relative paths, invalid line numbers, invalid IDs,
 or duplicate IDs with unequal payloads. Empty output is the only valid zero-finding response — a
 parse failure is never treated as "dry."
+
+**Gate-gap taxonomy** — the four production-reproduced classes (evidence doc §§1–4), each with
+the mechanical question the judge asks. `gate-gap` findings SHOULD name their class:
+
+| class | the defect | the judge's question |
+|---|---|---|
+| `fail-open-ordering` | an early-exit path (pend/presence) returns success before scope/litter checks run | does any exit-0 path skip later checks? |
+| `assertion-theatre` | the assertion checks the feature *said something*, not the *right thing* | is the expected value a literal string instead of a computed comparison against an oracle? |
+| `invariant-blindness` | round-trip/idempotency/symmetry ACs pass when both sides are equally wrong | does every invariant AC also have an absolute anchor? |
+| `fixture-coincidence` | the fixture's data cannot express the failure, so the AC passes for the wrong reason | could this fixture ever produce a failing value — and has this assertion ever been observed RED? |
+
+> A fixture that cannot fail is worse than no fixture — it purchases false confidence, and it
+> survives review because the line item is present and green. *(evidence doc §4)*
 
 **Two injectable commands** — the seam that makes this testable AND model-swappable. Both are
 specified as full contracts (argv, stdin, stdout, exit codes) in tasks — mockable in substance,
@@ -112,6 +135,18 @@ is caught by an objective net — a mutation the judge loves but that breaks a c
 land. The **`--check-resolution` confirmation** closes the other half: a gate-neutral edit that
 *doesn't actually address the finding* is rejected too, so "accepted" means both safe AND on-point.
 
+**The judge's first-class input is the delta between spec prose and gate assertions.** Field
+observation (evidence doc §6): the executor *fixes precisely what is gated and regresses what is
+merely described* — a faithful stamper optimising against the only objective it can observe. The
+judge's value is highest exactly where the spec says something the gate cannot measure, so the
+judge prompt receives spec + diff + the gate's assertion list, and is asked what the spec promises
+that no assertion covers. It never receives the gate's verdict as evidence of quality.
+
+**`escalate` is a legitimate judge verdict.** Some findings need judgment neither model has (the
+export loop's id-preservation fix took a human-verified collision branch). A judge may end the
+run with `escalate` + rationale instead of a mutation — "stop and hand to a human" is a success
+mode of the loop, not a failure of it.
+
 Rejected alternative: a judge with no deterministic anchor. That is a slot machine — always finds
 *something*, "improvements" silently regress, and it never terminates. The gate is what turns
 "keep going toward better" from a random walk into a ratchet.
@@ -157,6 +192,15 @@ Rejected alternative: a judge with no deterministic anchor. That is a slot machi
   changed-file APIs and Check-Run reporting, and return pass/block summaries, not this Finding
   schema. Steal its *patterns* (model-call wrapper, fail-closed defaults, repeated-vote stability),
   not its validators.
+- **Reference implementation of the pend/scope contract ruling:** `specs/export/verify.sh` in
+  new-horizons#25 — PEND keys on the *dependency's* observable, never the task-under-test's own
+  deliverable; missing deliverable on a single-task spec is a hard FAIL; scope/litter checks run
+  first and fatal. The ruling's text ships with the gate-score amendment; that file is the shape
+  to copy.
+- **Red-before-green, per AC (evidence doc §5):** an assertion that has never been observed
+  failing is an assertion of unknown value. The judge's gate-gap checklist asks it mechanically
+  ("has this assertion been seen RED?"); making it a *required field per AC* in the spec template
+  is the deeper constitution-level upgrade, sequenced separately.
 - **Lessons from the scored-gate dogfood — apply them when this becomes tasks:** match task
   granularity to the deliverable; every task must be observable/gradeable; give literal shapes not
   prose; the judge/executor calls MUST be mockable so `verify.sh` can test the loop deterministically.
