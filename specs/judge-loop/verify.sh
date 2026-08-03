@@ -240,8 +240,8 @@ if [ -f "$FXROOT/c1/state/ledger.jsonl" ]; then
   rm -f "$CASE/judge-calls"                  # fresh judge counter; SAME state dir
   finding fx-1 mutate 'swap|solution.txt|line A|line X' > "$CASE/round-1.jsonl"
   runjudge                                   # run 2: must be dry, executor untouched
-  r1=$(wc -l < "$CASE/exec-calls.run1" 2>/dev/null || echo 0)
-  r2=$(wc -l < "$CASE/exec-calls" 2>/dev/null || echo 0)
+  r1=$(wc -l < "$CASE/exec-calls.run1" 2>/dev/null | tr -d ' ' || echo 0)
+  r2=$(wc -l < "$CASE/exec-calls" 2>/dev/null | tr -d ' ' || echo 0)
   if [ "$r1" = 1 ] && [ "$r2" = "$r1" ] && [ "$(cat "$CASE/rc")" = 0 ]; then
     ok "AC-c4: rejected finding stays rejected across runs (persistent ledger)"
   else
