@@ -92,10 +92,12 @@ not just in name:
 
 - `JUDGE_CMD` — reads the spec + the current solution/diff, emits findings (JSONL above). Also
   callable as `JUDGE_CMD --check-resolution <finding-json>`, which MUST emit exactly
-  `{"id":"…","resolved":true|false}` (§4). **Default: Codex (`codex exec`)** — a different model
-  family from the executor (OQ-2).
-- `EXECUTOR_CMD` — applies one finding. **Default: the same `oc run` qwen path `ralph-qwen.sh`
-  uses** — local labor, frontier judgment.
+  `{"id":"…","resolved":true|false}` (§4). **Intended cast: Codex** — a different model family
+  from the executor (OQ-2). *(Amended 2026-08-03, first-run triage #3: the binding is REQUIRED
+  and explicit — defaults live in the operator's wrapper scripts, never baked into the loop,
+  which would couple it to one host's tool paths.)*
+- `EXECUTOR_CMD` — applies one finding. **Intended cast: qwen via `oc run`** — local labor,
+  frontier judgment. Same amendment: REQUIRED and explicit, bound by the operator.
 
 ## 4. Approach · [A]
 
@@ -228,12 +230,16 @@ Rejected alternative: a judge with no deterministic anchor. That is a slot machi
    branch, and empty `git status --porcelain` (untracked included). Each mutation records
    `before_head`; the executor MUST NOT commit; rejection restores exactly `before_head`, removes
    only files created after preflight, and asserts the tree is clean again. Acceptance re-checks
-   the branch and stages only the paths that mutation changed.
+   the branch and stages only the paths that mutation changed — enforced as **scope-violation**:
+   any post-mutation change outside the finding's declared `file` rejects the mutation outright
+   *(amended 2026-08-03, triage #2/#3)*.
 5. **Persistent ledger.** `JUDGE_STATE_DIR` (default under `git rev-parse --git-path ralph-judge`)
    holds an append-only JSONL ledger keyed by repo, branch, spec path, and finding id. Every
    seen/accepted/rejected/gate-gap decision is written atomically BEFORE the loop continues, and
    reloaded on startup — a rejected finding stays rejected across runs; interrupted runs recover
-   by reconciling recorded `before_head`/`after_head` against current HEAD.
+   by reconciling recorded `before_head`/`after_head` against current HEAD. *(Keying note,
+   2026-08-03 triage #5: the default `JUDGE_STATE_DIR` under the worktree's git-dir already
+   provides per-repo/per-branch keying; interrupted-run reconciliation remains open for v1.1.)*
 6. **PR-gated.** Runs in the sandbox/worktree; output is a better branch for human review, never a
    merge.
 7. **Grounded.** An ungrounded / no-`spec_anchor` finding is dropped — no taste-only churn. The

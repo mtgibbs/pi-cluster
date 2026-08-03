@@ -102,6 +102,7 @@ p,o,n = sys.argv[1], sys.argv[2], sys.argv[3]
 s = open(p).read()
 open(p,'w').write(s.replace(o,n))
 EOP
+[ "\$mode" = litter ] && echo stray > stray.txt
 [ "\$mode" = stage ]  && git add -A
 [ "\$mode" = commit ] && { git add -A; git commit -qm rogue; }
 exit 0
@@ -112,7 +113,7 @@ EOS
 }
 
 finding(){ # $1 id, $2 kind, $3 suggested_change -> one JSONL line
-  printf '{"id":"%s","file":"solution.txt","category":"clarity","spec_anchor":"§1","problem":"p","suggested_change":"%s","kind":"%s"}\n' "$1" "$3" "$2"
+  printf '{"id":"%s","file":"solution.txt","line":1,"category":"clarity","spec_anchor":"§1","problem":"p","suggested_change":"%s","kind":"%s"}\n' "$1" "$3" "$2"
 }
 
 runjudge(){ # run ralph-judge in $REPO with the case mocks; stdout+stderr to $CASE/out, rc to $CASE/rc
@@ -201,6 +202,19 @@ else
   no "AC-b5: an unresolved finding was committed — --check-resolution not enforced"
 fi
 
+# case 15: RJ_EXPECTED_BRANCH mismatch -> preflight refuses (triage #4)
+mkcase c15
+finding fx-1 mutate 'swap|solution.txt|junk comment|good comment' > "$CASE/round-1.jsonl"
+( cd "$REPO" && JUDGE_CMD="$CASE/judge.sh" EXECUTOR_CMD="$CASE/exec.sh" JUDGE_STATE_DIR="$STATE" \
+    GATE_SCORE="$(dirname "$RJ_ABS")/gate-score.sh" RJ_EXPECTED_BRANCH=not-this-branch \
+    JUDGE_TIMEOUT=20 EXECUTOR_TIMEOUT=3 GATE_TIMEOUT=20 bash "$RJ_ABS" specs/fx ) > "$CASE/out" 2>&1
+c15rc=$?
+# demand the preflight MESSAGE, not just rc=1 — a schema rejection also exits 1 (masked-red
+# lesson from this very change's red run: rc alone cannot discriminate).
+[ "$c15rc" = 1 ] && [ ! -f "$CASE/exec-calls" ] && grep -q "expected" "$CASE/out" \
+  && ok "AC-e1: RJ_EXPECTED_BRANCH mismatch fails preflight (with the branch message)" \
+  || no "AC-e1: wrong expected branch did not stop preflight properly (rc=$c15rc)"
+
 # =====================================================================================
 # T2 — judge round, JSONL fail-closed, ledger. Keyed on the ledger file (its observable).
 # =====================================================================================
@@ -225,8 +239,9 @@ if [ -f "$FXROOT/c1/state/ledger.jsonl" ]; then
   : > "$CASE/round-2.jsonl"
   runjudge
   if grep -q 'junk comment' "$REPO/solution.txt" && [ ! -f "$CASE/exec-calls" ] \
-     && grep -q '"decision":"gate-gap"' "$STATE/ledger.jsonl" 2>/dev/null; then
-    ok "AC-c3: gate-gap reported-not-applied (spec §4)"
+     && grep -q '"decision":"gate-gap"' "$STATE/ledger.jsonl" 2>/dev/null \
+     && grep -q '"finding"' "$STATE/ledger.jsonl"; then
+    ok "AC-c3: gate-gap reported-not-applied AND payload persisted (spec §4, triage #6)"
   else
     no "AC-c3: gate-gap was executed/applied or not ledgered"
   fi
@@ -246,6 +261,35 @@ if [ -f "$FXROOT/c1/state/ledger.jsonl" ]; then
     ok "AC-c4: rejected finding stays rejected across runs (persistent ledger)"
   else
     no "AC-c4: cross-run replay — run1 exec calls=$r1, after run2=$r2 (want equal, 1) rc=$(cat "$CASE/rc")"
+  fi
+  # case 12: finding missing the spec's line field -> whole invocation rejected (triage #1)
+  mkcase c12
+  printf '{"id":"fx-1","file":"solution.txt","category":"clarity","spec_anchor":"s1","problem":"p","suggested_change":"swap|solution.txt|junk comment|good comment","kind":"mutate"}\n' > "$CASE/round-1.jsonl"
+  runjudge
+  [ "$(cat "$CASE/rc")" = 1 ] && [ ! -f "$CASE/exec-calls" ] \
+    && ok "AC-c5: line-less finding rejected fail-closed (spec §3 table)" \
+    || no "AC-c5: line-less finding was not rejected (rc=$(cat "$CASE/rc"))"
+
+  # case 13: empty required string -> rejected (triage #1)
+  mkcase c13
+  printf '{"id":"fx-1","file":"solution.txt","line":1,"category":"clarity","spec_anchor":"s1","problem":"","suggested_change":"swap|solution.txt|junk comment|good comment","kind":"mutate"}\n' > "$CASE/round-1.jsonl"
+  runjudge
+  [ "$(cat "$CASE/rc")" = 1 ] && [ ! -f "$CASE/exec-calls" ] \
+    && ok "AC-c6: empty required string rejected" \
+    || no "AC-c6: empty problem string accepted (rc=$(cat "$CASE/rc"))"
+
+  # case 14: littering executor -> scope-violation reject + exact restore (triage #3)
+  mkcase c14
+  finding fx-1 mutate 'swap|solution.txt|junk comment|good comment' > "$CASE/round-1.jsonl"
+  : > "$CASE/round-2.jsonl"
+  echo litter > "$CASE/exec-mode"
+  runjudge
+  if [ ! -f "$REPO/stray.txt" ] && grep -q 'junk comment' "$REPO/solution.txt" \
+     && grep -q '"reason":"scope-violation"' "$STATE/ledger.jsonl" 2>/dev/null \
+     && (cd "$REPO" && [ -z "$(git status --porcelain)" ]); then
+    ok "AC-c7s: out-of-file executor change rejected as scope-violation + restored"
+  else
+    no "AC-c7s: littering executor not caught (spec §8.4 staging scope)"
   fi
 else
   pend "T2: judge round + JSONL contract + ledger (ledger.jsonl not yet emitted)"
