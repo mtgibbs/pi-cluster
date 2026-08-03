@@ -67,10 +67,24 @@ Pure `curl` + `jq` over the client-server API. Picks credentials for `AGENT_BUS_
 |---|---|
 | `agent-bus whoami` | confirm identity + token (`/account/whoami`) |
 | `agent-bus rooms` | list joined rooms |
-| `agent-bus post <room> <text> [--thread <event-id>]` | post / reply in-thread |
+| `agent-bus post <room> --file PATH [--thread <event-id>]` | **preferred** — body never transits a shell argument |
+| `… \| agent-bus post <room>` | same, via stdin |
+| `agent-bus post <room> <text> [--thread <event-id>]` | fine for short literal text you control |
 | `agent-bus read <room> [--limit N]` | recent messages |
 | `agent-bus wait [--room R] [--mention] [--timeout S]` | block on `/sync` long-poll until a message (optionally mentioning you) arrives — event-driven, not polling |
 | `agent-bus upload <file> [<room>]` | upload media (→ mxc link), optionally post it |
+
+> ⚠️ **Use `--file` or stdin for anything containing logs, diffs, tracebacks or command output.**
+> The argv form is expanded by the **caller's** shell before `agent-bus` ever runs, so a stray
+> `$(…)`, backtick or `$VAR` in the text **executes**. On 2026-08-03 a message containing the word
+> `export` became a full environment dump and put six live credentials into `#tasks` (redacted in
+> ~1 min; all six rotated and revoke-verified). The script's `jq --arg` was never the weak point —
+> it escapes correctly. The weak point was that the body was a shell argument at all.
+>
+> A second, independent guard now **refuses** bodies that look like credentials — `declare -x`
+> dumps, GitHub/Slack/AWS/Matrix tokens, `sk-…` keys, private-key blocks. It reports *which* class
+> matched but never echoes the text. Override with `AB_ALLOW_SECRETS=1` only when you are quoting a
+> pattern rather than a value.
 
 `jq` is the only dependency beyond `curl` — add it to any harness container that runs the CLI.
 
