@@ -5,8 +5,16 @@
 #
 #   agent-bus whoami                          # confirm identity + token
 #   agent-bus rooms                           # list joined rooms
-#   agent-bus post agents "hello world"       # post to #agents
-#   agent-bus post tasks "task: rom-slugs done" --thread '$evt:...'   # reply in-thread
+#   agent-bus post agents --file msg.txt       # PREFERRED — body never touches a shell argument
+#   … | agent-bus post agents                  # same, via stdin
+#   agent-bus post agents "hello world"        # fine for short literal text you control
+#   agent-bus post tasks --file msg.txt --thread '$evt:...'   # reply in-thread
+#
+# ⚠️ USE --file / stdin FOR ANYTHING CONTAINING LOGS, DIFFS, TRACEBACKS OR COMMAND OUTPUT.
+# The argv form is expanded by the CALLER's shell before this script runs, so a stray $(…),
+# backtick or $VAR in the text executes. On 2026-08-03 a message containing the word `export`
+# became a full environment dump — six live credentials posted to #tasks. A second guard now
+# refuses bodies that look like credentials (override: AB_ALLOW_SECRETS=1).
 #   agent-bus read agents [--limit 20]        # recent messages
 #   agent-bus wait --room tasks --mention --timeout 300   # block until mentioned (/sync long-poll)
 #   agent-bus upload ./plan.md agents         # upload a file, post link to #agents
@@ -90,10 +98,62 @@ case "$cmd" in
     done ;;
 
   post)
-    room="${1:?usage: post <room> <text> [--thread <event-id>]}"; shift
-    thread=""; text=""
-    while [ $# -gt 0 ]; do case "$1" in --thread) thread="$2"; shift 2;; *) text="${text:+$text }$1"; shift;; esac; done
+    room="${1:?usage: post <room> (<text> | --file PATH | -) [--thread <event-id>]}"; shift
+    thread=""; text=""; src=""
+    while [ $# -gt 0 ]; do case "$1" in
+      --thread) thread="$2"; shift 2;;
+      --file)   src="$2"; shift 2;;
+      -)        src="-"; shift;;
+      *)        text="${text:+$text }$1"; shift;;
+    esac; done
+
+    # PREFER --file / stdin. The body is DATA, but the argv path makes it CODE: the caller's shell
+    # expands $(…), backticks and $VAR inside the quoted string long before this script sees a byte
+    # of it. On 2026-08-03 that turned a message containing the word `export` into a full environment
+    # dump — six live credentials posted to #tasks. The `jq --arg` below was never the problem; it
+    # escapes correctly. The problem is that the body transited a shell argument at all.
+    #
+    # Message bodies are exactly where agents paste logs, diffs, tracebacks and error output: the
+    # content most likely to contain the characters that bite. Read it from a file or stdin and the
+    # dangerous path simply does not exist.
+    if [ -n "$src" ]; then
+      [ -n "$text" ] && die "pass the body EITHER as arguments OR via --file/-, not both"
+      if [ "$src" = "-" ]; then text="$(cat)"
+      else
+        [ -r "$src" ] || die "cannot read --file $src"
+        text="$(cat -- "$src")"
+      fi
+    elif [ -z "$text" ] && [ ! -t 0 ]; then
+      text="$(cat)"          # piped body, no text args:  … | agent-bus post tasks
+    fi
     [ -n "$text" ] || die "empty message"
+
+    # Second layer, deliberately independent of the first: refuse to send anything that looks like a
+    # credential. The change above removes the CAUSE; this removes the CONSEQUENCE, and would have
+    # blocked the 2026-08-03 leak even through the mis-escaped argv call. Matches are detected but
+    # never echoed — printing the offending text would leak it to the terminal and the agent
+    # transcript, which is most of the damage this exists to prevent.
+    if [ "${AB_ALLOW_SECRETS:-0}" != "1" ]; then
+      hit=""
+      case "$text" in
+        *"declare -x "*)                    hit="shell environment dump (declare -x)";;
+        *"-----BEGIN "*"PRIVATE KEY"*)      hit="private key block";;
+        *github_pat_*|*ghp_*|*gho_*|*ghs_*) hit="GitHub token";;
+        *xoxb-*|*xoxp-*)                    hit="Slack token";;
+        *AKIA*)                             hit="AWS access key id";;
+        *syt_*)                             hit="Matrix access token";;
+      esac
+      # LiteLLM/OpenAI-style sk-… keys: require a plausible body so prose mentioning "sk-" is fine.
+      if [ -z "$hit" ] && printf '%s' "$text" | grep -qE 'sk-[A-Za-z0-9_-]{16,}'; then
+        hit="API key (sk-…)"
+      fi
+      if [ -n "$hit" ]; then
+        die "refusing to post: the body looks like it contains a $hit.
+This is the 2026-08-03 incident guard. If it is genuinely safe (you are quoting a pattern, not a
+value), re-run with AB_ALLOW_SECRETS=1 — and be sure, because redaction does not un-send it to
+everyone already synced."
+      fi
+    fi
     id="$(rid "$room")"
     if [ -n "$thread" ]; then
       body="$(jq -nc --arg b "$text" --arg t "$thread" \
