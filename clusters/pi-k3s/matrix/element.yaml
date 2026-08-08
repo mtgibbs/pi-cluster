@@ -28,7 +28,7 @@ spec:
         kubernetes.io/hostname: pi5-worker-2
       containers:
         - name: element-web
-          image: vectorim/element-web:v1.12.23
+          image: vectorim/element-web:v1.12.25
           ports:
             - containerPort: 80
           readinessProbe:
