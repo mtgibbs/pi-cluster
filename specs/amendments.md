@@ -1,6 +1,6 @@
 # Amendments — ratified changes to the constitution
 
-> Version: 1.0.0 · rides with `constitution.md` as Tier-1 context.
+> Version: 1.1.0 · rides with `constitution.md` as Tier-1 context.
 >
 > The constitution is founding intent. **It does not morph.** Change arrives here:
 > proposed from the memory notes (`memory-amend propose`), ratified by a human via
@@ -15,15 +15,15 @@
 >   learned survives.
 > - Judges cite an amendment by its heading, same as a constitution principle.
 
-<!-- No amendments ratified yet. First candidate in review: self-proving gates
-     (from reference_loop_library) — verify.sh checks must prove they go RED
-     without the change, not only green with it. Lands here via its own PR when
-     accepted. Template:
+## Gates must prove they can fail
 
-## <Short imperative title>
-Status: Accepted · <date> · Source: <realm>/<note-name>
+Status: Accepted · 2026-08-10 · Source: pi-cluster/reference_loop_library
 
-<The rule, one to three sentences, constitution register.>
+A `verify.sh` check must be shown to go RED without the change it verifies —
+red-before / green-after — not merely green with it. A check that has never
+failed proves presence, not correctness; it cannot catch "built nothing."
 
-**Rationale:** <why every agent should follow this — one or two sentences.>
--->
+**Rationale:** false-green is the strongest failure mode of deterministic
+gates (the `no_false_green` risk; the specs/export incident scored an empty
+deliverable as passing). Proposed in the notes 2026-07-27 from the Loop
+Library review; ratified via memory-amend + this PR.
