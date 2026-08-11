@@ -25,10 +25,8 @@ missed and a 700B model doesn't waste anyone's afternoon.
 3. Every factual claim in the digest (parameter count, licence, size estimate) is
    **derived from API metadata**, never from model-generated prose.
 4. Prose in the digest is written by our **local** model via LiteLLM — not by a cloud API.
-5. Running the script with `DRY_RUN=1` prints the classification without pushing or
-   calling the LLM, so it can be tested safely. **Output contract:** one line per
-   candidate, exactly `[<bucket>] <model-id> - <reason>` (bucket lowercased, one of the
-   four in §3), then exit 0. `verify.sh` parses this format.
+5. Running the script with `DRY_RUN=1` prints the classification (see §10) without
+   pushing or calling the LLM, so it can be tested safely.
 6. `verify.sh` passes.
 
 ## 3. Entities · [E]
@@ -123,3 +121,31 @@ one Kustomization entry in `infrastructure.yaml`.
 ## 9. Tasks
 
 See `tasks.txt`. Each task must leave the tree passing `verify.sh`.
+
+---
+
+## 10. Output contract (LITERAL — `verify.sh` parses this) · [O — Operations]
+
+With `DRY_RUN=1` set, the script MUST print **one line per candidate** to **stdout**, in
+exactly this shape — an opening square bracket, the lowercase bucket, a closing bracket,
+a space, the model id, a space-hyphen-space, then the reason:
+
+```
+[test] inclusionAI/Ling-3.0-flash - MoE 127.5B, 8/512 experts active, ~71.2 GB at Q4
+[watch] deepseek-ai/DeepSeek-V4-Flash-0731 - 304.2B is over the 96 GB budget
+[skip] someone/Model-GGUF - quantized repack of an existing model
+```
+
+The regex `verify.sh` applies is `^\[(test|consider|watch|skip)\] `. Lines that don't
+match are ignored, so progress chatter is fine as long as every candidate emits one
+matching line. Then exit 0.
+
+**Before you declare this task done, RUN IT YOURSELF and look at the output:**
+
+```sh
+cd clusters/pi-k3s/model-watch && DRY_RUN=1 WINDOW_DAYS=45 MIN_LIKES=40 python3 model-watch.py | head -20
+```
+
+It must print matching lines and exit 0 with **no** LiteLLM or ntfy env vars set. Do not
+try to `import` the file to test it — the path contains hyphens and is not importable.
+Execute it. Then run `bash specs/model-watch/verify.sh` and read every line of output.

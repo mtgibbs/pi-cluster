@@ -1,4 +1,1 @@
-T1: Write clusters/pi-k3s/model-watch/model-watch.py — the sweep, the gate logic, DRY_RUN classification output per the spec output contract. Stdlib only.
-T2: Add the LLM summary + ntfy push to model-watch.py, including the fallback digest when the LLM call fails.
-T3: Write the four manifests (namespace, external-secret, cronjob, kustomization with configMapGenerator).
-T4: Wire it up — ntfy ACL line in clusters/pi-k3s/ntfy/deployment.yaml and the Kustomization entry in clusters/pi-k3s/flux-system/infrastructure.yaml.
+T1: Implement the whole model-watch feature — the script, all four manifests, the ntfy ACL line, and the Flux registration — until `bash specs/model-watch/verify.sh` prints VERIFY: PASS. verify.sh is a single end-to-end gate covering every file, so partial work cannot pass it; do all of it in one pass, then run the gate and fix what it reports.
