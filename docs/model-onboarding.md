@@ -15,6 +15,45 @@ Six steps. Steps 1–2 are paper and cost nothing; **most candidates should die 
 
 ---
 
+## 0. How we hear about a candidate — `model-watch`
+
+A monthly CronJob (`clusters/pi-k3s/model-watch/`) pushes a digest to the ntfy
+**`model-watch`** topic on the 1st. It exists because the interesting question is never
+"what is the best open model" — the frontier tier stopped fitting this box in mid-2026 —
+but **"what is the best model that fits ~96 GB."** That's a filter, and a filter is worth
+automating.
+
+Two signals, separated by how far they can be trusted:
+
+- **HuggingFace API → hard facts.** Trending text-generation models in the window, then
+  the per-model endpoint for `safetensors.total`, `config.num_experts` /
+  `num_experts_per_tok`, and licence. Parameter counts, MoE sparsity and the Q4 fit
+  estimate are **computed**, so the digest can't invent a model or misreport its size.
+- **Model cards → soft judgements.** Only candidates that clear the gates get their
+  README fetched and handed to the Beelink, which judges what metadata can't express:
+  dedicated Instruct vs hybrid thinker, tool support, what it is actually for. Cards are
+  third-party text and the prompt treats them as untrusted.
+
+Buckets: **test** (MoE, fits, permissive licence), **consider** (fits but dense — full
+weight traffic per token on a bandwidth-bound box), **watch** (too big, or a licence that
+needs reading), **skip** (derivative repo, or a licence we will not take).
+
+Two filters that matter more than they look, both found by running it against live data:
+
+- **Derivative repos are dropped via HF's `base_model:` relation tag** — otherwise GGUF
+  repacks and abliterated finetunes bury the real releases. But a **vendor's own**
+  instruct-tune of its **own** base is a real release, so the org is compared rather than
+  dropping every `finetune` outright.
+- **MoE config keys are not standardised** — `num_experts`, `n_routed_experts`,
+  `moe_num_experts`, `num_experts_per_tok`, `n_activated_experts`… Checking only the Qwen
+  spelling made a 35B-A3B model come back as "dense 7.3B".
+
+Knobs are env vars on the CronJob (`WINDOW_DAYS`, `MIN_LIKES`, `VRAM_BUDGET_GB`); raise
+`MIN_LIKES` if the push gets noisy. **Known gap:** open-ended web research (release blogs,
+community signal such as the standing petition for a GLM-5.2-Air) needs either a
+search-API credential or a Claude-side routine — the in-cluster job reads HF only, so it
+will miss a model that matters but has not trended yet.
+
 ## 1. Intake — the gates a candidate must pass before anyone spends a weekend
 
 Fail any of these and the answer is no, regardless of benchmark scores.
