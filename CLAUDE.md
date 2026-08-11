@@ -90,6 +90,7 @@ regardless of service (see [Route the work](#2-route-the-work--read--investigate
 | **Secrets — writing the manifest** | `.claude/skills/secrets-management/SKILL.md` (author an ExternalSecret, 1Password item shape, debug a failed sync, ESO bootstrap) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` | `oc` (local) — Claude orchestrates |
+| **Trying out a new local model** | `docs/model-onboarding.md` (intake gates, VRAM/KV math, stand-up path, decision log) | Ansible PR in `beelink-ansible`, applied from the laptop |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
 | **Family Board (dashboard UI)** | **self-contained subtree** `clusters/pi-k3s/family-board/` (own `CLAUDE.md` + `.claude/skills/family-board-ui` + `.claude/agents/board-designer`; slated to spin off) | `cluster-ops` (deploy/verify) |
 | **review-hub (PR-review gates)** | `docs/adr/008-review-hub-framework-seam.md` (framework/instance seam; `scripts/reviewhub/` + `specs/validators/`; slated to spin off when a second consumer exists) | `cluster-ops` (deploy/verify) |

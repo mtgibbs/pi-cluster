@@ -11,6 +11,10 @@ iGPU / gfx1151, RDNA 3.5), 128 GB unified LPDDR5X, ~96 GB carved as VRAM,
 **llama.cpp `server-vulkan`**. ROCm OOMs on gfx1151 — not used. Inference is
 **memory-bandwidth-bound**, so speed scales with *active* params: low-active MoE wins.
 
+> **This is the worked example; `docs/model-onboarding.md` is the generalised process.** The
+> constraints below (non-thinking Instruct, tool-support-in-template, low active params) are now
+> intake gates there, and the verdicts are rows in its decision log.
+
 **Behavioral constraint that drives the whole selection:** hidden-reasoning ("thinking")
 models are a trap here. `/no_think` and API thinking toggles do **not** survive our
 Ollama + LiteLLM path (`drop_params:true` strips them; the Ollama OpenAI

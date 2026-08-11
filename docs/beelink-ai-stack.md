@@ -6,6 +6,9 @@
 
 This document captures the architecture, decisions, and phased plan for adding a local AI inference appliance (Beelink) alongside the existing Pi K3s cluster. The Beelink is the model-serving plane; the Pi cluster remains the orchestration plane.
 
+> **Adding or swapping a model?** Follow `docs/model-onboarding.md` — intake gates, the
+> VRAM/KV math to run *before* downloading, the stand-up decision tree, and the decision log.
+
 ## TL;DR
 
 | Topic | Decision |
