@@ -245,10 +245,15 @@ REMOTE
       --exclude '.git' --exclude 'state' --exclude 'amendment-review' --exclude 'stale-review' --exclude '__pycache__' \
       "$HOME/dev/memory-tools/" "$HOST:$home_dir/memory-tools/"
     ssh "$HOST" "sudo chown -R 1001:1001 $home_dir/memory-tools"
-    # /usr/local/bin: already on every shell's PATH in the container, unlike
-    # ~/.local/bin. Explicit memory-* glob so strays (pycache) never get linked.
-    ssh "$HOST" "docker exec -u 0 $c sh -c 'ln -sf /home/agent/memory-tools/bin/memory-* /usr/local/bin/ && mkdir -p /home/agent/.claude/skills/memory-graph && ln -sf /home/agent/memory-tools/SKILL.md /home/agent/.claude/skills/memory-graph/SKILL.md && chown -R agent:agent /home/agent/.claude/skills/memory-graph && rm -f /home/agent/.local/bin/__pycache__'"
-    echo "harness: memory-tools synced to $c — commands on PATH (/usr/local/bin), skill installed."
+    # The rootfs is READ-ONLY outside /home/agent (see the capabilities note),
+    # so /usr/local/bin is off the table. Links land in ~/.local/bin, named
+    # explicitly (no glob strays); the PATH line is seeded into .profile and
+    # .bashrc for future login shells. Existing sessions use the absolute
+    # path. Durable fix = ENV PATH in the base image (beelink-ansible), parked.
+    ssh "$HOST" "docker exec $c sh -c 'mkdir -p /home/agent/.local/bin /home/agent/.claude/skills/memory-graph && rm -f /home/agent/.local/bin/__pycache__ && ln -sf /home/agent/memory-tools/bin/memory-graph /home/agent/memory-tools/bin/memory-infer /home/agent/memory-tools/bin/memory-promote /home/agent/memory-tools/bin/memory-amend /home/agent/memory-tools/bin/memory-stale /home/agent/.local/bin/ && ln -sf /home/agent/memory-tools/SKILL.md /home/agent/.claude/skills/memory-graph/SKILL.md'"
+    ssh "$HOST" "docker exec $c sh -c 'for f in /home/agent/.profile /home/agent/.bashrc; do grep -q local/bin \$f 2>/dev/null || printf \"PATH=/home/agent/.local/bin:\\\$PATH\\n\" >> \$f; done'"
+    echo "harness: memory-tools synced to $c — links in ~/.local/bin, skill installed."
+    echo "  Existing sessions: use /home/agent/memory-tools/bin/<cmd> (PATH fix is a base-image change, parked)."
     ;;
   prompt)
     target="${1:?usage: harness prompt qwen-or-claude \"text\"}"
