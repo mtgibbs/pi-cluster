@@ -240,7 +240,7 @@ REMOTE
       *) echo "harness: sync-memory-tools target must be claude or codex (got '$target')" >&2; exit 1 ;;
     esac
     c="$(container_for "$target")"
-    ssh "$HOST" "mkdir -p $home_dir/memory-tools"
+    ssh "$HOST" "sudo mkdir -p $home_dir/memory-tools"
     rsync -az --delete --rsync-path="sudo rsync" \
       --exclude '.git' --exclude 'state' --exclude 'amendment-review' --exclude 'stale-review' \
       "$HOME/dev/memory-tools/" "$HOST:$home_dir/memory-tools/"
