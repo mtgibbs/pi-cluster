@@ -21,6 +21,7 @@
 #   harness status                   # health (compose ps) + live activity per
 #                                     # agent: current task/attempt/phase from the
 #                                     # ralph heartbeat, or the live tmux pane
+#   harness sync-memory-tools [claude|codex]  # ship the memory-* commands + skill
 #   harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index
 #                                     # (defaults to claude — re-run to refresh)
 #   harness prompt claude "<text>"   # one-shot headless prompt, waits for the
@@ -221,6 +222,31 @@ REMOTE
       "$HOME/.ctx/work.sqlite" "$HOST:$home_dir/.ctx/work.sqlite"
     ssh "$HOST" "sudo chown -R 1001:1001 $home_dir/.ctx"
     echo "harness: ctx index synced to $c. Restart the container to be safe: ssh $HOST 'cd /opt/ai-stack && docker compose restart $c'"
+    ;;
+  sync-memory-tools)
+    # Snapshot of ~/dev/memory-tools into a container — same shape as sync-ctx:
+    # laptop-initiated push, physically copied, goes stale, re-run after a git
+    # pull on the laptop. Installs the five memory-* commands and the
+    # memory-graph skill so a container agent can walk ITS OWN vault branch
+    # (the vault itself moves via push-memory/pull-memory, never this).
+    #
+    # The decision queues (state/, amendment-review/, stale-review/) are
+    # deliberately excluded: accept/decline/confirm are the human's gates and
+    # live on the laptop. A container gets read, walk, and brief — not rule.
+    target="${1:-claude}"
+    case "$target" in
+      claude) home_dir="$CLAUDE_HOME_DIR" ;;
+      codex)  home_dir="$CODEX_HOME_DIR" ;;
+      *) echo "harness: sync-memory-tools target must be claude or codex (got '$target')" >&2; exit 1 ;;
+    esac
+    c="$(container_for "$target")"
+    ssh "$HOST" "mkdir -p $home_dir/memory-tools"
+    rsync -az --delete --rsync-path="sudo rsync" \
+      --exclude '.git' --exclude 'state' --exclude 'amendment-review' --exclude 'stale-review' \
+      "$HOME/dev/memory-tools/" "$HOST:$home_dir/memory-tools/"
+    ssh "$HOST" "sudo chown -R 1001:1001 $home_dir/memory-tools"
+    ssh "$HOST" "docker exec $c sh -c 'mkdir -p /home/agent/.local/bin /home/agent/.claude/skills/memory-graph && for t in /home/agent/memory-tools/bin/*; do ln -sf \$t /home/agent/.local/bin/\$(basename \$t); done && ln -sf /home/agent/memory-tools/SKILL.md /home/agent/.claude/skills/memory-graph/SKILL.md'"
+    echo "harness: memory-tools synced to $c — commands in ~/.local/bin, skill installed."
     ;;
   prompt)
     target="${1:?usage: harness prompt qwen-or-claude \"text\"}"
