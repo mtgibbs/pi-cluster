@@ -1,6 +1,6 @@
 # Amendments — ratified changes to the constitution
 
-> Version: 1.1.0 · rides with `constitution.md` as Tier-1 context.
+> Version: 1.2.0 · rides with `constitution.md` as Tier-1 context.
 >
 > The constitution is founding intent. **It does not morph.** Change arrives here:
 > proposed from the memory notes (`memory-amend propose`), ratified by a human via
@@ -27,3 +27,18 @@ failed proves presence, not correctness; it cannot catch "built nothing."
 gates (the `no_false_green` risk; the specs/export incident scored an empty
 deliverable as passing). Proposed in the notes 2026-07-27 from the Loop
 Library review; ratified via memory-amend + this PR.
+
+## Durable facts go to the repo, never only to memory
+
+Status: Accepted · 2026-08-10 · Source: pi-cluster/feedback_docs_over_memory
+
+A non-obvious fact about the cluster or a service — API quirk, breaking
+default, hour-long recipe — lands in the repo: a skill's `SKILL.md`, `docs/`,
+or `ARCHITECTURE.md`. Agent memory holds the user profile, feedback rules,
+ephemeral state, and pointers to docs — never the content itself. When in
+doubt, write the doc.
+
+**Rationale:** memory is private to one agent — it survives no rebuild, gets
+no PR review, and is invisible to sub-agents and humans reading the repo.
+Docs travel with the codebase. This principle already decided all six
+amendment declines before it was ratified itself.
