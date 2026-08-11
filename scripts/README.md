@@ -166,3 +166,27 @@ JUDGE_CMD=scripts/ralph-judge-codex.sh EXECUTOR_CMD=scripts/ralph-judge-exec-qwe
 
 State + report land under the worktree's git-dir (`ralph-judge/ledger.jsonl`, `report.json`);
 exit 0 = completed (see report), 1 = aborted fail-closed, 2 = gate-unstable/needs a human.
+
+## Running loops from a fresh worktree — the opencode.json gotcha
+
+`opencode.json` (repo root) carries the loop permissions qwen needs — `edit: allow`,
+`bash` allow with `kubectl`/`op` denied. It is **gitignored**, so a fresh worktree does
+not inherit it, and headless `oc run` then falls back to the global `edit: ask`, which
+**auto-rejects every write**. The failure looks like the model doing nothing: three
+attempts, `STOP — needs a human`, ~700-byte session logs.
+
+Before running any loop in a worktree:
+
+    cp opencode.json ../pi-cluster-<task>/opencode.json
+
+Safe: it is ignored at `.gitignore:27`, so the loop's `git add -A` cannot commit it.
+(Learned 2026-08-10 — the loop-report race's first heat burned six sessions on this.)
+
+## loop-report.sh — one-screen summary of a strategy run
+
+    scripts/gate-score.sh specs/<f>/verify.sh > /tmp/gate.log
+    scripts/loop-report.sh --spec specs/<f> --base origin/main --gate-log /tmp/gate.log
+
+Prints branch, commit count, the last gate score line, and the judge ledger summary
+(`judge: none` if no judge ran). Built by the race it now reports on — see
+specs/loop-report/ and the race/* branches for the full evidence trail.
