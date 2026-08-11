@@ -33,9 +33,9 @@ fi
 SPEC_DIR="${1:?usage: ralph-judge-codex.sh <spec-dir>}"
 codex exec --sandbox read-only --output-last-message "$OUT" "You are the JUDGE in ralph-judge (see specs/judge-loop/spec.md §§3-4,7-8 for your role). The deterministic gate is already green; your job is quality the gate cannot see. Review the solution for spec '$SPEC_DIR' against its INTENT.
 
-Read: $SPEC_DIR/spec.md — its Touches/Scope sections name the solution files; read those files, plus specs/constitution.md and $SPEC_DIR/verify.sh.
+Read: $SPEC_DIR/spec.md — its Touches/Scope sections name the solution files; read those files, plus specs/constitution.md, specs/amendments.md (ratified additions to the constitution — an Accepted amendment carries the same weight as a founding principle; skip silently if absent), and $SPEC_DIR/verify.sh.
 
-Emit findings ONLY within the conservative v1 surface: localized comments, naming, clarity, and literal spec-fidelity corrections. Anything bigger (refactors, dead code, missing gate checks) must be kind=gate-gap (report-only). Every finding MUST cite a real spec section or constitution principle as spec_anchor — no anchor, no finding. Do not propose changes to behavior.
+Emit findings ONLY within the conservative v1 surface: localized comments, naming, clarity, and literal spec-fidelity corrections. Anything bigger (refactors, dead code, missing gate checks) must be kind=gate-gap (report-only). Every finding MUST cite a real spec section, constitution principle, or Accepted amendment heading as spec_anchor — no anchor, no finding. Never cite an amendment whose Status is not Accepted. Do not propose changes to behavior.
 
 OUTPUT CONTRACT — your ENTIRE final message is 0..5 lines, each line one JSON object, NO prose, NO code fences, NO trailing commentary:
 {\"id\":\"<kebab-slug>\",\"file\":\"<repo-relative path>\",\"line\":<integer >=1>,\"category\":\"clarity|naming|spec-fidelity|gate-gap\",\"spec_anchor\":\"<§ or principle>\",\"problem\":\"<one sentence>\",\"suggested_change\":\"<concrete, small, applyable instruction>\",\"kind\":\"mutate|gate-gap\"}
