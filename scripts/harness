@@ -242,11 +242,13 @@ REMOTE
     c="$(container_for "$target")"
     ssh "$HOST" "sudo mkdir -p $home_dir/memory-tools"
     rsync -az --delete --rsync-path="sudo rsync" \
-      --exclude '.git' --exclude 'state' --exclude 'amendment-review' --exclude 'stale-review' \
+      --exclude '.git' --exclude 'state' --exclude 'amendment-review' --exclude 'stale-review' --exclude '__pycache__' \
       "$HOME/dev/memory-tools/" "$HOST:$home_dir/memory-tools/"
     ssh "$HOST" "sudo chown -R 1001:1001 $home_dir/memory-tools"
-    ssh "$HOST" "docker exec $c sh -c 'mkdir -p /home/agent/.local/bin /home/agent/.claude/skills/memory-graph && for t in /home/agent/memory-tools/bin/*; do ln -sf \$t /home/agent/.local/bin/\$(basename \$t); done && ln -sf /home/agent/memory-tools/SKILL.md /home/agent/.claude/skills/memory-graph/SKILL.md'"
-    echo "harness: memory-tools synced to $c — commands in ~/.local/bin, skill installed."
+    # /usr/local/bin: already on every shell's PATH in the container, unlike
+    # ~/.local/bin. Explicit memory-* glob so strays (pycache) never get linked.
+    ssh "$HOST" "docker exec -u 0 $c sh -c 'ln -sf /home/agent/memory-tools/bin/memory-* /usr/local/bin/ && mkdir -p /home/agent/.claude/skills/memory-graph && ln -sf /home/agent/memory-tools/SKILL.md /home/agent/.claude/skills/memory-graph/SKILL.md && chown -R agent:agent /home/agent/.claude/skills/memory-graph && rm -f /home/agent/.local/bin/__pycache__'"
+    echo "harness: memory-tools synced to $c — commands on PATH (/usr/local/bin), skill installed."
     ;;
   prompt)
     target="${1:?usage: harness prompt qwen-or-claude \"text\"}"
