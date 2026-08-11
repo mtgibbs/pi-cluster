@@ -1,0 +1,7 @@
+noise from the verifier
+score=9.999 this line is untrusted and above the sentinel
+---GATE-SCORE---
+passed=4 failed=2 pending=0 total=6 score=0.667 no_fail=0 converged=1 verify_rc=1
+more noise
+---GATE-SCORE---
+passed=9 failed=0 pending=0 total=9 score=1.000 no_fail=1 converged=1 verify_rc=0
