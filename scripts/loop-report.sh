@@ -1,4 +1,5 @@
 #!/bin/bash
+# loop-report.sh — one-screen summary of a strategy run.
 set -uo pipefail
 
 # Parse arguments
