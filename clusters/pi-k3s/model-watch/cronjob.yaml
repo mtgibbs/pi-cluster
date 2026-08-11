@@ -1,0 +1,72 @@
+# model-watch — monthly "what should we be running?" digest.
+#
+# Why a CronJob and not an event trigger: model releases ARE events, but there is no
+# webhook to subscribe to, and polling HF hourly to learn about a monthly-cadence
+# decision is waste. A digest is genuinely periodic work — the case the reactive-first
+# rule explicitly carves out.
+#
+# Runs on the 1st at 13:00 UTC (~8-9am ET). Reads are all outbound HTTPS; the only
+# in-cluster dependencies are LiteLLM (via the Beelink) and ntfy.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: model-watch
+  namespace: model-watch
+spec:
+  schedule: "0 13 1 * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: model-watch
+              # Stdlib-only script, so a bare python image needs no pip install at
+              # runtime — nothing to break when PyPI is unreachable.
+              image: python:3.13-alpine
+              command: ["python3", "/app/model-watch.py"]
+              env:
+                - name: LITELLM_BASE_URL
+                  value: "https://ai.lab.mtgibbs.dev/v1"
+                - name: LITELLM_MODEL
+                  value: "qwen3-30b-instruct"
+                - name: LITELLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: model-watch-secret
+                      key: litellm-api-key
+                # In-cluster service DNS, not the public ingress — same hop Vector uses.
+                - name: NTFY_URL
+                  value: "http://ntfy.ntfy.svc.cluster.local/model-watch"
+                - name: NTFY_USER
+                  value: "family"
+                - name: NTFY_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: model-watch-secret
+                      key: ntfy-password
+                # Window is deliberately wider than the 1-month cadence so a model
+                # released just after last run still gets seen exactly once.
+                - name: WINDOW_DAYS
+                  value: "40"
+                - name: MIN_LIKES
+                  value: "40"
+                - name: VRAM_BUDGET_GB
+                  value: "96"
+              volumeMounts:
+                - name: script
+                  mountPath: /app
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: script
+              configMap:
+                name: model-watch-script
