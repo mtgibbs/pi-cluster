@@ -129,7 +129,9 @@
        [ -f path/to/thing ] && { ...assert on it... } || pend "thing"
      so the check arms itself as soon as the target exists, in whatever order the model
      builds. STRICT=1 turns every remaining `pend` into a FAIL, so "all tasks passed"
-     can never mean "half of it was never written".
+     can never mean "half of it was never written". The flip side, and why ralph fails a
+     no-op attempt: an EMPTY tree also satisfies a pend-staged gate, so a task whose
+     executor got blocked would otherwise "pass" having written nothing.
 
      Corollary for §9: keep task lines SEMANTICALLY RICH. Measured on the same dogfood —
      "write model-watch.py: the sweep, the gate logic, the DRY_RUN output contract"
