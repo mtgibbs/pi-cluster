@@ -108,6 +108,23 @@ URLs/UIDs. When done, stop.${feedback}"
     fi
 
 
+    # A run that changed NOTHING is not a pass. The stillborn-log guard above catches an
+    # executor that never STARTED; this catches one that started, was blocked, and wrote
+    # nothing. It matters because a pend-staged gate (specs/TEMPLATE.md §11) is satisfied
+    # by an empty tree — every check pends — so a no-op attempt sails through and the task
+    # after it inherits the work plus a spent retry budget. Observed 2026-08-12 on
+    # specs/model-watch: opencode asked to Read `/specs/model-watch/spec.md` (absolute,
+    # from filesystem root), opencode auto-rejected it as an external directory, the model
+    # produced no file, and the staged gate passed T1 with "nothing to commit".
+    if [ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+      echo "  ✗ attempt $attempt changed nothing — a no-op is a failure, not a pass" >&2
+      hb_write failed false
+      feedback="
+A previous attempt produced NO file changes at all. If a tool call was rejected, use
+paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this time."
+      continue
+    fi
+
     # The gate: deterministic, external. The model does NOT get to say "done".
     hb_write verifying
     if out="$(cd "$ROOT" && bash "$VERIFY" 2>&1)"; then
