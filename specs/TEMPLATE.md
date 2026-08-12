@@ -113,6 +113,31 @@
      criterion (and each §8 safeguard) so it maps to a verify.sh assertion.
      (Hashimoto harness-engineering / TDD-for-agents.) -->
 
+<!-- THE THREE-VERDICT CONTRACT — copy this preamble; do NOT write a two-verdict gate.
+     ralph runs verify.sh after EVERY task, then once more at the end with STRICT=1. A
+     check whose target belongs to a LATER task must report `pend`, not `no` — otherwise
+     task 1 is gated on task 4's work and can never pass, the loop burns all its retries,
+     and it stops for a human. (Cost us a full dogfood run on specs/model-watch,
+     2026-08-11 — the gate was correct and the STAGING was not.)
+
+       ok(){   echo "  PASS  $1"; }
+       no(){   echo "  FAIL  $1" >&2; fail=1; }
+       pend(){ if [ "${STRICT:-0}" = 1 ]; then no "$1 — still unbuilt at the final check (STRICT)"
+               else echo "  pend  $1 (not built yet)"; fi; }
+
+     Rule of thumb: presence-gate on the artifact, not the task number —
+       [ -f path/to/thing ] && { ...assert on it... } || pend "thing"
+     so the check arms itself as soon as the target exists, in whatever order the model
+     builds. STRICT=1 turns every remaining `pend` into a FAIL, so "all tasks passed"
+     can never mean "half of it was never written".
+
+     Corollary for §9: keep task lines SEMANTICALLY RICH. Measured on the same dogfood —
+     "write model-watch.py: the sweep, the gate logic, the DRY_RUN output contract"
+     scored 17/19 first try, while "implement the whole model-watch feature" made the
+     model build something suggested by the NAME (a filesystem poller) and score 7/19.
+     The task line anchors harder than the spec does; a vague one lets it drift to the
+     noun. Narrow tasks + pend-staged gate, never one mega-task with a monolithic gate. -->
+
 ## 11b. Loop execution (handing to a local model)
 <!-- Local models (qwen) are faithful literal executors with no stamina/taste/self-check.
      Run via scripts/ralph-qwen.sh: ONE task per iteration, FRESH context each time,
