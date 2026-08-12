@@ -83,8 +83,43 @@ one Kustomization entry in `infrastructure.yaml`.
   quantisation **with headroom left for KV cache**, which shares the same pool; low active
   params preferred.
 - **Source of truth for metadata:** the HuggingFace Hub HTTP API at
-  `https://huggingface.co/api`. Explore it and use what it actually returns — do not
-  assume a field exists because it would be convenient.
+  `https://huggingface.co/api`. **The API's real behaviour is pinned in §6a — it is not
+  what you would assume.** Use those facts; do not invent field names.
+
+### 6a. HuggingFace API — MEASURED behaviour (verified 2026-08-11, use verbatim)
+
+These were established by calling the live API. Several contradict the obvious guess, so
+treat them as literal facts rather than starting points.
+
+1. **The list endpoint does not give you parameter counts.** Sweep with
+   `GET /api/models?sort=trendingScore&direction=-1&limit=60&filter=text-generation&full=true`.
+   It returns `id`, `likes`, `downloads`, `createdAt`, `tags` — but `safetensors` is
+   **`None` for every entry, even with `full=true`**. Sorting by `createdAt` instead
+   returns near-pure noise (zero-like fine-tunes), so trendingScore + a `likes` floor is
+   the usable signal.
+2. **Parameter counts and architecture come from the per-model endpoint.**
+   `GET /api/models/{id}` returns `safetensors.total` (an int — total params),
+   `config` (with `architectures`, `model_type`, and the MoE keys), and
+   `cardData.license`. You must call this per candidate.
+3. **MoE config keys are not standardised.** Depending on vendor, expert count appears as
+   `num_experts`, `num_local_experts`, `n_routed_experts`, or `moe_num_experts`; active
+   experts as `num_experts_per_tok`, `n_activated_experts`, or `moe_topk`. Check all of
+   them. Reading only the Qwen spelling reports a 35B-A3B model as "dense 7.3B".
+4. **Derivative repos are identified by a relation tag**, not by name. `tags` contains
+   `base_model:<relation>:<base-id>` where relation is one of `quantized`, `finetune`,
+   `merge`, `adapter`. Without filtering these, GGUF repacks and abliterated finetunes
+   bury the real releases. **But a vendor's own instruct-tune of its own base IS a real
+   release** — compare the org of `<base-id>` against the org of the candidate; only drop
+   a `finetune` when the orgs differ. (`LiquidAI/LFM2.5-2.6B` is the case that proves it.)
+5. **`cardData.license` is often the literal string `"other"`**, with the real name in
+   `license_name` (seen: `openmdw-1.1`, `lfm1.0`). Don't silently discard these — a
+   licence we can't classify is a `watch`, not a `skip`.
+6. **Model card text** is at `https://huggingface.co/{id}/raw/main/README.md` (plain text).
+7. **Size estimate:** Q4-class weights ≈ `params * 0.60` bytes. KV cache and parallel
+   slots share the same unified pool, so treat only ~75% of the budget as available for
+   weights.
+8. **The network is flaky** — HF occasionally times out mid-sweep. Retry per request, and
+   never let one unreachable model abort the run.
 - **LiteLLM:** `https://ai.lab.mtgibbs.dev/v1`, OpenAI-compatible, `Authorization: Bearer
   <key>`. Model `qwen3-30b-instruct`. Key from secret `model-watch-secret`, key
   `litellm-api-key`, backed by 1Password item `model-watch/litellm-key`.
