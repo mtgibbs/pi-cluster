@@ -1,0 +1,7 @@
+# id	bucket	why this fixture exists
+Qwen/Qwen3-Next-80B-A3B-Instruct	test	MoE that fits, permissive licence
+fixtureorg/OverBudget-300B	watch	~170 GB at Q4, over the 72 GB weight budget
+repacker/Someone-Elses-Model-GGUF	skip	quantized repack of another org's model
+sameorg/Model-Instruct	test	a vendor's own instruct-tune of its own base IS a real release
+vendor/Licence-Other-30B	watch	non-standard licence needs reading, not silent discard
+vendor/Dense-14B	consider	fits and licensed, but dense on a bandwidth-bound box

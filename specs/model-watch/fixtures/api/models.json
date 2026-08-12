@@ -1,0 +1,60 @@
+[
+ {
+  "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+  "likes": 900,
+  "downloads": 90000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ },
+ {
+  "id": "fixtureorg/OverBudget-300B",
+  "likes": 500,
+  "downloads": 50000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ },
+ {
+  "id": "repacker/Someone-Elses-Model-GGUF",
+  "likes": 300,
+  "downloads": 30000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [
+   "base_model:quantized:realorg/Someone-Elses-Model"
+  ],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ },
+ {
+  "id": "sameorg/Model-Instruct",
+  "likes": 250,
+  "downloads": 25000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [
+   "base_model:finetune:sameorg/Model-Base"
+  ],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ },
+ {
+  "id": "vendor/Licence-Other-30B",
+  "likes": 200,
+  "downloads": 20000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ },
+ {
+  "id": "vendor/Dense-14B",
+  "likes": 180,
+  "downloads": 18000,
+  "createdAt": "2020-01-01T00:00:00.000Z",
+  "tags": [],
+  "pipeline_tag": "text-generation",
+  "safetensors": null
+ }
+]

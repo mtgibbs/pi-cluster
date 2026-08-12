@@ -120,6 +120,11 @@ treat them as literal facts rather than starting points.
    weights.
 8. **The network is flaky** — HF occasionally times out mid-sweep. Retry per request, and
    never let one unreachable model abort the run.
+9. **Base URL must be overridable.** Read `HF_BASE` (default `https://huggingface.co`) and
+   build every Hub URL from it — API calls at `{HF_BASE}/api/...`, model cards at
+   `{HF_BASE}/{id}/raw/main/README.md`. `verify.sh` points this at a local fixture server
+   to test the classifier offline against known answers. Hard-coding the hostname makes
+   the feature untestable and will fail the gate.
 - **LiteLLM:** `https://ai.lab.mtgibbs.dev/v1`, OpenAI-compatible, `Authorization: Bearer
   <key>`. Model `qwen3-30b-instruct`. Key from secret `model-watch-secret`, key
   `litellm-api-key`, backed by 1Password item `model-watch/litellm-key`.
@@ -149,6 +154,11 @@ treat them as literal facts rather than starting points.
   come from API metadata. If the LLM call fails, the job must still push a usable digest
   built from the computed data rather than failing silently.
 - **No secrets in logs.** Never print the LiteLLM key or ntfy password.
+- **Never weaken TLS.** No `ssl.CERT_NONE`, no `check_hostname = False`, no
+  `_create_unverified_context`. The LiteLLM request carries an API key.
+- **ntfy uses HTTP Basic correctly:** `Authorization: Basic <base64("user:password")>`,
+  reading `NTFY_USER` and `NTFY_PASSWORD`. Sending the raw password 401s, and the failure
+  is invisible — the monthly push just silently stops arriving.
 - **Network failures must not crash the run** — a single unreachable model must not abort
   the whole sweep.
 - `DRY_RUN=1` must make **no** outbound push and **no** LLM call.
@@ -184,3 +194,20 @@ cd clusters/pi-k3s/model-watch && DRY_RUN=1 WINDOW_DAYS=45 MIN_LIKES=40 python3 
 It must print matching lines and exit 0 with **no** LiteLLM or ntfy env vars set. Do not
 try to `import` the file to test it — the path contains hyphens and is not importable.
 Execute it. Then run `bash specs/model-watch/verify.sh` and read every line of output.
+
+---
+
+## 11. Verification · [O]
+
+`bash specs/model-watch/verify.sh` — offline and deterministic; `STRICT=1` for the final
+pass. It runs your classifier against **recorded HuggingFace responses** in
+`specs/model-watch/fixtures/`, served by `fixture_server.py` on `HF_BASE` (§6a item 9).
+
+`fixtures/EXPECTED.tsv` is the ground truth: six models, one per rule, each with the
+bucket it must land in and why that fixture exists. **Read it** — it is the clearest
+statement of what the gate expects, including the MoE trap (a real model whose config
+carries `num_experts: 512` *and* `num_experts_per_tok: 10`) and the same-org finetune
+that must NOT be dropped as a derivative.
+
+The gate also asserts from the fixture server's request log that you actually fetched
+model cards — code that looks like it fetches them is not enough.

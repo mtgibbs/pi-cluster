@@ -45,7 +45,6 @@ spec:
                     printf '%s\n%s\n' "$FAMILY_PASSWORD" "$FAMILY_PASSWORD" | ntfy user add --ignore-exists family || true
                     ntfy access family "deadlines-*" rw || true
                     ntfy access family "dns-bypass" rw || true
-                    ntfy access family "model-watch" rw || true
           env:
             - name: FAMILY_PASSWORD
               valueFrom:
