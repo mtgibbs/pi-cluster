@@ -260,7 +260,10 @@ def main():
             c["card_excerpt"] = get_text(
                 f"https://huggingface.co/{c['id']}/raw/main/README.md", limit=4000)
         buckets.setdefault(bucket, []).append(c)
-        print(f"  [{bucket:8s}] {c['id']:<52s} {reason}", flush=True)
+        # Exact §10 output contract: `[bucket] id - reason`, one line per candidate.
+        # verify.sh parses this, so the pretty-padded version it used to print was a
+        # silent contract break — caught by running the gate against this file.
+        print(f"[{bucket}] {c['id']} - {reason}", flush=True)
 
     testable = buckets.get("test", []) + buckets.get("consider", [])
     if not testable and not buckets.get("watch"):
