@@ -25,7 +25,9 @@ import sys
 import urllib.error
 import urllib.request
 
-HF = "https://huggingface.co/api"
+# Overridable so verify.sh can point the classifier at recorded fixtures offline.
+HF_BASE = os.environ.get("HF_BASE", "https://huggingface.co").rstrip("/")
+HF = f"{HF_BASE}/api"
 UA = {"User-Agent": "pi-cluster-model-watch/1.0"}
 
 WINDOW_DAYS = int(os.environ.get("WINDOW_DAYS", "35"))
@@ -258,7 +260,7 @@ def main():
         c["reason"] = reason
         if bucket in ("test", "consider"):
             c["card_excerpt"] = get_text(
-                f"https://huggingface.co/{c['id']}/raw/main/README.md", limit=4000)
+                f"{HF_BASE}/{c['id']}/raw/main/README.md", limit=4000)
         buckets.setdefault(bucket, []).append(c)
         # Exact §10 output contract: `[bucket] id - reason`, one line per candidate.
         # verify.sh parses this, so the pretty-padded version it used to print was a
