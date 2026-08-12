@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_36 services · 67 workloads · 37 Flux Kustomizations · 7 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_37 services · 68 workloads · 38 Flux Kustomizations · 7 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -118,6 +118,8 @@ graph LR
   k1unc8vb --> k513jul
   kkuvy6m --> k513jul
   k19g0j44 --> k513jul
+  k52qv9g["model-watch"]
+  k1unc8vb --> k52qv9g
   k1unc8vb --> kzp0jgv
   kkuvy6m --> kzp0jgv
   k19g0j44 --> kzp0jgv
@@ -289,6 +291,11 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - creds: `protonvpn-credentials`, `qbittorrent-credentials`, `servarr-api-keys`  _(→ secrets-map.md)_
   - storage: `bazarr-config`, `calibre-web-config`, `jellyseerr-config`, `lazylibrarian-config`, `lidarr-config`, `media-books`, `media-downloads`, `media-library`, `media-music`, `prowlarr-config`, `qbittorrent-config`, `radarr-config`, `readarr-config`, `sabnzbd-config`, `sonarr-config`
   - ingress: `bazarr.lab.mtgibbs.dev`, `calibre.lab.mtgibbs.dev`, `lazylibrarian.lab.mtgibbs.dev`, `lidarr.lab.mtgibbs.dev`, `prowlarr.lab.mtgibbs.dev`, `qbit.lab.mtgibbs.dev`, `radarr.lab.mtgibbs.dev`, `readarr.lab.mtgibbs.dev`, `requests.lab.mtgibbs.dev`, `sabnzbd.lab.mtgibbs.dev`, `sonarr.lab.mtgibbs.dev`
+
+### model-watch  ·  Flux: `model-watch` (after: `external-secrets-config`)
+- **CronJob/model-watch** — `python`
+  - creds: `model-watch-secret`  _(→ secrets-map.md)_
+  - calls: → `ntfy`
 
 ### monitoring  ·  Flux: `monitoring` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
   - ingress: `grafana.lab.mtgibbs.dev`
