@@ -83,8 +83,48 @@ one Kustomization entry in `infrastructure.yaml`.
   quantisation **with headroom left for KV cache**, which shares the same pool; low active
   params preferred.
 - **Source of truth for metadata:** the HuggingFace Hub HTTP API at
-  `https://huggingface.co/api`. Explore it and use what it actually returns — do not
-  assume a field exists because it would be convenient.
+  `https://huggingface.co/api`. **The API's real behaviour is pinned in §6a — it is not
+  what you would assume.** Use those facts; do not invent field names.
+
+### 6a. HuggingFace API — MEASURED behaviour (verified 2026-08-11, use verbatim)
+
+These were established by calling the live API. Several contradict the obvious guess, so
+treat them as literal facts rather than starting points.
+
+1. **The list endpoint does not give you parameter counts.** Sweep with
+   `GET /api/models?sort=trendingScore&direction=-1&limit=60&filter=text-generation&full=true`.
+   It returns `id`, `likes`, `downloads`, `createdAt`, `tags` — but `safetensors` is
+   **`None` for every entry, even with `full=true`**. Sorting by `createdAt` instead
+   returns near-pure noise (zero-like fine-tunes), so trendingScore + a `likes` floor is
+   the usable signal.
+2. **Parameter counts and architecture come from the per-model endpoint.**
+   `GET /api/models/{id}` returns `safetensors.total` (an int — total params),
+   `config` (with `architectures`, `model_type`, and the MoE keys), and
+   `cardData.license`. You must call this per candidate.
+3. **MoE config keys are not standardised.** Depending on vendor, expert count appears as
+   `num_experts`, `num_local_experts`, `n_routed_experts`, or `moe_num_experts`; active
+   experts as `num_experts_per_tok`, `n_activated_experts`, or `moe_topk`. Check all of
+   them. Reading only the Qwen spelling reports a 35B-A3B model as "dense 7.3B".
+4. **Derivative repos are identified by a relation tag**, not by name. `tags` contains
+   `base_model:<relation>:<base-id>` where relation is one of `quantized`, `finetune`,
+   `merge`, `adapter`. Without filtering these, GGUF repacks and abliterated finetunes
+   bury the real releases. **But a vendor's own instruct-tune of its own base IS a real
+   release** — compare the org of `<base-id>` against the org of the candidate; only drop
+   a `finetune` when the orgs differ. (`LiquidAI/LFM2.5-2.6B` is the case that proves it.)
+5. **`cardData.license` is often the literal string `"other"`**, with the real name in
+   `license_name` (seen: `openmdw-1.1`, `lfm1.0`). Don't silently discard these — a
+   licence we can't classify is a `watch`, not a `skip`.
+6. **Model card text** is at `https://huggingface.co/{id}/raw/main/README.md` (plain text).
+7. **Size estimate:** Q4-class weights ≈ `params * 0.60` bytes. KV cache and parallel
+   slots share the same unified pool, so treat only ~75% of the budget as available for
+   weights.
+8. **The network is flaky** — HF occasionally times out mid-sweep. Retry per request, and
+   never let one unreachable model abort the run.
+9. **Base URL must be overridable.** Read `HF_BASE` (default `https://huggingface.co`) and
+   build every Hub URL from it — API calls at `{HF_BASE}/api/...`, model cards at
+   `{HF_BASE}/{id}/raw/main/README.md`. `verify.sh` points this at a local fixture server
+   to test the classifier offline against known answers. Hard-coding the hostname makes
+   the feature untestable and will fail the gate.
 - **LiteLLM:** `https://ai.lab.mtgibbs.dev/v1`, OpenAI-compatible, `Authorization: Bearer
   <key>`. Model `qwen3-30b-instruct`. Key from secret `model-watch-secret`, key
   `litellm-api-key`, backed by 1Password item `model-watch/litellm-key`.
@@ -114,6 +154,11 @@ one Kustomization entry in `infrastructure.yaml`.
   come from API metadata. If the LLM call fails, the job must still push a usable digest
   built from the computed data rather than failing silently.
 - **No secrets in logs.** Never print the LiteLLM key or ntfy password.
+- **Never weaken TLS.** No `ssl.CERT_NONE`, no `check_hostname = False`, no
+  `_create_unverified_context`. The LiteLLM request carries an API key.
+- **ntfy uses HTTP Basic correctly:** `Authorization: Basic <base64("user:password")>`,
+  reading `NTFY_USER` and `NTFY_PASSWORD`. Sending the raw password 401s, and the failure
+  is invisible — the monthly push just silently stops arriving.
 - **Network failures must not crash the run** — a single unreachable model must not abort
   the whole sweep.
 - `DRY_RUN=1` must make **no** outbound push and **no** LLM call.
@@ -149,3 +194,20 @@ cd clusters/pi-k3s/model-watch && DRY_RUN=1 WINDOW_DAYS=45 MIN_LIKES=40 python3 
 It must print matching lines and exit 0 with **no** LiteLLM or ntfy env vars set. Do not
 try to `import` the file to test it — the path contains hyphens and is not importable.
 Execute it. Then run `bash specs/model-watch/verify.sh` and read every line of output.
+
+---
+
+## 11. Verification · [O]
+
+`bash specs/model-watch/verify.sh` — offline and deterministic; `STRICT=1` for the final
+pass. It runs your classifier against **recorded HuggingFace responses** in
+`specs/model-watch/fixtures/`, served by `fixture_server.py` on `HF_BASE` (§6a item 9).
+
+`fixtures/EXPECTED.tsv` is the ground truth: six models, one per rule, each with the
+bucket it must land in and why that fixture exists. **Read it** — it is the clearest
+statement of what the gate expects, including the MoE trap (a real model whose config
+carries `num_experts: 512` *and* `num_experts_per_tok: 10`) and the same-org finetune
+that must NOT be dropped as a derivative.
+
+The gate also asserts from the fixture server's request log that you actually fetched
+model cards — code that looks like it fetches them is not enough.

@@ -1,0 +1,23 @@
+{
+ "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+ "safetensors": {
+  "total": 81324862720,
+  "parameters": {
+   "BF16": 81324862720
+  }
+ },
+ "config": {
+  "architectures": [
+   "Qwen3NextForCausalLM"
+  ],
+  "model_type": "qwen3_next",
+  "num_experts": 512,
+  "num_experts_per_tok": 10
+ },
+ "cardData": {
+  "license": "apache-2.0"
+ },
+ "tags": [],
+ "likes": 900,
+ "createdAt": "2020-01-01T00:00:00.000Z"
+}

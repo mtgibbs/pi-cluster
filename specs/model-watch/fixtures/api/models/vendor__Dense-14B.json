@@ -1,0 +1,21 @@
+{
+ "id": "vendor/Dense-14B",
+ "safetensors": {
+  "total": 14000000000,
+  "parameters": {
+   "BF16": 14000000000
+  }
+ },
+ "config": {
+  "architectures": [
+   "FixtureForCausalLM"
+  ],
+  "model_type": "fixture"
+ },
+ "cardData": {
+  "license": "mit"
+ },
+ "tags": [],
+ "likes": 180,
+ "createdAt": "2020-01-01T00:00:00.000Z"
+}
