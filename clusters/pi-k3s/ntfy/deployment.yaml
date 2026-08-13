@@ -45,6 +45,10 @@ spec:
                     printf '%s\n%s\n' "$FAMILY_PASSWORD" "$FAMILY_PASSWORD" | ntfy user add --ignore-exists family || true
                     ntfy access family "deadlines-*" rw || true
                     ntfy access family "dns-bypass" rw || true
+                    # NTFY_AUTH_DEFAULT_ACCESS is deny-all, so every topic needs a
+                    # line here. Publishing to an ungranted topic 403s silently from
+                    # the caller's point of view — easy to lose an hour to.
+                    ntfy access family "model-watch" rw || true
           env:
             - name: FAMILY_PASSWORD
               valueFrom:

@@ -723,3 +723,28 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 34. model-watch - monthly "what should we be running?" digest. Sweeps the HuggingFace
+# API for newly-trending text-generation models, computes the intake gates from
+# docs/model-onboarding.md against real metadata (params, MoE config, licence), has the
+# Beelink summarise only what clears them, and pushes to the ntfy `model-watch` topic.
+# Facts are computed, prose is generated — so the digest cannot invent a model.
+# PREREQ before green: the model-watch/litellm-key 1Password item (a LiteLLM virtual key
+# scoped to the digest model). Like new-horizons, `wait: true` means this Kustomization
+# reports FAILED until that item exists — land it before merging, not after.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: model-watch
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/model-watch
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
