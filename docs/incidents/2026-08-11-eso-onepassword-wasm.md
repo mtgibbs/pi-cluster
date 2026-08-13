@@ -2,7 +2,7 @@
 
 - **Date:** onset 2026-08-11 between **20:28 and 20:57 UTC**; detected 2026-08-12 ~18:55 UTC (**~40 h undetected**)
 - **Severity:** High-latent — no user-visible outage, no data loss, but **all secret rotation was dead** and no new secret could be created cluster-wide
-- **Status:** 🔶 **Diagnosed, remediation pending** — the fix (`kubectl rollout restart deploy/external-secrets`) requires kubectl, which the coding harness does not have. Observability gap fixed in this PR.
+- **Status:** ✅ **Resolved 2026-08-13 17:02 UTC** (~44.5 h total). Fixed by the pod roll that merging the observability PR (#159) triggered — see §4.1. Root cause confirmed as in-process WASM state; the service-account token is exonerated.
 - **Detected via:** *accidentally*. A routine docs merge triggered a Flux re-reconcile; the resulting `get_flux_status` showed nearly every Kustomization not-ready. **Nothing alerted.**
 
 ---
@@ -90,6 +90,42 @@ does not reset the WASM host memory. Only a process restart does. (This tripped 
 initial analysis in-session: the continuous retries were misread as evidence that a
 restart wouldn't help. The opposite is true.)
 
+### 4.1 What actually happened (2026-08-13)
+
+The fix arrived as a side effect of the remedy for the *observability* gap. Adding
+`resources:` to the HelmRelease values mutates the **Deployment pod template**, so merging
+#159 made Flux run a Helm upgrade, which rolled the controller — deployment revision 5 → 6,
+ReplicaSet `67dffb589f` → `598fd94748`. A fresh process meant a fresh Extism host.
+
+Recovery was immediate and unambiguous in the controller log:
+
+```
+17:02:22  error  ... err: ClusterSecretStore "onepassword" is not ready   (last error)
+17:02:29  info   reconciled secret  {operator-oauth, tailscale}
+17:02:31  info   reconciled secret  {matrix-db-password, backup-jobs}
+17:02:34  info   reconciled secret  {cloudflare-api-token, cert-manager}
+17:02:36  info   reconciled secret  {vector-ntfy, log-aggregation}
+```
+
+ESO then drained the backlog at roughly one secret every 2 s. No further WASM traps.
+
+**This settled the open question.** The §3 analysis could not separate "WASM host memory
+exhausted" from "malformed token panicking the SDK", and the initial write-up said a
+rolling restart wouldn't discriminate them. It did: **the token was never touched**, and
+the same token works in a fresh process. A malformed value would have failed identically
+after the restart. Root cause is in-process runtime state; the credential is fine.
+
+**Two harness gaps this exposed, both now addressed:**
+
+- `restart_deployment`'s whitelist was applications-only, so the agent could diagnose this
+  and not act on it. Fixed in `pi-cluster-mcp#53` (controller only; webhook and the Flux
+  controllers deliberately excluded).
+- `reconcile_flux` accepts only `kustomization` and `helmrelease`, not `gitrepository`. The
+  documented **reconcile-source-first** order is therefore not fully expressible through the
+  MCP — reconciling the Kustomization before the source has fetched the new commit is a
+  no-op, which cost a confused minute here. The GitRepository's own 1 m interval covers it,
+  but the tool should grow the type.
+
 ---
 
 ## 5. Why nobody knew (the real defect)
@@ -131,12 +167,15 @@ Shipped with this document:
 
 Still open:
 
-- **Run the restart** and record which branch of §4 it took.
 - **Consider an ESO chart upgrade** from `1.2.0` if upstream has a fix for WASM/SDK
   client-lifetime leakage. Worth a look before assuming the limit alone is enough.
 - **Audit for the same shape elsewhere.** The pattern — *a long-lived controller whose
   embedded runtime dies while the process stays healthy* — is not unique to ESO, and
   liveness probes are structurally blind to it.
+- **Watch whether it recurs.** If the WASM host leaks on a fixed schedule, the 512Mi limit
+  converts a 40-hour silent outage into a periodic self-healing restart — acceptable, but
+  the leak itself would still be worth reporting upstream. Uptime since 2026-08-13 17:02
+  is the number to watch.
 
 ---
 
