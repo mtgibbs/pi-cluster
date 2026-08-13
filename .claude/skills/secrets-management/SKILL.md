@@ -156,6 +156,31 @@ kubectl logs -n external-secrets deploy/external-secrets
 - Service account token expired or invalid
 - Re-create onepassword-service-account secret
 
+**"wasm error: out of bounds memory access" in `init_client()`** — the whole store dies
+- Seen 2026-08-11: `ClusterSecretStore/onepassword` stopped validating and **53 of 56
+  ExternalSecrets** failed with `ClusterSecretStore "onepassword" is not ready`.
+- The `onepasswordSDK` provider runs the 1Password SDK as an **Extism/WASM plugin**. This
+  trap is the WASM host failing to allocate, *not* an auth problem — an expired or wrong
+  token gives `unauthorized` instead.
+- **It is invisible.** Failing ExternalSecrets keep their last-synced value, so every
+  materialised Secret stays intact and every workload keeps running. Rotation is dead and
+  no NEW secret can be created, but nothing looks broken. The pod reports `Running 1/1`
+  with **0 restarts**.
+- **Fix: restart the controller.**
+  ```bash
+  kubectl -n external-secrets rollout restart deploy/external-secrets
+  kubectl -n external-secrets get clustersecretstore onepassword -w
+  ```
+  **A retry loop is not a restart.** ESO retried client creation continuously for 40 hours
+  and never recovered — retrying inside the same process does not reset the WASM host
+  memory. Don't read the persistent failures as evidence a restart won't help; it's the
+  opposite.
+- If it fails **identically** after a restart, suspect the bootstrap token
+  (`external-secrets/onepassword-service-account`, key `token`) — a malformed value can
+  panic the SDK inside the sandbox and present the same way. Recreate it (see
+  Bootstrapping below).
+- Full analysis: `docs/incidents/2026-08-11-eso-onepassword-wasm.md`
+
 ## Bootstrapping (Fresh Cluster)
 
 The 1Password service account token must be created manually:
