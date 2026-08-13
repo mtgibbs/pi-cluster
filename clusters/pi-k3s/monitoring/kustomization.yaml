@@ -12,4 +12,5 @@ resources:
   - dashboard-new-horizons.yaml
   - prometheusrule-beelink.yaml
   - prometheusrule-media-nfs.yaml
+  - prometheusrule-external-secrets.yaml
   - ingress.yaml
