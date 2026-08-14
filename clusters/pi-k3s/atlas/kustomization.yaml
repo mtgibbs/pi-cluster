@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: atlas
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+# index.html is GENERATED — `memory-graph forcemap` writes it and the laptop's
+# ~/memory-atlas/refresh.sh copies it here. Commit the refreshed file to publish;
+# the hashed ConfigMap rolls the pod automatically (family-board pattern).
+# It embeds note/realm NAMES from both vaults (never bodies) — LAN-only by
+# design; do not add a cloudflare-tunnel route for this host.
+configMapGenerator:
+  - name: atlas-site
+    files:
+      - index.html
