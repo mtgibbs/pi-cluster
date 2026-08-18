@@ -149,6 +149,7 @@ URLs/UIDs. When done, stop.${feedback}"
 A previous attempt FAILED verification with:
 $(printf '%s' "$out" | grep -E 'FAIL|VERIFY' | head -20)
 Fix exactly those failures."
+    git -C "$ROOT" reset -q -- . 2>/dev/null || true   # reset index to HEAD so checkout -- can drop staged files
     git -C "$ROOT" checkout -- . 2>/dev/null || true   # reset tracked changes from the bad attempt
     git -C "$ROOT" clean -fd -- . 2>/dev/null || true  # ...and untracked files/dirs it created —
     # `checkout --` alone leaves these behind, letting an out-of-scope file from attempt N
