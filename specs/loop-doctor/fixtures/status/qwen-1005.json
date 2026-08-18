@@ -1,0 +1,1 @@
+{"agent":"qwen","pid":1005,"repo":"fixture-repo","branch":"loop/fixture","spec":"specs/v1","task":"T2: a fixture task","task_index":2,"total_tasks":4,"attempt":2,"max_attempts":3,"phase":"failed","verify_pass":false,"last_commit":"abc1234","started":1786999000,"updated":1786999600}
