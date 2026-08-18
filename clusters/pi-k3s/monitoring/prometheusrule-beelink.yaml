@@ -154,10 +154,28 @@ spec:
             description: "Tasks are blocking on memory reclaim for over 5% of wall-clock time, sustained 10m. This is real slowdown, not just a high gauge — inference and ralph loops are both paying for it."
 
         # --- CPU saturation (load per core) ---
+        #
+        # `scalar()` on the denominator is load-bearing, not cosmetic. Without it this
+        # rule silently evaluates to nothing and can never fire — verified against live
+        # Prometheus 2026-08-18: both halves returned values on their own (node_load5
+        # = 0.72, core count = 32) while the division returned an empty vector.
+        #
+        # Why: a binary operator between two instant vectors matches on the FULL label
+        # set. The numerator carries {instance="beelink", job="beelink-node"}; the
+        # aggregated denominator carries no labels at all, so there is no matching pair
+        # and the result is empty. `scalar()` converts it to a plain number, which is
+        # matched against every sample instead. `/ on() group_left()` works too; scalar
+        # is the smaller change and reads better here.
+        #
+        # This is the same class of fault as the increase() artifact on BeelinkOOMKill
+        # above, inverted: that one fired without an event, this one cannot fire at
+        # all. A rule showing health=ok and state=inactive in the Prometheus UI proves
+        # only that it parsed — not that it is capable of firing. Check new rules by
+        # evaluating the expression, not by reading the rules page.
         - alert: BeelinkCPUSaturated
           expr: |
             node_load5{instance="beelink"}
-              / count(count(node_cpu_seconds_total{instance="beelink"}) by (cpu)) > 2
+              / scalar(count(count(node_cpu_seconds_total{instance="beelink"}) by (cpu))) > 2
           for: 15m
           labels:
             severity: warning
