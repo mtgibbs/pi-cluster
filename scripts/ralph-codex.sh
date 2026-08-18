@@ -109,7 +109,8 @@ while IFS= read -r task || [ -n "$task" ]; do
     prompt="${SHEET:+$SHEET
 
 }Read $SPEC. Implement ONLY this one task, nothing else: ${task}
-Follow the spec's section 10 reference and section 7 acceptance criteria EXACTLY.
+Follow the spec's section 10 acceptance criteria and section 7 norms EXACTLY.
+Do not run git add, git commit, or git stash — the loop owns the index.
 Do not touch anything outside this task's scope. Reuse existing patterns; never invent
 URLs/UIDs. When done, stop.${feedback}"
 
