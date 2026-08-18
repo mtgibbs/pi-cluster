@@ -2,7 +2,9 @@
 
 > **REASONS Canvas** (see `specs/TEMPLATE.md`). Constraints-before-work order.
 
-- **Status:** Draft v0.1 — OQ1–OQ5 open, must be resolved before handing to a loop
+- **Status:** Draft v0.2 — **OQ1 and OQ5 CLOSED 2026-08-18** (read from `beelink-ansible`
+  `origin/main`); OQ2 is the remaining blocker before handing to a loop. OQ1's answer changed the
+  design — see §4.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md` Core Mandates)
 - **Touches:** `beelink-ansible` repo → `playbooks/50-ai-stack.yml`, the coding-harness compose
@@ -37,12 +39,20 @@ RAM arithmetic, and committed us to building this instead.
 
 ## 3. Entities · [E — Entities]
 
-- **Harness containers** — `coding-harness-qwen`, `coding-harness-claude`, `coding-harness-claude-2`,
-  `coding-harness-codex`. Non-root uid 1000, `cap_drop: [ALL]`, read-only rootfs, no Docker socket.
+- **Harness containers** — `coding-harness-qwen` (`mem_limit: 4g`, `cpus: 2.0`),
+  `coding-harness-claude` (`4g`/`2.0`), `coding-harness-claude-2` (`2g`/`1.0`),
+  `coding-harness-codex` (`2g`/`1.0`). Non-root uid 1000, `cap_drop: [ALL]`, read-only rootfs, no
+  Docker socket. Caps are **not** uniform — verified against `beelink-ansible` `origin/main`.
+- **`ai-internal`** (existing) — the single shared bridge network. `driver: bridge`, **no subnet
+  declared, no `internal: true`**. **18 services sit on it**: the four harness containers plus
+  `litellm`, `ollama`, `llama-server`, `postgres`, `caddy`, `open-webui`, `open-webui-dewey`,
+  `pipelines`, `pipelines-ops`, `cadvisor`, `gpu-metrics`, `litellm-exporter`, `beelink-backup`,
+  `harness-console`. This is the fact that shapes the whole design (§4).
+- **`harness-net`** (NEW — must be created, not renamed) — a dedicated bridge network for the four
+  harness containers + `harness-egress` + `litellm`, with an **explicit fixed subnet** so
+  `DOCKER-USER` has something stable to match. Container IPs are not stable; the subnet is.
 - **`harness-egress`** (new) — the forward-proxy container. Config: an allowlist file, one
   host-pattern per line, `#` comments. Exact syntax depends on OQ2 (proxy choice).
-- **`harness-net`** (new or renamed) — the Docker network the harness containers sit on, with a
-  **fixed subnet** so nftables can match on it. Container IPs are not stable; the subnet is.
 - **Allowlist entry** — `(pattern, port, why)`. `pattern` is a hostname or `*.suffix`; entries
   without a recorded `why` are not allowed (see §7).
 - **Env contract** — `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` in each harness container, pointing
@@ -52,11 +62,21 @@ RAM arithmetic, and committed us to building this instead.
 ## 4. Approach · [A — Approach]
 
 **Belt and braces, in that order.** The *braces* are an HTTP(S) forward proxy with a hostname
-allowlist, selected by `HTTP_PROXY`/`HTTPS_PROXY`. The *belt* is host nftables in the `DOCKER-USER`
-chain: default-deny for the harness subnet, permitting only the proxy, DNS, and named LAN
-destinations. The proxy alone is **not** a boundary — `HTTP_PROXY` is advisory and any process can
-ignore it. The nftables rule is what makes it real; the proxy is what makes it *legible* (a named
-allowlist you can read and audit).
+allowlist, selected by `HTTP_PROXY`/`HTTPS_PROXY`. The *belt* is a host firewall rule in the
+`DOCKER-USER` chain: default-deny for the harness subnet, permitting only the proxy, DNS, and named
+LAN destinations. The proxy alone is **not** a boundary — `HTTP_PROXY` is advisory and any process
+can ignore it. The firewall rule is what makes it real; the proxy is what makes it *legible* (a
+named allowlist you can read and audit).
+
+**The network move is the load-bearing step (OQ1's answer, and it changed this design).** All 18
+Beelink services share one bridge network, `ai-internal`, with no subnet declared. A `DOCKER-USER`
+rule matching that subnet would therefore confine **ollama, litellm, postgres, caddy and everything
+else** — precisely what §5 puts out of scope, and a fast route to an outage. So the four harness
+containers move **off** `ai-internal` and onto a new dedicated `harness-net` with an explicit fixed
+subnet, joined by `harness-egress`. `litellm` is attached to **both** networks so that
+`http://litellm:4000` keeps resolving by name from the harness side; every other service stays
+exactly where it is. Confining a subnet is only safe once that subnet contains only what we mean to
+confine.
 
 Deliberately **not** using TLS interception. Hostname filtering via the `CONNECT` verb is enough to
 enforce "which host", we do not need "which URL", and a MITM CA in a container that runs agent code
@@ -77,16 +97,21 @@ means they cannot manage their own firewall, and self-managed confinement is not
 ## 5. Scope · [S — Structure: boundary]
 
 ### In scope
-- `beelink-ansible`: the harness compose template (network + proxy env), a new `harness-egress`
-  service + its allowlist config under `files/`, host nftables rules, `playbooks/50-ai-stack.yml`.
+- `beelink-ansible`: the harness compose block in `playbooks/50-ai-stack.yml` (new `harness-net`
+  network + proxy env + moving the four harness services onto it + attaching `litellm` to it), a new
+  `harness-egress` service + its allowlist config under `files/`, host `DOCKER-USER` rules.
 - `pi-cluster`: the `Known gap` paragraph in `.claude/skills/coding-agent-ops/SKILL.md`.
 
 ### Out of scope
 - **The Pi K3s cluster.** Nothing here touches `clusters/`. Cluster egress is a separate question.
 - **The UDM firewall.** The YouTube/short-form blackout rules are a different system with a
   different owner (`unifi-ops/SKILL.md`); do not extend them to cover this.
-- **The Beelink's other containers** — ollama, llama-server, LiteLLM, Open WebUI, Postgres, Caddy.
-  Only the four harness containers are confined. Do not "helpfully" widen it.
+- **The Beelink's other 14 services** — ollama, llama-server, LiteLLM, Open WebUI (×2), Postgres,
+  Caddy, pipelines (×2), cadvisor, gpu-metrics, litellm-exporter, beelink-backup, harness-console.
+  Only the four harness containers are confined. Do not "helpfully" widen it — and note that leaving
+  them on `ai-internal` while the harness moves to `harness-net` is exactly what keeps them out.
+  `litellm` is the sole exception: it joins `harness-net` *in addition to* `ai-internal`, and is not
+  itself confined.
 - **Ingress.** This is outbound only. No port publishing changes, no new exposed ports.
 - **The dependency-install policy wording.** Phase 2 makes it enforceable; rewriting the policy is a
   follow-up, not this spec.
@@ -103,6 +128,16 @@ means they cannot manage their own firewall, and self-managed confinement is not
   mount. Egress is the last open axis, which is why it is worth closing and also why it is not
   urgent enough to justify breaking the harness.
 - **Host is Ubuntu 26.04 Server** (`docs/beelink-ai-stack.md`), x86_64, Docker Compose, not K3s.
+- **The host firewall is `ufw`, and the playbook already drives it** — `50-ai-stack.yml` shells out
+  to `ufw allow from 192.168.1.0/24 to any port 9100` and `ufw allow from 172.16.0.0/12 to any port
+  9110`, with `changed_when: "'Rule added' in …stdout"` for idempotency. **Follow that pattern for
+  anything host-level.** But note the gotcha the playbook itself records: *"cAdvisor :8081 is
+  published via Docker so its iptables bypass ufw"* — Docker installs its own rules ahead of ufw, so
+  **ufw cannot govern container forwarding**. Container egress must go in `DOCKER-USER`. Both
+  mechanisms are in play; do not assume one covers the other. (OQ5, closed.)
+- **`beelink-ansible`'s working tree on the laptop mirror is STALE** — it was 40 commits behind
+  `origin/main` on a feature branch when this spec was written, and the stale tree showed only two
+  harness containers. **Read `git show origin/main:playbooks/50-ai-stack.yml`, not the checkout.**
 - **RAM is the binding constraint on that box**: the OS sees ~30.5 GiB after the ~96 GB iGPU UMA
   carve (measured 2026-08-18, `docs/adr/009-sbx-sandboxes.md`). The proxy must be small — a
   few hundred MiB, not a JVM. This is a hard design input, not a preference.
@@ -132,7 +167,7 @@ means they cannot manage their own firewall, and self-managed confinement is not
 
 ## 8. Safeguards · [S — Safeguards]
 
-1. **No credential ever appears in the proxy config or the nftables rules.** Not the PAT, not a
+1. **No credential ever appears in the proxy config or the firewall rules.** Not the PAT, not a
    LiteLLM key, not an OAuth token. The proxy does not authenticate; it filters by hostname.
 2. **No TLS interception.** No MITM CA is generated, installed, or mounted into any container.
 3. **The four harness containers keep their existing confinement** — `cap_drop: [ALL]`,
@@ -142,25 +177,36 @@ means they cannot manage their own firewall, and self-managed confinement is not
 5. **Phase 1 is log-only.** No enforcement ships in the same change as the observation tooling.
 6. **`litellm` and the in-Docker-network hostnames stay reachable** — container-to-container traffic
    is not proxied and not denied.
-7. **Locking yourself out is the failure mode to design against.** The nftables rules apply to the
-   harness subnet ONLY, never to the host's own egress or to SSH/Tailscale. A wrong rule here costs
-   remote access to the box.
+7. **Locking yourself out is the failure mode to design against.** The `DOCKER-USER` rules apply to
+   the `harness-net` subnet ONLY, never to `ai-internal`, never to the host's own egress, never to
+   SSH/Tailscale. A wrong rule here costs remote access to the box.
+8. **Confine only what `harness-net` contains.** Before any enforcement lands, `harness-net` must
+   hold exactly the four harness containers, `harness-egress`, and `litellm`. If another service is
+   ever added to it, the blast radius of every rule in §9 T6 silently grows. This is the safeguard
+   that OQ1 turned out to require.
 
 ## 9. Task breakdown · [O — Operations]
 
 **Phase 1 — observe (ships first, alone)**
 - **T1.** Add a `harness-egress` compose service (small proxy image, OQ2) + `files/harness-egress/`
   config directory. Log-only: permit all, log every destination.
-- **T2.** Put the harness containers on a network with a **fixed subnet**; set `HTTP_PROXY`/
-  `HTTPS_PROXY`/`NO_PROXY` in each. No nftables yet. `NO_PROXY` must include `litellm` and the
-  Docker network suffix.
-- **T3.** Wire both into `playbooks/50-ai-stack.yml`. Deploy. Run normal loops for a week.
+- **T2.** Declare `harness-net` with an explicit fixed subnet. **Move** the four harness services
+  from `ai-internal` onto it, put `harness-egress` on it, and add `harness-net` to `litellm`'s
+  network list so it sits on both. Leave the other 14 services on `ai-internal` untouched. Then set
+  `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` in each harness container; `NO_PROXY` must include `litellm`.
+  No firewall rules yet.
+- **T3.** Wire both into `playbooks/50-ai-stack.yml`. Deploy. **Smoke-test the network move before
+  anything else** — a loop that cannot reach `litellm` is a broken harness, not a quiet one:
+  `docker exec coding-harness-claude curl -sS -m5 -o /dev/null -w '%{http_code}\n' http://litellm:4000/health`.
+  Then run normal loops for a week.
 - **T4.** Distil the observed destination set into `allowlist.conf`, one `why` comment per entry.
 
 **Phase 2 — enforce (separate change, after T4)**
 - **T5.** Flip the proxy from log-only to allowlist-enforcing.
-- **T6.** Add the `DOCKER-USER` nftables default-deny for the harness subnet: permit → proxy, DNS,
-  and the named LAN destinations; reject everything else.
+- **T6.** Add the `DOCKER-USER` default-deny for the **`harness-net` subnet only** (never
+  `ai-internal`): permit → proxy, DNS, and the named LAN destinations; reject everything else. Use
+  `DOCKER-USER`, not a `ufw` rule — Docker's own rules run ahead of ufw and ufw does not govern
+  container forwarding (§6).
 - **T7.** Update `coding-agent-ops/SKILL.md` — replace the `Known gap` paragraph with the design.
 
 Candidate starting allowlist (to be **confirmed against T3 data**, not trusted as written):
@@ -176,17 +222,21 @@ codex's ChatGPT auth and Claude Code's telemetry actually require (OQ4).
 - **AC2 (Ubiquitous).** Each of the four harness containers shall have `HTTP_PROXY`, `HTTPS_PROXY`
   and `NO_PROXY` set.
 - **AC3 (Ubiquitous).** `NO_PROXY` shall include `litellm`, so model traffic is not proxied.
-- **AC4 (Ubiquitous).** The harness network shall declare an explicit fixed subnet.
+- **AC4 (Ubiquitous).** The `harness-net` network shall declare an explicit fixed subnet.
+- **AC4b (Ubiquitous).** `harness-net` shall be a network distinct from `ai-internal`, and `litellm`
+  shall be attached to it — otherwise the harness loses `http://litellm:4000` by name.
 - **AC5 (State-driven).** While in phase 1, the proxy config shall be log-only — no entry is denied.
 - **AC6 (Ubiquitous).** Every allowlist entry shall be preceded by a `#` comment giving its reason.
 - **AC7 (Unwanted).** If an allowlist pattern is broader than one wildcard label, the gate shall fail.
-- **AC8 (Unwanted).** If any credential literal appears in the proxy config or nftables rules, the
+- **AC8 (Unwanted).** If any credential literal appears in the proxy config or firewall rules, the
   gate shall fail.
 - **AC9 (Unwanted).** If any harness service gains `NET_ADMIN`, `privileged`, or a Docker socket
   mount, the gate shall fail.
 - **AC10 (Unwanted).** If the proxy service mounts the Docker socket, the gate shall fail.
-- **AC11 (Event-driven).** When phase 2 lands, the nftables rules shall scope to the harness subnet
-  and shall not reference the host's primary interface or the SSH/Tailscale paths.
+- **AC11 (Event-driven).** When phase 2 lands, the `DOCKER-USER` rules shall scope to a source
+  subnet and shall not reference the SSH/Tailscale paths.
+- **AC13 (Unwanted).** If a firewall rule references `ai-internal`, the gate shall fail — confining
+  that subnet would confine all 18 services (Safeguard 8).
 - **AC12 (Ubiquitous).** No MITM CA shall be generated, installed, or mounted anywhere.
 
 ## 11. Verification (the harness)
@@ -221,25 +271,32 @@ One task per iteration, fresh context, gated on `verify.sh`. **Phase 1 only** (T
 touches host firewall rules where a wrong rule costs remote access to the Beelink (Safeguard 7), so
 T5–T7 are a human-driven change, not a loop.
 
-`tasks.txt` covers **T1–T3 only** and is **provisional**: T1 names the proxy chosen in OQ2 and T2
-assumes a network shape that OQ1 has not confirmed. Resolve OQ1 and OQ2, fold the answers back into
-§4/§6, then re-read the tasks before starting a loop. T4 is not a loop task at all — it needs a week
-of real traffic to distil.
+`tasks.txt` covers **T1–T3 only**. T2 is now grounded in the real topology (OQ1 closed), so the
+remaining provisional part is T1's proxy image, pending OQ2. T4 is not a loop task at all — it needs
+a week of real traffic to distil.
 
 ## 12. Open questions
 
-- **OQ1.** What is the current compose network topology on the Beelink? Are the harness containers
-  and `litellm` on a shared user-defined network, and does it declare a subnet? Everything in §9
-  depends on this and I could not read `beelink-ansible` from the harness container. **Resolve first.**
-- **OQ2.** Which proxy? Candidates: `tinyproxy` (tiny, `Allow`/`Filter` by host, minimal deps),
-  `squid` (capable, heavier than this box wants), or a ~50-line Go/Python `CONNECT` filter (no
-  dependency, but ours to maintain). Decide on RAM footprint and allowlist-syntax legibility.
+- **OQ1. CLOSED 2026-08-18.** One shared bridge network, `ai-internal`, `driver: bridge`, **no
+  subnet declared**, **18 services on it** including all four harness containers and `litellm`.
+  Confirmed against `beelink-ansible` `origin/main` (the laptop mirror's working tree was 40 commits
+  stale and showed only two harness containers — see §6). **This answer changed the design**: a
+  subnet rule on `ai-internal` would confine the entire stack, so the harness moves to a dedicated
+  `harness-net` (§4, §9 T2, Safeguard 8, AC4b, AC13).
+- **OQ2. OPEN — the remaining blocker.** Which proxy? Candidates: `tinyproxy` (tiny, `Allow`/`Filter`
+  by host, minimal deps), `squid` (capable, heavier than this box wants), or a ~50-line Go/Python
+  `CONNECT` filter (no dependency, but ours to maintain). Decide on RAM footprint and allowlist-syntax
+  legibility. Budget context: the harness services alone already cap at 12 GiB (4+4+2+2) on a ~30.5
+  GiB host, so a few hundred MiB is the ceiling.
 - **OQ3.** Does anything in the harness ignore `HTTP_PROXY`? Go binaries honour it; some Node tooling
   needs `npm config set proxy` separately. Enumerate during T3 rather than assuming.
 - **OQ4.** What hosts do Claude Code's telemetry/auth and codex's ChatGPT device-auth actually need?
   This is exactly what phase 1 exists to answer — do not guess it into the allowlist.
-- **OQ5.** nftables or iptables-nft on Ubuntu 26.04, and does the installed Docker version still
-  honour the `DOCKER-USER` chain the same way? Verify on the box before writing T6.
+- **OQ5. CLOSED 2026-08-18.** The host runs **`ufw`**, already driven from `50-ai-stack.yml` via
+  `ansible.builtin.command: ufw allow …` with `changed_when` idempotency — follow that pattern for
+  host-level rules. But ufw does **not** govern container forwarding (the playbook itself records
+  that Docker's iptables bypass ufw for published ports), so container egress goes in `DOCKER-USER`.
+  Both mechanisms are in play; neither covers the other.
 
 ## Two-way sync rule
 

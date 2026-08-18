@@ -74,7 +74,7 @@ four harness containers. Close the egress gap with our own ansible-managed proxy
 | Scenario | Per sandbox | Four lanes | Verdict |
 |---|---|---|---|
 | sbx defaults (50% of host RAM) | ~15.2 GiB | ~61 GiB | 2× oversubscribed on a 30.5 GiB host. One sandbox alone exceeds the 6.4 GiB currently available |
-| Tuned to today's caps (`--memory 4g`) | 4 GiB + guest kernel | ~16–18 GiB fenced | Fits on paper, leaves nothing for the inference plane |
+| Tuned to today's caps (4+4+2+2 GiB) | 2–4 GiB + guest kernel | ~12 GiB + 4 guest kernels fenced | Fits on paper, leaves little for the inference plane |
 | One disposable lane (`--memory 6g`) | 6 GiB | n/a | **Viable.** Roughly what is actually free |
 
 ### Why a slice is not equivalent to a cap
@@ -174,7 +174,7 @@ four harness containers. Close the egress gap with our own ansible-managed proxy
 ### Retrofit all four harness containers onto sbx
 
 - Pro: one mechanism, strongest isolation, egress policy included.
-- Con: does not close arithmetically on 30.5 GiB. Would fence ~16–18 GiB of rigid slices on a host
+- Con: does not close arithmetically on 30.5 GiB. Would fence ~12 GiB of rigid slices on a host
   already at 6.4 GiB available with swap in use, crush the file cache that makes model heat-ups
   fast, and trade declarative ansible provisioning for imperative CLI state. Rejected on numbers,
   not preference.
@@ -192,8 +192,8 @@ four harness containers. Close the egress gap with our own ansible-managed proxy
   container idles at 425 MiB against a 4 GiB cap on 2 CPUs. A Pi 5's 4 cores would be a per-lane
   upgrade.
 - Con: arm64 versus the pinned linux_x64 `ctx` binary baked into the image; SD-card storage is a
-  known chronic pain (NVMe HAT effectively mandatory); 4 GiB × 4 lanes exceeds 16 GB with nothing
-  left for the OS.
+  known chronic pain (NVMe HAT effectively mandatory); the four lanes' caps total 12 GiB (4+4+2+2),
+  which fits 16 GB only just, with little left for the OS.
 - **Parked as a separate decision, not rejected.** It is orthogonal to sbx — the blast-zone lane is
   worth having wherever the harness lives. Revisit once the OOM-kill history is dated
   (`journalctl -k | grep -i "killed process"` on the Beelink) and the arm64 `ctx` question is
@@ -208,6 +208,24 @@ four harness containers. Close the egress gap with our own ansible-managed proxy
   mode down and cold model reloads on the way back. The yield is bounded at roughly 8 GiB and costs
   the 256k context that `opencode.json` declares. A lever, not a solution — and unnecessary if the
   harness moves off-box.
+
+## Amendments
+
+**2026-08-18 — harness caps corrected.** The original text used "4 GiB × 4 lanes ≈ 16–18 GiB". The
+real caps are **not uniform**: `coding-harness-qwen` and `-claude` are `4g`/`2.0`, while `-claude-2`
+and `-codex` are `2g`/`1.0` — **12 GiB total**, verified against `beelink-ansible` `origin/main`.
+The decision is unaffected (sbx defaults want ~15.2 GiB *per sandbox*, which is what fails), but the
+tuned-retrofit row was wrong and is fixed above.
+
+The same read closed OQ1 on the follow-on spec and **changed that design**: all 18 Beelink services
+share one `ai-internal` bridge with no declared subnet, so a `DOCKER-USER` rule scoped to it would
+confine the whole stack. The harness therefore moves to a dedicated `harness-net`. See
+`specs/harness-egress-allowlist/spec.md` §4.
+
+Worth recording why this was late: the ADR and spec both stated that `beelink-ansible` could not be
+read from the harness container. **That was false** — it is mounted at `/Users/mtgibbs/dev/`. The
+mounted checkout is, however, a **stale mirror** (40 commits behind `origin/main` when checked), and
+reading its working tree showed only two harness containers. Read `git show origin/main:<path>`.
 
 ## Related
 
