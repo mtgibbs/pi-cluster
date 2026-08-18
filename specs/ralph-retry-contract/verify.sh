@@ -63,7 +63,7 @@ done
 run_loop() {
   local scen="$1" retries="${2:-2}" T
   T="$(mktemp -d -t rrc.XXXXXX)"
-  mkdir -p "$T/bin" "$T/mock" "$T/repo"
+  mkdir -p "$T/bin" "$T/mock" "$T/repo" "$T/retry"
   cp "$FIX/mock-oc" "$T/bin/oc"; chmod +x "$T/bin/oc"
   cp -R "$FIX/mock-exec/$scen" "$T/mock/scenario"
   ( cd "$T/repo" && git init -q . && git config user.email t@t && git config user.name t
