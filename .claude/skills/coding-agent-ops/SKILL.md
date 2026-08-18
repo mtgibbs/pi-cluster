@@ -355,6 +355,14 @@ tighten further; noted as a possible future hardening step, not done because
 it's meaningfully more complexity than the current risk (a PR-gated coding
 loop, not an untrusted-code sandbox) warrants today.
 
+> **Decision recorded 2026-08-18 — see `docs/adr/009-sbx-sandboxes.md`.** Docker
+> Sandboxes (`sbx`) was evaluated as a way to close this gap and **rejected as a
+> retrofit for these four containers**: the Beelink's OS sees only ~30.5 GiB
+> (128 GB less the ~96 GB iGPU UMA carve), and sbx allocates 50% of host RAM per
+> microVM with no swap. The plan instead is an ansible-managed egress allowlist
+> proxy here, plus a *separate* disposable `sbx` lane for untrusted third-party
+> code. Read the ADR before revisiting — it carries the measurements.
+
 **Notifications through the attach chain (tmux → ssh → iTerm2)** — working as of
 2026-07-09; only the image bake is pending review:
 - **Turn-end/attention bells:** `preferredNotifChannel: terminal_bell` in the claude
