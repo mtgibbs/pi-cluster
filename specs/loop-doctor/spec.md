@@ -271,12 +271,28 @@ artifact rather than on a later task's work (`specs/TEMPLATE.md` §11 three-verd
 - **T5** — the §3.3 classifier, replacing T2's placeholder. Observable: real `fault` + `evidence`.
 - **T6** — `--ledger` append-only with skip-based idempotency. Observable: the ledger file.
 
+**Rejected — splitting T1's argument parsing from its directory policy.** The `qwen-61568`
+post-mortem flagged T1 as carrying two contracts, and the obvious remedy is two tasks. It does
+not work here: T2 would have **no presence-gate**. A behaviour ("does it exit 2 on an unreadable
+explicit dir?") has no artifact to arm a `pend` on, so its checks could only be hard FAILs — and
+hard-failing T2's checks while T1 is being built is precisely the "T1 gated on a later task's
+work" trap the three-verdict contract exists to prevent. The alternative presence-gate — grepping
+the script for `exit 2` — tests for the fix rather than the behaviour. So the two stay one task,
+and the real defect (§10 AC2/AC2b: the precedence was never stated) is fixed instead. Splitting a
+task is only an improvement when each half can be observed independently.
+
 ## 10. Acceptance criteria (EARS) · [O]
 
 - **AC1** (Ubiquitous) The system shall exist at `scripts/loop-doctor.sh`, be executable, and be
   `bash -n` clean.
-- **AC2** (Unwanted) If invoked with no arguments and no readable default directories, then the
-  system shall print a line containing `usage:` to stderr and exit 1.
+- **AC2** (Unwanted) If invoked with **no directory flags** and neither default directory is
+  readable, then the system shall print a line containing `usage:` to stderr and exit 1.
+- **AC2b** (Unwanted) If a directory is given **explicitly** via `--status-dir` or `--log-dir`
+  and is not a readable directory, then the system shall print to stderr and exit **2** — and
+  shall do so whether the other directory is readable or not. The explicit-flag rule outranks
+  AC2; the two overlap and the precedence is normative, not incidental.
+- **AC2c** (Unwanted) If an unrecognised flag is given, then the system shall print a line
+  containing `usage:` to stderr and exit 1.
 - **AC3** (Event-driven) When given a fixture status dir and log dir, the system shall print
   exactly one output line per `run_id` found.
 - **AC4** (Event-driven) When a run's heartbeat has `phase=running` and `updated` older than
@@ -337,6 +353,13 @@ fixtures/logs/qwen-1002/T1-attempt1.log   contains a fake key literal -> AC14
 must be shown RED against a deliberately wrong implementation before the gate is accepted; the
 AC5 pair (same fixture, two `--now` values, two verdicts) is itself the proof that the staleness
 check cannot pass vacuously. Record the red-before evidence in `specs/loop-doctor/evidence/`.
+
+**Coverage runs both ways.** §11's usual instruction is that every §10 criterion maps to an
+assertion. `qwen-61568` exposed the converse gap: `t1:unreadable-dir-exit-2` was asserted by the
+gate and derived only from `tasks.txt` — **no §10 criterion covered it**, so the ambiguity behind
+it was never forced into the open. Every assertion in this gate must name the AC (or the §-rule)
+it enforces, and an assertion that can name none is either a missing AC or a gate that is testing
+its author's assumptions.
 
 **Blind spot, stated honestly** (evidence doc §5 lesson): a fixtures-only gate validates the
 classifier against shapes we already know. It cannot prove the rule table covers a fault class

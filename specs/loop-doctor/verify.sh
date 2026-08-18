@@ -90,15 +90,32 @@ if [ -f "$F" ]; then
   bash -n "$F" 2>/dev/null && ok "t1:bash-n-clean" || no "t1:bash-n-clean"
   grep -q 'declare -A' "$F" && no "t1:no-declare-A-bash32" || ok "t1:no-declare-A-bash32"
 
+  # AC2c — unrecognised flag.
   bash "$F" --definitely-not-a-flag >/dev/null 2>/tmp/ld-flag.txt; rc=$?
-  [ "$rc" -eq 1 ] && ok "ac2:unknown-flag-exit-1" || no "ac2:unknown-flag-exit-1"
-  grep -q 'usage:' /tmp/ld-flag.txt && ok "ac2:usage-on-stderr" || no "ac2:usage-on-stderr"
+  [ "$rc" -eq 1 ] && ok "ac2c:unknown-flag-exit-1" || no "ac2c:unknown-flag-exit-1"
+  grep -q 'usage:' /tmp/ld-flag.txt && ok "ac2c:usage-on-stderr" || no "ac2c:usage-on-stderr"
 
+  # AC2 — NO directory flags, unreadable defaults -> usage, exit 1.
+  RALPH_STATUS_DIR=/nonexistent/nope RALPH_LOG_DIR=/nonexistent/nope \
+    bash "$F" >/dev/null 2>/tmp/ld-def.txt; rc=$?
+  [ "$rc" -eq 1 ] && ok "ac2:no-flags-unreadable-defaults-exit-1" \
+    || no "ac2:no-flags-unreadable-defaults-exit-1"
+  grep -q 'usage:' /tmp/ld-def.txt && ok "ac2:usage-on-stderr" || no "ac2:usage-on-stderr"
+
+  # AC2b — an EXPLICIT unreadable dir is exit 2. Both orderings are asserted because AC2 and
+  # AC2b overlap: the first case satisfies BOTH rules, and only the precedence decides. This
+  # pair is what the spec failed to state and qwen-61568 died on (3 attempts, T1).
   bash "$F" --status-dir /nonexistent/nope --log-dir /nonexistent/nope >/dev/null 2>&1; rc=$?
-  [ "$rc" -eq 2 ] && ok "t1:unreadable-dir-exit-2" || no "t1:unreadable-dir-exit-2"
+  [ "$rc" -eq 2 ] && ok "ac2b:both-explicit-unreadable-exit-2" \
+    || no "ac2b:both-explicit-unreadable-exit-2 — got $rc; AC2b outranks AC2"
+  bash "$F" --status-dir /nonexistent/nope --log-dir "$L" >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && ok "ac2b:one-explicit-unreadable-exit-2" \
+    || no "ac2b:one-explicit-unreadable-exit-2 — got $rc"
 else
   no "t1:bash-n-clean"; no "t1:no-declare-A-bash32"
-  no "ac2:unknown-flag-exit-1"; no "ac2:usage-on-stderr"; no "t1:unreadable-dir-exit-2"
+  no "ac2c:unknown-flag-exit-1"; no "ac2c:usage-on-stderr"
+  no "ac2:no-flags-unreadable-defaults-exit-1"; no "ac2:usage-on-stderr"
+  no "ac2b:both-explicit-unreadable-exit-2"; no "ac2b:one-explicit-unreadable-exit-2"
 fi
 
 # Shared invocations. Never let a crashing script abort the gate.

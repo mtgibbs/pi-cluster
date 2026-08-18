@@ -79,3 +79,54 @@ spec's deliverable. Two legitimate paths, and the choice is the operator's:
   very run is the natural dogfood. Note the risk: a reference implementation kept where the
   executor can read it stops being a fair measurement (research log §17, "the fair-comparison
   spec and the effective spec are different documents").
+
+---
+
+## 7. Post-dogfood revision — the ambiguity the gate was hiding
+
+Run `qwen-61568` (the first `build-converge` on this spec) **stopped on T1 after 3 attempts**,
+one check from green: `t1:unreadable-dir-exit-2`. The cause was a defect in *this spec*, not the
+executor.
+
+`tasks.txt` T1 stated two rules that both fire on `--status-dir /nonexistent --log-dir /nonexistent`:
+
+- *"if neither --status-dir nor --log-dir is a readable directory → exit **1**"*
+- *"if a directory was explicitly given but is unreadable → exit **2**"*
+
+**It never said which wins.** The gate encoded the ordering the reference implementation happened
+to use, so it passed 50/50 while the spec it was testing was undecidable. And the assertion had
+**no §10 criterion at all** — it existed only in `tasks.txt`, so nothing ever forced the question.
+
+### Fixed
+
+- `tasks.txt` T1 now states the precedence explicitly (explicit-flag rule first), and warns
+  against inspecting `"$1"` after the parse loop — under the mandated `set -u` that is a fatal
+  unbound-variable error, and it is what qwen's attempt 3 actually crashed on.
+- §10 gained **AC2** (no flags, unreadable defaults → 1), **AC2b** (explicit unreadable → 2,
+  outranks AC2), **AC2c** (unknown flag → 1).
+- §11 gained the **coverage-runs-both-ways** rule: every assertion must name the criterion it
+  enforces. An assertion that can name none is a missing AC or a gate testing its author's
+  assumptions.
+- §9 records why splitting T1 was **rejected**: the second half is a behaviour with no artifact
+  to arm a `pend` on, so its checks could only be hard FAILs — the exact "gated on a later task"
+  trap the three-verdict contract prevents.
+
+### Red-before-green for the new criteria
+
+Swapping the precedence in the reference implementation (apply the exit-1 rule first):
+
+```
+PASS  ac2:no-flags-unreadable-defaults-exit-1
+PASS  ac2b:one-explicit-unreadable-exit-2
+FAIL  ac2b:both-explicit-unreadable-exit-2 — got 1; AC2b outranks AC2
+```
+
+Only the **overlapping** case moves — which is the point. `one-explicit-unreadable` satisfies a
+single rule and is precedence-independent; `both-explicit-unreadable` satisfies both, so it is
+the only assertion that can pin the ordering. Gate is now **53/53, `score=1.000`, STRICT exit 0**.
+
+### The transferable lesson
+
+A gate tuned against a single implementation certifies **that implementation's reading** of the
+spec. It took a second, independent implementation to reveal that the spec had two readings. This
+is the argument for running a spec through the loop even when a working version already exists.
