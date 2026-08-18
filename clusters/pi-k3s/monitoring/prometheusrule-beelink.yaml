@@ -69,6 +69,14 @@ spec:
         # MemAvailable ignores swap, and an OOM kill frees memory, so a 10m-averaged
         # level alert is structurally blind to both. Swap level + PSI stall + the
         # oom_kill counter cover what it misses.
+        #
+        # Correction to the commit that introduced these rules (24b61a7): its message
+        # and PR body claimed a kill had landed "within the hour", i.e. that the 8
+        # kills were ongoing. That was wrong — it came from the increase() artifact
+        # described on BeelinkOOMKill below. Exact deltas show the counter flat over
+        # 90m, 24h and 7d, so all 8 kills predate 2026-08-11 and the box is tight but
+        # not actively killing. These rules are watchful instrumentation, not an
+        # active incident.
         - alert: BeelinkMemoryPressure
           expr: |
             (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}) > 0.90
@@ -81,12 +89,28 @@ spec:
 
         # The event this file previously could not see at all. /proc/vmstat oom_kill
         # is kernel state — it survives node-exporter restarts and resets only on
-        # reboot, so `increase` is safe here. Fires for ~1h after a kill.
+        # reboot. Fires for ~1h after a kill.
         # Triage: `journalctl -k | grep -i "killed process"` on the Beelink to see
         # WHAT died — an inference process, a harness container, or the Compose stack.
+        #
+        # DO NOT rewrite this as increase(...[1h]) > 0. That was the original form
+        # and it is wrong for this metric. `increase` extrapolates to the range
+        # edges, and on a flat low-cardinality integer counter it yields a phantom
+        # positive: observed 2026-08-18, increase(...[1h]) reported > 0.5 while the
+        # exact delta over 90m/24h/7d was 0 — i.e. it claimed a kill that never
+        # happened. (Suspected mechanism: a short-history series matching the
+        # selector, which `-` drops but `increase` extrapolates. Not fully isolated;
+        # the behaviour is reproducible regardless.)
+        #
+        # Offset subtraction is exact integer arithmetic — no extrapolation, no
+        # false positive. Known tradeoff: if the series did not exist 1h ago (fresh
+        # Prometheus or a re-registered target) this returns nothing and we are
+        # blind for one hour. That is the better failure: a false OOM-critical page
+        # costs more trust than an hour of silence.
         - alert: BeelinkOOMKill
           expr: |
-            increase(node_vmstat_oom_kill{instance="beelink"}[1h]) > 0
+            (node_vmstat_oom_kill{instance="beelink"}
+               - node_vmstat_oom_kill{instance="beelink"} offset 1h) > 0
           for: 5m
           labels:
             severity: critical
