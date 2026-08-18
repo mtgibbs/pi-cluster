@@ -1,0 +1,4 @@
+running the fixture gate
+  FAIL  alpha
+  PASS  beta
+  PEND  gamma-must-not-fail-the-parser
