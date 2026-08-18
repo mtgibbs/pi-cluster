@@ -30,11 +30,18 @@ if [ ! -d "$R" ]; then
   echo; [ "$fail" = 0 ] && echo "VERIFY: PASS" || echo "VERIFY: FAIL"; exit "$fail"
 fi
 
-# Collect candidate files by CONTENT, not by a guessed path — the ansible repo layout is OQ1.
-mapfile -t COMPOSE < <(grep -rl -- "coding-harness" "$R" \
+# Collect candidate files by CONTENT, not by a guessed path — the ansible repo layout was OQ1.
+#
+# read-loop, NOT `mapfile`: this gate is most likely to be run FROM THE LAPTOP with
+# ANSIBLE_REPO=../beelink-ansible, and macOS ships bash 3.2 where mapfile/readarray do not exist —
+# the script would die on line 34 before checking anything. See AGENTS.md "Shell is macOS bash 3.2".
+# Process substitution IS available in 3.2, so `while read < <(...)` is the portable equivalent.
+COMPOSE=()
+while IFS= read -r f; do [ -n "$f" ] && COMPOSE+=("$f"); done < <(grep -rl -- "coding-harness" "$R" \
   --include='*.yml' --include='*.yaml' --include='*.j2' 2>/dev/null | sort -u)
 ALLOW="$(find "$R" -name 'allowlist.conf' 2>/dev/null | head -1)"
-mapfile -t NFT < <(grep -rl -iE "nftables|DOCKER-USER|iptables" "$R" \
+NFT=()
+while IFS= read -r f; do [ -n "$f" ] && NFT+=("$f"); done < <(grep -rl -iE "nftables|DOCKER-USER|iptables" "$R" \
   --include='*.yml' --include='*.yaml' --include='*.j2' --include='*.conf' --include='*.sh' 2>/dev/null | sort -u)
 
 incompose(){ [ "${#COMPOSE[@]}" -gt 0 ] && grep -qE -- "$1" "${COMPOSE[@]}" 2>/dev/null; }
