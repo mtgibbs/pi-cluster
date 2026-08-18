@@ -237,9 +237,20 @@ degraded means *don't skip*. Both err toward doing more work and claiming less.
 
 - **T1** — `scripts/ralph-ledger.sh`: key derivation, `ledger_record`, `ledger_resume_index`,
   never-fatal contract.
-- **T2** — record at the commit boundary in both loops.
-- **T3** — resume-skip behind `RALPH_RESUME`, in both loops.
-- **T4** — the CLI: `list`, `forget <task>`, `clear`.
+- **T2** — the CLI: `list`, `forget <task>`, `clear`, and the sourced-vs-executed guard.
+- **T3** — record at the commit boundary in both loops.
+- **T4** — resume-skip behind `RALPH_RESUME`, in both loops.
+
+> Reordered from the draft at compile time: the two file-local tasks (helper, CLI) come first and
+> the two loop-wiring tasks after, so each pair shares one file and one blast radius. The gate's
+> unit tier covers T1-T2 and its integration tier covers T3-T4, which is only a clean split
+> because of this order.
+
+**`RALPH_LEDGER_DIR` was added at compile time** as an override of §3's `$HOME/.harness/ledger`,
+which remains the default. Every sibling channel has one (`RALPH_LOG_DIR`, `RALPH_STATUS_DIR`,
+`RETRY_STATE_DIR`) and §11 forbids the gate from writing the operator's real corpus — a feature
+whose whole purpose is to accumulate a durable ledger must not have its ledger scribbled on by
+its own test suite.
 
 ---
 

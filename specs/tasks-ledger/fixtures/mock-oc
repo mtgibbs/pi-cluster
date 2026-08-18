@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# mock `oc` — stands in for the executor so a real ralph run is deterministic.
+# Invoked by ralph as: oc run --dir <ROOT> <PROMPT>
+# Env (set by the gate): MOCK_DIR = where to keep state.
+#
+# Unlike specs/run-regression-guard's mock, the scenario is dispatched on the TASK NAMED IN THE
+# PROMPT rather than on a global attempt counter. A resumed run skips tasks, so invocation N is
+# not task N any more — an attempt-numbered scenario would build the wrong file and the resume
+# fixtures would silently test nothing.
+set -uo pipefail
+[ "${1:-}" = "run" ] || { echo "mock-oc: expected 'run'" >&2; exit 64; }
+shift
+DIR=""; PROMPT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir) DIR="${2:-}"; shift 2 ;;
+    *)     PROMPT="$1"; shift ;;
+  esac
+done
+: "${MOCK_DIR:?mock-oc needs MOCK_DIR}"
+n=$(( $(cat "$MOCK_DIR/attempt" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$n" > "$MOCK_DIR/attempt"
+printf '%s\n===END-PROMPT-%s===\n' "$PROMPT" "$n" >> "$MOCK_DIR/prompts.txt"
+
+# ralph aborts when a nonzero exit is paired with <512 bytes of transcript (the stillborn
+# guard at ralph-qwen.sh:109). A real attempt is chatty, so be chatty.
+i=0; while [ $i -lt 40 ]; do echo "mock-oc: working on the task, line $i"; i=$((i+1)); done
+
+act="$MOCK_DIR/scenario/default.sh"
+[ -f "$act" ] && ROOT="$DIR" MOCK_DIR="$MOCK_DIR" PROMPT="$PROMPT" bash "$act"
+exit 0
