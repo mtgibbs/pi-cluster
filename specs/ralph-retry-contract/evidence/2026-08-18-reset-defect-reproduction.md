@@ -115,3 +115,61 @@ check that passes for the wrong reason (the first: `ac15` in
 `specs/loop-doctor/evidence/2026-08-18-red-before-green.md` §4, which matched a comment).
 Red-before-green is not a formality here; it has now caught a real defect in the gate on both
 attempts.
+
+---
+
+# Build run — `qwen-86499`, 2026-08-18
+
+`run-loop.sh build-converge specs/ralph-retry-contract`, driven from an **isolated copy** of
+`scripts/` (§11b: the loop being modified is the loop doing the modifying; bash re-seeks in a
+running script, so the executing copy must not be the edited one).
+
+| Task | Result |
+|---|---|
+| T1 `ralph-retry.sh` helper | **passed, attempt 1** |
+| T2 reset fix in both twins | **passed, attempt 1** |
+| T3 prompt fix in both twins | **passed, attempt 1** |
+| T4 wire the helper in | failed ×3 → STOP |
+
+Three of four first try, against the previous run's stop-on-T1. The tasks that landed cleanly
+were the ones with a literal target: a named function set, a named line to insert, a named string
+to replace.
+
+## T4 did not fail — the gate did
+
+The gate's `run_loop` set `RETRY_STATE_DIR="$T/retry"` and **never created that directory**.
+`retry_init`'s `: > "$RETRY_STATE_FILE"` then failed, `RETRY_OK` stayed 0, and the helper
+degraded to silence — which is exactly what **AC6 requires it to do**. AC9 could therefore never
+pass, whatever the executor wrote.
+
+qwen's attempt-3 implementation was correct: sourced with stubs, `retry_init` per task,
+`retry_record` on both paths, the regression block appended to the verify-failure feedback only.
+Recovering it from `~/.harness/logs/qwen-86499/T4-attempt3.diff` and adding one `mkdir`:
+
+```
+28 PASS, 0 FAIL, 0 pend    score=1.000    STRICT exit 0
+```
+
+**A gate that models a degraded mode must not accidentally create that mode in its own fixtures**,
+or it tests the degradation instead of the feature.
+
+## Two things this run proves about the fix itself
+
+- `ac7:staged-file-gone-next-attempt` **passes** — D2 is closed, verified by a real ralph run
+  that stages a file in attempt 1 and finds it gone in attempt 2.
+- The twins are byte-identical on all three shared clauses (`ac12`).
+
+Note the ordering subtlety: because the executing loop was the frozen copy, T4's own retries ran
+under the **unfixed** reset. The fix was proven by the gate, not by the run that produced it.
+
+## Three specs, three gate defects
+
+| Spec | Defect in the gate | Found by |
+|---|---|---|
+| loop-doctor | `ac15` matched a comment, not a call | running it against known-good code |
+| ralph-retry-contract | "prompt contains `alpha`" passed unfixed | running it against known-bad code |
+| ralph-retry-contract | `RETRY_STATE_DIR` never created | **a real executor failing honestly against it** |
+
+The third is the one no mutation test would have caught: the gate was self-consistently wrong, and
+only an independent implementation trying to satisfy it exposed the contradiction. This is the
+strongest argument yet for running a spec through the loop even when the answer is already known.
