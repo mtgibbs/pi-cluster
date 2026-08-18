@@ -52,10 +52,42 @@ if incompose 'HTTPS?_PROXY'; then
   else no "AC3: NO_PROXY does not name litellm — model traffic (http://litellm:4000) would be proxied and will break"; fi
 else pend "AC2: proxy env vars"; fi
 
-# ---------- AC4: the network declares a fixed subnet (nftables must match on it) ----------
+# ---------- AC4: the network declares a fixed subnet (DOCKER-USER must match on it) ----------
 if incompose 'harness-egress|HTTPS?_PROXY'; then
   if incompose 'subnet:'; then ok "AC4: network declares a fixed subnet"
-  else no "AC4: no 'subnet:' declared — container IPs are not stable, so phase-2 nftables has nothing to match on"; fi
+  else no "AC4: no 'subnet:' declared — container IPs are not stable, so phase-2 DOCKER-USER has nothing to match on"; fi
+
+  # AC4b: OQ1 found ALL 18 services on the single shared `ai-internal` bridge. Confining that
+  # subnet would confine ollama/litellm/postgres/caddy too, so the harness must move to its own
+  # network — and litellm must join it, or `http://litellm:4000` stops resolving by name and every
+  # loop on the box breaks. Both halves are checked because either alone is a broken state.
+  if incompose 'harness-net'; then
+    ok "AC4b: a dedicated harness-net is declared"
+    # Extract the litellm service block BY NAME and indentation, then look inside it.
+    # A whole-file `grep -qzE 'litellm:(.|\n)*?harness-net'` does NOT work: POSIX ERE has no lazy
+    # quantifier, so it matches `litellm:` followed by `harness-net` ANYWHERE later — including the
+    # bottom-level `networks:` declaration. That gave a false PASS on a fixture where litellm was
+    # not on harness-net at all. Scope the search to the block.
+    litellm_blk=""
+    for f in "${COMPOSE[@]}"; do
+      litellm_blk="$litellm_blk$(awk '
+        /^[[:space:]]*litellm:[[:space:]]*$/ && !inblk { ind=match($0,/[^ ]/); inblk=1; next }
+        inblk {
+          if ($0 ~ /^[[:space:]]*$/) next
+          if (match($0,/[^ ]/) <= ind) { inblk=0; next }
+          print
+        }' "$f" 2>/dev/null)"
+    done
+    if [ -z "$litellm_blk" ]; then
+      pend "AC4b: litellm service block not found"
+    elif printf '%s' "$litellm_blk" | grep -qE 'harness-net'; then
+      ok "AC4b: litellm is attached to harness-net"
+    else
+      no "AC4b: litellm is NOT attached to harness-net — the harness would lose http://litellm:4000 by name and every loop breaks (spec §4)"
+    fi
+  else
+    pend "AC4b: dedicated harness-net"
+  fi
 fi
 
 # ---------- AC5/AC6/AC7: the allowlist file ----------
@@ -124,6 +156,11 @@ if [ "${#NFT[@]}" -gt 0 ] && grep -rqE 'DOCKER-USER' "${NFT[@]}" 2>/dev/null; th
   grep -rqiE 'tailscale|tailscale0|(^|[^A-Za-z])ssh([^A-Za-z]|$)|-?-?dport[[:space:]]+22([^0-9]|$)|:22([^0-9]|$)' "${NFT[@]}" 2>/dev/null \
     && no "AC11: firewall rules reference SSH/Tailscale — out of scope and a lockout risk (Safeguard 7)" \
     || ok "AC11: rules do not touch SSH/Tailscale paths"
+
+  # AC13 / Safeguard 8: ai-internal carries all 18 services. A rule naming it confines the whole box.
+  grep -rqE 'ai-internal' "${NFT[@]}" 2>/dev/null \
+    && no "AC13: a firewall rule references ai-internal — that subnet holds all 18 services, not just the harness (Safeguard 8)" \
+    || ok "AC13: no firewall rule references ai-internal (Safeguard 8)"
 else
   pend "AC11: phase-2 nftables rules"
 fi
