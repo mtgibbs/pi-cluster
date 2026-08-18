@@ -51,6 +51,12 @@ if [ -f "$(dirname "$0")/ralph-log.sh" ]; then
 else
   log_init() { :; }; log_path() { printf '/dev/null'; }; log_failure() { :; }; log_where() { :; }
 fi
+# Retry contract — track regressions across attempts. See scripts/ralph-retry.sh.
+if [ -f "$(dirname "$0")/ralph-retry.sh" ]; then
+  . "$(dirname "$0")/ralph-retry.sh"
+else
+  retry_init() { :; }; retry_record() { :; }; retry_regressions() { :; }
+fi
 
 command -v codex >/dev/null 2>&1 || { echo "ralph-codex: codex CLI not on PATH" >&2; exit 1; }
 codex login status >/dev/null 2>&1 || {
@@ -103,13 +109,14 @@ while IFS= read -r task || [ -n "$task" ]; do
   [ -z "${task// }" ] && continue
   echo "════════ TASK: $task ════════"
   HB_TASK="$task"; HB_TIDX=$((HB_TIDX + 1)); hb_write running
-  feedback=""; passed=0
+  feedback=""; passed=0; retry_init
   for attempt in $(seq 1 $((RETRIES + 1))); do
     HB_ATTEMPT="$attempt"; hb_write running
     prompt="${SHEET:+$SHEET
 
 }Read $SPEC. Implement ONLY this one task, nothing else: ${task}
-Follow the spec's section 10 reference and section 7 acceptance criteria EXACTLY.
+Follow the spec's section 10 acceptance criteria and section 7 norms EXACTLY.
+Do not run git add, git commit, or git stash — the loop owns the index.
 Do not touch anything outside this task's scope. Reuse existing patterns; never invent
 URLs/UIDs. When done, stop.${feedback}"
 
@@ -139,16 +146,26 @@ URLs/UIDs. When done, stop.${feedback}"
       git -C "$ROOT" commit -q -m "ralph(codex): ${task%%:*} — ${task#*: }" || true
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
+      retry_record "$out"
       break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
     log_failure "$HB_TIDX" "$attempt" "$out"   # BEFORE the reset below erases the evidence
+    retry_record "$out"
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
+    _regression_block=""
+    if _rb="$(retry_regressions "$out")" && [ -n "$_rb" ]; then
+      _regression_block="
+REGRESSION — these checks PASSED in an earlier attempt of this same task and now do not:
+$_rb
+Keep them passing while you fix the failures above. Do not trade one check for another."
+    fi
     feedback="
 A previous attempt FAILED verification with:
 $(printf '%s' "$out" | grep -E 'FAIL|VERIFY' | head -20)
-Fix exactly those failures."
+Fix exactly those failures.${_regression_block}"
+    git -C "$ROOT" reset -q -- . 2>/dev/null || true   # reset index to HEAD so checkout -- can drop staged files
     git -C "$ROOT" checkout -- . 2>/dev/null || true   # reset tracked changes from the bad attempt
     git -C "$ROOT" clean -fd -- . 2>/dev/null || true  # ...and untracked files/dirs it created —
     # `checkout --` alone leaves these behind, letting an out-of-scope file from attempt N
