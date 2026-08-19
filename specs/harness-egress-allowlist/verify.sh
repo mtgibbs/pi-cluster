@@ -36,9 +36,18 @@ fi
 # ANSIBLE_REPO=../beelink-ansible, and macOS ships bash 3.2 where mapfile/readarray do not exist —
 # the script would die on line 34 before checking anything. See AGENTS.md "Shell is macOS bash 3.2".
 # Process substitution IS available in 3.2, so `while read < <(...)` is the portable equivalent.
+#
+# Options go BEFORE the operands, and the pattern goes behind `-e`. Do NOT reintroduce the
+# `--` that used to sit before the pattern: `--` terminates option parsing, so every
+# `--include=` after it was consumed as a FILENAME and the filters silently did nothing.
+# The collection then matched Dockerfiles, *.sh, *.md, *.json and *.txt. That produced a
+# false FAIL on AC8 (it scanned entrypoint.sh, which legitimately contains the string
+# `x-access-token` as part of a git-credentials URL) and, far worse, a latent false PASS on
+# AC1/AC2/AC3 — `incompose harness-egress` would happily match a SPEC DOC that merely
+# mentions the service, so a task that wrote nothing but prose could satisfy the gate.
 COMPOSE=()
-while IFS= read -r f; do [ -n "$f" ] && COMPOSE+=("$f"); done < <(grep -rl -- "coding-harness" "$R" \
-  --include='*.yml' --include='*.yaml' --include='*.j2' 2>/dev/null | sort -u)
+while IFS= read -r f; do [ -n "$f" ] && COMPOSE+=("$f"); done < <(grep -rl \
+  --include='*.yml' --include='*.yaml' --include='*.j2' -e "coding-harness" "$R" 2>/dev/null | sort -u)
 ALLOW="$(find "$R" -name 'allowlist.conf' 2>/dev/null | head -1)"
 NFT=()
 while IFS= read -r f; do [ -n "$f" ] && NFT+=("$f"); done < <(grep -rl -iE "nftables|DOCKER-USER|iptables" "$R" \
@@ -138,10 +147,33 @@ if [ -z "$hits" ]; then ok "AC8: no credential literals (Safeguard 1)"
 else no "AC8: credential literal in $hits (Safeguard 1)"; fi
 
 # ---------- AC9: harness confinement must not be relaxed ----------
+#
+# Scoped to the harness + proxy service blocks, NOT the whole file. Safeguard 3 is about the
+# four harness containers and the proxy; the same compose file also declares cadvisor, which
+# legitimately carries `privileged: true` to read container stats. A whole-file grep fails on
+# cadvisor forever, and a gate that is always red is a gate people stop reading.
+#
+# awk walks the service map: it learns the service-key indent from a `coding-harness-*:` line,
+# tracks whichever service block it is currently inside, and only flags the offending tokens
+# while that block is one we actually confine.
 if [ "${#COMPOSE[@]}" -gt 0 ]; then
-  if grep -qE 'NET_ADMIN|privileged:[[:space:]]*true' "${COMPOSE[@]}" 2>/dev/null; then
-    no "AC9: NET_ADMIN or privileged:true appears in a compose file — harness containers must not manage their own firewall (Safeguard 3)"
-  else ok "AC9: no NET_ADMIN / privileged (Safeguard 3)"; fi
+  bad="$(awk '
+    /^[[:space:]]*coding-harness-[A-Za-z0-9_-]*:[[:space:]]*$/ && ind=="" {
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+    }
+    ind != "" {
+      match($0, /^[[:space:]]*/)
+      if (RLENGTH == ind && $0 ~ /^[[:space:]]*[A-Za-z0-9_-]+:[[:space:]]*$/) {
+        svc = $0; sub(/^[[:space:]]*/, "", svc); sub(/:[[:space:]]*$/, "", svc)
+      }
+      if (svc ~ /^(coding-harness-|harness-egress)/ && $0 ~ /NET_ADMIN|privileged:[[:space:]]*true/) {
+        printf "%s:%d: %s\n", FILENAME, FNR, svc
+      }
+    }
+  ' "${COMPOSE[@]}" 2>/dev/null)"
+  if [ -n "$bad" ]; then
+    no "AC9: NET_ADMIN or privileged:true on a confined service — $bad (Safeguard 3)"
+  else ok "AC9: no NET_ADMIN / privileged on harness or proxy services (Safeguard 3)"; fi
 
   # AC10 + Safeguard 4: nothing here earns the Docker socket, least of all a network appliance.
   if grep -qE '/var/run/docker\.sock' "${COMPOSE[@]}" 2>/dev/null; then
