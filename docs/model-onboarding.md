@@ -24,6 +24,14 @@ Fail any of these and the answer is no, regardless of benchmark scores.
   reasoning: LiteLLM's `drop_params:true` strips the toggle, and Ollama's `/v1/chat/completions`
   ignores `think:false`. Hybrid models leak `<think>` blocks and burn the context before any content
   appears. This gate alone has killed more candidates than every other combined.
+  - **The gate is about *where* the toggle lives, not what the checkpoint is called.** What our path
+    cannot honour is a *per-request* toggle — LiteLLM strips it, Ollama ignores it. A model whose
+    reasoning is pinned **at server launch** is a different case: on the `llama-server` path,
+    `--chat-template-kwargs '{"reasoning_effort":"none"}'` is baked into the process before LiteLLM
+    is ever in the picture. Qwen3.8-27B (2026-08-19) is the first candidate to clear the gate this
+    way. **Unverified on this box** — nobody has actually run it, so treat the escape hatch as a
+    hypothesis and prove it with a real `<think>`-leak check before any candidate is allowed to
+    lean on it.
 - **Tool support declared in the serving template**, if the consumer needs tools. LiteLLM correctly
   refuses to send tool definitions to a model whose template doesn't advertise them — this is why
   `gemma3:27b` was dropped for Dewey despite being the original pick. *(Exception: a deterministic-RAG
@@ -121,6 +129,8 @@ Append a row whenever a candidate is decided. Backfilled from `docs/model-eval-2
 | 2026-05 | IBM Granite-4.0-H-Small | Answer | hybrid Mamba-2 MoE 32B / 9B | **Deferred** | Genuine non-thinking checkpoint, but Vulkan/Mamba maturity + 9B active |
 | 2026-06-24 | Qwen3-Coder-Next Q8 | Work-mode coder | MoE, hybrid linear KV | **Adopted** | 256k native context at ~86/96 GiB; `hot-coder` alias flips to it via `aimode work` |
 | 2026-08-11 | **Colibrì + GLM-5.2** (engine) | Frontier / async | 744B / 40B, disk-streamed experts | **Rejected — not now** | ~0.5 tok/s projected on our drive class; auto-pin wants 37–47 GB against a 96 GB VRAM carve. Triggers to revisit in `docs/research/colibri-moe-disk-streaming.md` |
+| 2026-08-19 | `Qwen3.8-Max` (2.4T-A95B) | Frontier / any | MoE 2.4T / 95B active | **Rejected — step-2 arithmetic** | Smallest published quant is 397 GB (Q1_0), ~3× the box's total RAM; 95B active would cap it near 2 tok/s even if it fit. Same wall as Colibrì, eight days later |
+| 2026-08-19 | `Qwen3.8-27B` | Work-mode coder (candidate) | dense 27.8B / **27.8B active**, hybrid GDN | **Rejected for `hot-coder`; flagged for judge** | Better model, wrong shape — fails gate #3. 17.5 GB/token vs Coder-Next's 3.2 → **~11 tok/s projected** against Coder-Next's **59 measured**. Its SWE-bench Pro 61.7 (vs 44.3) is earned at `reasoning_effort: xhigh`, which we would have to switch off, keeping the slowness and discarding the reason to want it. Cheap KV (hybrid GDN) is not the problem; active params are. **Possible fit: the review-hub judge** — latency-tolerant, quality-bound, thinking-ON is a feature there. Shelf and measure; needs the `review-hub` key allowlist widened and a 3rd `llama-server` against the same 96 GB pool |
 
 ---
 
