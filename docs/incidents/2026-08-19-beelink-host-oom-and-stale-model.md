@@ -17,13 +17,15 @@ want three different fixes at three different confidence levels.
 1. **Fault A — host-RAM OOM kills. REAL, HISTORICAL, MECHANISM STILL ARMED.**
    8 kills between 2026-07-10 and 2026-07-14 (`llama-server` ×5, Prisma ×3). None since. **Nothing
    was fixed** — the conditions that produced them are all still in place.
-2. **Fault B — n8n has called a deleted model for 10 weeks. UNAMBIGUOUS, CHEAP TO FIX.**
-   152 × HTTP 400 in 72 h, hourly, ongoing. The model was removed deliberately on 2026-06-06.
+2. **Fault B — n8n calls a model that was deleted on 2026-06-06. UNAMBIGUOUS, CHEAP TO FIX.**
+   152 × HTTP 400 in 72 h, hourly, ongoing and measured. The *duration* of the outage is inferred,
+   not measured — see the blast-radius note.
 3. **Fault C — `opencode` streams aborted mid-response. SYMPTOM REAL, MECHANISM UNPROVEN.**
    8 aborts in 26 h. Correlating conditions identified; causation is **not** established.
 
-**The deepest finding is not any of the three.** It is that Fault B ran at a **100% failure rate for
-ten weeks with zero signal reaching a human.** See [Phase 4](#phase-4--the-fault-that-hid-fault-b).
+**The deepest finding is not any of the three.** It is that Fault B ran at a **100% failure rate with
+zero signal reaching a human** — for at least the 72 h we can see, and very likely far longer. See
+[Phase 4](#phase-4--the-fault-that-hid-fault-b).
 
 ---
 
@@ -207,8 +209,8 @@ laptop per `feedback_everything_as_code`.
 
 **This is the one worth doing even if nothing else on this page gets done.**
 
-A pipeline failed **100% of its runs for ten weeks** and nobody found out. Not because the failure
-was subtle — it returned a clean HTTP 400 with an explicit error string, hourly, the whole time.
+A pipeline failed **100% of its runs** and nobody found out. Not because the failure was subtle — it
+returned a clean HTTP 400 with an explicit error string, hourly, the whole time.
 Nothing was watching, so a total outage and a healthy system looked identical from the outside.
 
 That is exactly the failure mode recorded in the repo already: *a passing check and one incapable of
