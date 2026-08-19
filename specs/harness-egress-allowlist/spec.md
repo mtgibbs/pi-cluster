@@ -2,9 +2,10 @@
 
 > **REASONS Canvas** (see `specs/TEMPLATE.md`). Constraints-before-work order.
 
-- **Status:** Draft v0.2 — **OQ1 and OQ5 CLOSED 2026-08-18** (read from `beelink-ansible`
-  `origin/main`); OQ2 is the remaining blocker before handing to a loop. OQ1's answer changed the
-  design — see §4.
+- **Status:** Draft v0.3 — **OQ1, OQ2 and OQ5 all CLOSED 2026-08-18.** OQ1's answer changed the
+  design (see §4); OQ2 is settled on **squid**, measured on the box rather than argued (see §12).
+  **No open blockers — this is ready to hand to a loop.** OQ3 and OQ4 are answered *by* running
+  phase 1, not before it.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md` Core Mandates)
 - **Touches:** `beelink-ansible` repo → `playbooks/50-ai-stack.yml`, the coding-harness compose
@@ -51,8 +52,11 @@ RAM arithmetic, and committed us to building this instead.
 - **`harness-net`** (NEW — must be created, not renamed) — a dedicated bridge network for the four
   harness containers + `harness-egress` + `litellm`, with an **explicit fixed subnet** so
   `DOCKER-USER` has something stable to match. Container IPs are not stable; the subnet is.
-- **`harness-egress`** (new) — the forward-proxy container. Config: an allowlist file, one
-  host-pattern per line, `#` comments. Exact syntax depends on OQ2 (proxy choice).
+- **`harness-egress`** (new) — the forward-proxy container: **squid**, caching disabled, no TLS
+  interception (OQ2, closed). Config is two files: `squid.conf` (the mechanism) and
+  `allowlist.conf` (the policy — one host-pattern per line, `#` comments, fed to squid as a
+  `dstdomain` ACL file). Keeping policy in its own file is what lets T4 rewrite the allowlist
+  without touching proxy mechanics, and what makes the diff reviewable.
 - **Allowlist entry** — `(pattern, port, why)`. `pattern` is a hostname or `*.suffix`; entries
   without a recorded `why` are not allowed (see §7).
 - **Env contract** — `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` in each harness container, pointing
@@ -145,6 +149,23 @@ means they cannot manage their own firewall, and self-managed confinement is not
   loop can execute against the ansible repo. That is the intended execution path for this spec.
 - **Git identity** is a fine-grained PAT (`op://pi-cluster/coding-harness-github-pat/token`).
   `github.com` reachability is not optional — losing it strands every loop's output.
+- **Compose prefixes network names — the live network is `ai-stack_ai-internal`, not `ai-internal`.**
+  Verified on the box 2026-08-18: `docker network ls` shows `ai-stack_ai-internal`; `docker network
+  inspect ai-internal` returns *"network not found"*. `ai-internal` is only the key inside the compose
+  YAML. So `harness-net` will materialise as **`ai-stack_harness-net`**, and any command or rule that
+  names a network — inspection, a `DOCKER-USER` comment, a runbook line — must use the prefixed form
+  or it will silently look at nothing.
+- **`ai-internal` is auto-assigned `172.18.0.0/16`** (gateway `172.18.0.1`) — a /16, because no subnet
+  is declared and Docker allocates from its default pool. Two consequences for T2/T6: `harness-net`'s
+  fixed subnet must be chosen so it cannot collide with that pool, and the existing ufw rule
+  `ufw allow from 172.16.0.0/12 to any port 9110` (§6 above) **already spans both networks** — it is
+  not harness-specific and must not be mistaken for one.
+- **Live membership confirms the §3 count**: 17 containers were attached at inspection time — the four
+  harness containers, `litellm`, `ollama`, `llama-server`, `postgres`, `caddy`, `open-webui`,
+  `open-webui-dewey`, `pipelines`, `pipelines-ops`, `cadvisor`, `gpu-metrics`, `litellm-exporter`,
+  `harness-console`. The 18th, `beelink-backup`, is a nightly one-shot and is simply not running
+  between runs. Safeguard 8's "confine only what `harness-net` contains" should be checked against
+  the *running* set, which is why this number moves.
 - **MCP endpoints the harness may use** are in-cluster on the Pi, reached over the LAN:
   `mcp.lab.mtgibbs.dev`, `local-llm-mcp.lab.mtgibbs.dev`, `kiwix-mcp.lab.mtgibbs.dev`
   (`docs/local-llm-mcp.md`, `docs/kiwix-mcp.md`). These are LAN destinations, not internet —
@@ -188,8 +209,12 @@ means they cannot manage their own firewall, and self-managed confinement is not
 ## 9. Task breakdown · [O — Operations]
 
 **Phase 1 — observe (ships first, alone)**
-- **T1.** Add a `harness-egress` compose service (small proxy image, OQ2) + `files/harness-egress/`
-  config directory. Log-only: permit all, log every destination.
+- **T1.** Add a `harness-egress` compose service (**squid**, `ubuntu/squid`, `cache deny all` /
+  `cache_mem 0`) + a `files/harness-egress/` config directory holding `squid.conf` and
+  `allowlist.conf`. Log-only: `http_access allow all`, but log every destination as
+  `ALLOW <host>:<port>` via `logformat` + `access_log`. Log to a file under a `proxy`-owned
+  `/var/log/squid/` and `tail -F` it to stdout from the entrypoint — squid cannot write `/dev/stdout`
+  directly after dropping privileges (OQ2).
 - **T2.** Declare `harness-net` with an explicit fixed subnet. **Move** the four harness services
   from `ai-internal` onto it, put `harness-egress` on it, and add `harness-net` to `litellm`'s
   network list so it sits on both. Leave the other 14 services on `ai-internal` untouched. Then set
@@ -271,9 +296,9 @@ One task per iteration, fresh context, gated on `verify.sh`. **Phase 1 only** (T
 touches host firewall rules where a wrong rule costs remote access to the Beelink (Safeguard 7), so
 T5–T7 are a human-driven change, not a loop.
 
-`tasks.txt` covers **T1–T3 only**. T2 is now grounded in the real topology (OQ1 closed), so the
-remaining provisional part is T1's proxy image, pending OQ2. T4 is not a loop task at all — it needs
-a week of real traffic to distil.
+`tasks.txt` covers **T1–T3 only**, and nothing in it is provisional any more: T2 is grounded in the
+real topology (OQ1 closed) and T1 names a specific proxy (OQ2 closed). T4 is not a loop task at all —
+it needs a week of real traffic to distil.
 
 ## 12. Open questions
 
@@ -283,11 +308,53 @@ a week of real traffic to distil.
   stale and showed only two harness containers — see §6). **This answer changed the design**: a
   subnet rule on `ai-internal` would confine the entire stack, so the harness moves to a dedicated
   `harness-net` (§4, §9 T2, Safeguard 8, AC4b, AC13).
-- **OQ2. OPEN — the remaining blocker.** Which proxy? Candidates: `tinyproxy` (tiny, `Allow`/`Filter`
-  by host, minimal deps), `squid` (capable, heavier than this box wants), or a ~50-line Go/Python
-  `CONNECT` filter (no dependency, but ours to maintain). Decide on RAM footprint and allowlist-syntax
-  legibility. Budget context: the harness services alone already cap at 12 GiB (4+4+2+2) on a ~30.5
-  GiB host, so a few hundred MiB is the ceiling.
+- **OQ2. CLOSED 2026-08-18 — `squid`,** caching disabled. Decided by measuring all three on the
+  Beelink itself, not by argument.
+
+  **RAM does not discriminate.** The premise that squid is "heavier than this box wants" is wrong at
+  this scale: measured idle RSS was **23–25 MiB** (`ubuntu/squid`, `cache deny all`, `cache_mem 0`),
+  against a stated ceiling of a few hundred MiB. tinyproxy came in at **1.9 MiB**. Both are noise on
+  a 30.5 GiB host — squid is ~0.7% of the RAM free at the time of measurement. A 21 MiB difference is
+  not a reason to accept a worse allowlist.
+
+  **Legibility discriminates, and it is the criterion that matters** — §4 is explicit that the proxy
+  is not the boundary (the `DOCKER-USER` rule is); the proxy exists to make the policy *auditable*.
+  Squid is the only candidate that produces both required artifacts natively, with no code:
+
+  - **The allowlist format §7 asks for.** `acl allowed_hosts dstdomain "/etc/squid/allowlist.conf"`
+    reads one host per line with `#` comments — the spec's format, verbatim, no translation layer.
+    `.github.com` means "that domain and its subdomains", which is exactly the one-label wildcard
+    §7 permits.
+  - **The log format §7 asks for.** Two `logformat` lines plus ACL-selected `access_log` emit
+    literally `ALLOW <host>:<port>` / `DENY <host>:<port>`. Verified end-to-end through a real
+    client:
+
+    ```
+    ALLOW github.com:443       # curl -x proxy https://github.com   -> 200
+    DENY example.com:443       # curl -x proxy https://example.com  -> 000, fails fast
+    ```
+
+  **Why not the other two:**
+
+  - **tinyproxy** — smallest, but its filter file is **POSIX regex, not globs**. `*.githubusercontent.com`
+    is not a valid pattern there; you would write `\.githubusercontent\.com$`. That contradicts §7's
+    stated syntax and **AC7**, which gates on wildcard-label breadth. Its log format is also fixed
+    (`Connect ... Proxying refused on filtered domain`), so `ALLOW`/`DENY` would need post-processing.
+    Saving 21 MiB by making the audit surface less readable inverts the point of the component.
+  - **A hand-rolled Go/Python `CONNECT` filter** — would match the norms perfectly, but adds an image
+    we build and maintain, plus correctness risk in proxy semantics (CONNECT tunnelling, absolute-form
+    plain-HTTP `HTTP_PROXY` requests that npm and pip actually use, timeouts, concurrency). ADR-009
+    already books "the egress proxy is work we now own" as a Negative; this is the option that
+    maximises it, in exchange for nothing squid does not already give us. Reconsider only if squid's
+    config surface becomes the problem.
+
+  **One implementation wart, found while measuring — T1 must handle it.** Squid drops privileges to
+  the `proxy` user and then **cannot open `/dev/stdout`** (`FATAL: Cannot open '/dev/stdout' for
+  writing`), so the §7 norm of "`docker logs harness-egress` is the triage tool" is not free. Log to
+  a file under a `proxy`-owned `/var/log/squid/` and stream it to stdout from the entrypoint
+  (`squid -N … & exec tail -F /var/log/squid/egress.log`). Verified working in that shape. Also:
+  **do not use the alpine `squid` package** — it dies at startup with
+  `initgroups: unable to set groups for User root`. `ubuntu/squid` works.
 - **OQ3.** Does anything in the harness ignore `HTTP_PROXY`? Go binaries honour it; some Node tooling
   needs `npm config set proxy` separately. Enumerate during T3 rather than assuming.
 - **OQ4.** What hosts do Claude Code's telemetry/auth and codex's ChatGPT device-auth actually need?
