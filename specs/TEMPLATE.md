@@ -179,6 +179,25 @@
        NON-zero / present result in a case you construct on purpose. If you cannot make the
        probe fire, you have not proven absence; you have proven nothing.
 
+     TRAP A-PRIME — THE SCOPE THAT SILENTLY DID NOTHING. Trap A's fix is "scope the search".
+     But a scope can be WRITTEN and be INERT, and an inert scope looks exactly like a working
+     one. Found in specs/harness-egress-allowlist 2026-08-18 (#184), where the file collection
+     read:
+         grep -rl -- "coding-harness" "$R" --include='*.yml' --include='*.yaml'
+     `--` terminates option parsing, so every --include= after it was consumed as a FILENAME and
+     the filters did nothing at all. The collection was pulling *.md, *.sh, *.json and *.txt,
+     which meant `incompose 'harness-egress'` could be satisfied by a SPEC DOCUMENT that merely
+     mentions the service — AC1/AC2/AC3 passing on a task that wrote only prose. A gate
+     satisfiable by its own spec. Caught latent, before it ever fired, only because the work is
+     unbuilt and the spec lives in the other repo.
+       Note what does NOT catch this. The one-question test above passes cleanly: "it fails when
+     no compose file declares harness-egress" is a correct sentence about a broken check. The
+     scope was not missing, so reviewing for Trap A finds nothing either. Only the NEAR-MISS
+     practice below catches it — a fixture that mentions the service in prose without declaring
+     it exposes the false PASS on the first run.
+       Fix: prove the scope excluded something. If a filter is load-bearing, assert the
+     collection is non-degenerate rather than trusting that the flag took effect.
+
      THE ONE-QUESTION TEST, before writing any check:
        "Name the concrete condition under which this check FAILS."
      If you cannot state it in one sentence, or if the condition you name is also what happens
