@@ -128,7 +128,17 @@
      Rule of thumb: presence-gate on the artifact, not the task number —
        [ -f path/to/thing ] && { ...assert on it... } || pend "thing"
      so the check arms itself as soon as the target exists, in whatever order the model
-     builds. STRICT=1 turns every remaining `pend` into a FAIL, so "all tasks passed"
+     builds. ANCHOR ON THE TASK'S OWN NARROWEST DELIVERABLE — not a container above it,
+     not a detail below it. Too coarse and an EARLIER task's scaffolding arms a LATER
+     task's checks, flipping them pend->FAIL; because the gate is whole-spec, that earlier
+     task then fails forever on work not yet due and no retry can fix it. Too narrow and
+     the check never arms at all, the task is marked done, and the loop advances on a false
+     PASS — the worse of the two, because the line keeps moving. Measured 2026-08-18 in
+     notes-from-hearing: the FIRST task created the watch target's source file (an Xcode
+     target requires one), which armed five checks belonging to the FIFTH task and took the
+     gate from 45 PASS / 0 FAIL to 49 / 6. Verify a re-anchor in BOTH directions — earlier
+     task's output alone must pend, and a WRONG implementation of the later task must still
+     arm and FAIL. STRICT=1 turns every remaining `pend` into a FAIL, so "all tasks passed"
      can never mean "half of it was never written". The flip side, and why ralph fails a
      no-op attempt: an EMPTY tree also satisfies a pend-staged gate, so a task whose
      executor got blocked would otherwise "pass" having written nothing.
@@ -139,6 +149,49 @@
      model build something suggested by the NAME (a filesystem poller) and score 7/19.
      The task line anchors harder than the spec does; a vague one lets it drift to the
      noun. Narrow tasks + pend-staged gate, never one mega-task with a monolithic gate. -->
+
+<!-- A CHECK MUST TELL ITS SIGNAL FROM WHAT WOULD BE TRUE ANYWAY.
+     This is the corollary of the amendment "Gates must prove they can fail", applied to the
+     one place it keeps being violated: the search a check performs. FOUR times in four
+     consecutive specs, a check passed while the feature was absent — every one of them
+     written by someone who had read that amendment.
+
+       spec                   check                          why it passed with NO feature
+       ---------------------  -----------------------------  ------------------------------------
+       loop-doctor            ac15:no-forbidden-invocations  matched the word in a COMMENT
+       ralph-retry-contract   ac9:regressed-check-named      FAIL feedback already said the name
+       run-regression-guard   ac9:stop-names-destroying-task task banner already said the label
+       tasks-ledger           ac6:resume-skips-proven-tasks  probe never matched, so "0" was free
+
+     TRAP A — THE NEEDLE IS ALREADY IN THE HAYSTACK. The thing you grep for exists for reasons
+     that have nothing to do with the feature: a comment, a doc block, the prompt you are
+     inspecting, a banner the loop prints for every task. Searching the WHOLE artifact for a
+     word the artifact already contains is not a check, it is a coin that lands heads.
+       Fix: scope the search to the REGION THE FEATURE PRODUCES, and strip comments first.
+         grep -q "$name" "$log"                        # lies
+         sed -n "/^REGRESSION/,/^\$/p" "$log" | grep -q "$name"   # checks
+
+     TRAP B — AN ABSENCE ASSERTION SATISFIED BY A BROKEN PROBE. A check of the form "expect
+     zero / expect absent" is ALSO satisfied when the measurement itself is broken — a grep
+     with a wrong anchor, a counter reading a file that was never written, a command whose
+     output format moved. The check and the bug produce identical output.
+       Fix: every absence assertion needs a POSITIVE CONTROL — show the probe returning a
+       NON-zero / present result in a case you construct on purpose. If you cannot make the
+       probe fire, you have not proven absence; you have proven nothing.
+
+     THE ONE-QUESTION TEST, before writing any check:
+       "Name the concrete condition under which this check FAILS."
+     If you cannot state it in one sentence, or if the condition you name is also what happens
+     when your measurement breaks, it is not a check yet.
+
+     AND THE PRACTICE THAT ACTUALLY CATCHES THESE: run the gate against a NEAR-MISS, not only
+     against an empty tree. An empty tree proves a gate PENDS; a near-miss proves it
+     DISCRIMINATES. Write a complete, plausible implementation with exactly one thing wrong,
+     in a scratch dir, uncommitted. specs/tasks-ledger did this — an ancestry-only build passed
+     25 of 28 checks and failed precisely the two written to catch it, and the experiment
+     surfaced three gate defects that clean main could never have shown (see that spec's
+     evidence/). Keep the adversary OUT of the repo, or a later loop run stops being a fair
+     measurement. -->
 
 ## 11b. Loop execution (handing to a local model)
 <!-- Local models (qwen) are faithful literal executors with no stamina/taste/self-check.
