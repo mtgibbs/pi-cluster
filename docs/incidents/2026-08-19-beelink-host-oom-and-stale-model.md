@@ -158,15 +158,23 @@ arriving request invalidates an in-flight slot's context and kills the stream �
 
 ## The plan
 
-Ordered by **confidence × safety**, not by severity. Phase 1 has a known-correct answer and cannot
-destabilise the running box; Phase 3 is the one that needs evidence before anyone touches a knob.
+Ordered by **confidence × safety**, not by severity. Phase 3 is the one that needs evidence before
+anyone touches a knob.
+
+> **Correction (2026-08-19, after checking live state).** An earlier draft of this plan claimed
+> Phase 1 "cannot destabilise the running box." **That was wrong**, and the reason is in
+> [Deployment windows](#deployment-windows--what-bounces-the-loop) below. Phase 1 is the *cheapest*
+> phase, not the *safest* one.
 
 ### Phase 1 — Fault B: repoint the two n8n workflows
 
-**Confidence: high. Risk to the box: none.** Repo change, PR-gated, no Beelink mutation.
+**Confidence: high on the diagnosis. Risk on deploy: REAL — see 1.0.** The *diff* is a repo change
+with no Beelink mutation; the *consequence* of that diff is a new model load on a box with 10.1 GiB
+of VRAM headroom.
 
 | # | Task | Notes |
 |---|---|---|
+| **1.0** | **Resolve the `work`-mode tenancy conflict. BLOCKS EVERYTHING ELSE IN THIS PHASE.** | In `aimode work` the box is deliberately sole-tenant: Ollama holds **zero** models and `llama-server` holds 85.9 of 96.0 GiB. A working digest call makes Ollama load an Instruct model into **10.1 GiB** of headroom — and `OLLAMA_KEEP_ALIVE=-1` means it then **never unloads**. Fixing Fault B this way can *cause* Fault A. |
 | 1.1 | **Enumerate what LiteLLM actually serves**, including DB-backed models | Blocks 1.2. `config.yaml` is not the full list. Needs a key against `/v1/models` or a read of `proxy_model_table`. |
 | 1.2 | **Choose the replacement model** | `docs/n8n-email-pipeline.md:151` requires a **non-thinking Instruct** checkpoint. `qwen3-coder-30b` is a *coder* model and is likely the wrong choice for extraction/summarisation — do not default to it without checking 1.1. |
 | 1.3 | Update `digest-builder.json` (lines 73, 106) and `inbound-mail.json` (line 115) | Three string literals. |
@@ -174,6 +182,16 @@ destabilise the running box; Phase 3 is the one that needs evidence before anyon
 
 > **1.1 is a genuine blocker, not ceremony.** Guessing a replacement is how this pipeline broke in
 > the first place: the model name outlived the model.
+>
+> **And 1.0 is the bigger one.** The stale string is only half of Fault B. The other half is that an
+> **hourly** job and a **mode-exclusive** box are in direct conflict, and nobody wrote that down —
+> the digest and the coding loop are mutually exclusive tenants of the same VRAM. The hourly 400s
+> have been doing us a backhanded favour: a 400 is cheap, whereas a *successful* call that pins a
+> 24 GB model into 10 GiB of headroom, permanently, mid-loop-run, is not.
+>
+> This is a design decision, not a string edit. Options: skip the digest while in `work` mode, queue
+> it until `family`, give it a small dedicated model that fits the headroom, or make `work` mode
+> reserve room for it. **Pick one before touching 1.3.**
 
 ### Phase 2 — Fault A: stop the host OOM from choosing the inference server
 
@@ -223,6 +241,41 @@ failing look the same.*
 | 4.3 | **Positive-control every alert added here** | Prove it fires by breaking it on purpose. An alert that has never fired is not evidence of health. |
 
 ---
+
+## Deployment windows — what bounces the loop
+
+Measured 2026-08-19 17:40 EDT with the loop **live** (38 activity events in 90 s, task 463958,
+slots 1 and 2 busy, ~30.9 t/s). Anything that recreates a container in that state kills an
+in-flight run.
+
+**Live constraints that decide all of this:**
+
+| Fact | Value |
+|---|---|
+| `aimode` | `work` — sole-tenant by design |
+| VRAM free | **10.1 GiB** (85.9 of 96.0 used) |
+| Ollama resident models | **none** — work mode evicted them |
+| `OLLAMA_KEEP_ALIVE` | **`-1`** — once loaded, never unloads |
+| `OLLAMA_MAX_LOADED_MODELS` | 3 |
+
+**Safe to land while the loop runs:**
+
+- **This document and any other `docs/` change** — outside `clusters/`, so Flux touches no workload.
+- **Phase 4 alerting** — Prometheus rules are in-cluster and never touch the Beelink inference path.
+- **Authoring** the Phase 1 PR. It is the *deploy* that is dangerous, not the diff.
+
+**Requires a window with the loop stopped:**
+
+- **Phase 2** — `mem_limit` is not hot-changeable through the IaC path; compose **recreates** the
+  container. `llama-server` dies, then reloads an 85 GB Q8 (44 s warm per the startup log, 60–120 s
+  cold per the onboarding budget). The `litellm` limit in 2.3 has the same problem one layer up:
+  restarting LiteLLM drops every in-flight stream even if `llama-server` survives.
+- **Phase 3** — `--cache-ram` and `n_parallel` are command-line args. Same recreate, same outcome.
+- **Phase 1 at runtime** — indirectly, via the 1.0 tenancy conflict above.
+
+> **Free window:** `aimode family` already tears down `llama-server`. Doing the Phase 2 and Phase 3
+> recreates during that transition costs **no extra downtime** — the restart was going to happen
+> anyway. Don't schedule a separate outage for it.
 
 ## Open questions
 
