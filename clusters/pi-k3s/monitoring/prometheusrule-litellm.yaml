@@ -1,0 +1,178 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: litellm-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: litellm
+    release: kube-prometheus  # Match Prometheus Operator selector
+spec:
+  groups:
+    - name: litellm.rules
+      rules:
+        # =====================================================================
+        # WHY THIS FILE EXISTS
+        #
+        # On 2026-08-19 we found the n8n intake pipeline had been calling
+        # `qwen3-30b-instruct` — a model deliberately removed on 2026-06-06 —
+        # and failing every single call. Nothing alerted. A 100%-broken
+        # pipeline and a healthy one looked identical from outside, because
+        # the only thing that would have distinguished them was output nobody
+        # was watching for.
+        #
+        # The instinct is "alert on the errors". That instinct is WRONG here,
+        # and the reason is the whole point of this file:
+        #
+        #   litellm_requests_total is sourced from LiteLLM's /spend API, which
+        #   records COMPLETED requests. A request rejected at the routing layer
+        #   ("Invalid model name") may never become a spend-log entry at all.
+        #   Measured 2026-08-19: n8n-intake's failure counter sat frozen at
+        #   1,987,698 while the LiteLLM proxy log showed fresh 400s on the hour.
+        #
+        # So the failure counter can be BLIND to exactly the fault that bit us.
+        # Absence-of-success cannot be. LiteLLMPipelineSilent below is the rule
+        # that would actually have caught Fault B on day one; the failure-rate
+        # rules are the supporting cast, not the headline.
+        #
+        # Full investigation: docs/incidents/2026-08-19-beelink-host-oom-and-stale-model.md
+        # =====================================================================
+
+        # --- The exporter itself ---------------------------------------------
+        # FIRST, because every other rule in this file goes silent-and-green if
+        # the exporter stops reporting. An alert that cannot fire and an alert
+        # with nothing to say look the same on a dashboard. This one tells them
+        # apart.
+        #
+        # Two failure modes, two conditions:
+        #   litellm_up == 0        -> the exporter is running but its poll of
+        #                             LiteLLM is failing (bad key, proxy down).
+        #   last_poll is stale     -> the exporter is wedged and still serving
+        #                             its last-known values, which would read
+        #                             as a perfectly healthy flat line.
+        #
+        # 900s = 15m. The exporter polls roughly every 30s (measured
+        # 2026-08-19: last_poll was 32s old), so 15m is ~30 missed polls — well
+        # clear of transient jitter.
+        - alert: LiteLLMExporterUnhealthy
+          expr: |
+            litellm_up == 0
+              or
+            (time() - litellm_last_poll_timestamp_seconds) > 900
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "LiteLLM exporter is not reporting fresh data"
+            description: "litellm-exporter on the Beelink (192.168.1.70:9101) is either failing its poll of LiteLLM or serving stale values. Every other litellm.rules alert is blind until this clears — treat a quiet dashboard as unknown, not healthy."
+
+        # --- THE HEADLINE: absence of success ---------------------------------
+        # This is the rule that catches a Fault-B-shaped outage.
+        #
+        # SCOPE IS DELIBERATELY NARROW. It matches only `n8n-intake`, because
+        # that is the one consumer with a SCHEDULE — the digest fires on the
+        # hour (observed 18:00, 19:00, 20:00, 21:00 on 2026-08-19), so silence
+        # is genuinely abnormal. The other consumers are demand-driven and a
+        # quiet night is not a fault:
+        #   dewey          - kids asking questions; silent overnight by design
+        #   opencode-coder - the ralph loop; silent whenever it isn't running
+        #   mealie         - recipe extraction; user-initiated
+        #   local-llm-mcp  - ad-hoc
+        # Adding a consumer here should be a deliberate act with a known
+        # cadence, not a reflex. A deadman on a demand-driven consumer is just
+        # a nightly false page.
+        #
+        # 12h window against an hourly job = 12 missed runs before it speaks.
+        # That is intentionally forgiving: this alert's job is to catch a
+        # pipeline that is DEAD, not one that skipped a beat.
+        #
+        # POSITIVE CONTROL — READ THIS BEFORE DEPLOYING:
+        # This alert is EXPECTED TO FIRE IMMEDIATELY on deploy, because
+        # n8n-intake is currently at zero successes and has been since
+        # 2026-06-06. That firing IS the proof the rule works, verified against
+        # a real outage rather than a synthetic one. It should CLEAR when
+        # Phase 1 of the incident plan lands. If it does NOT fire on deploy,
+        # the rule is broken — do not assume the pipeline recovered.
+        #
+        # `or vector(0)` IS LOAD-BEARING, DO NOT SIMPLIFY IT AWAY.
+        # sum() over a series that does not exist returns an EMPTY vector, not
+        # zero — so a bare `== 0` matches nothing and the alert silently
+        # becomes incapable of firing. Today the success series exists (value
+        # 20,832, frozen since 2026-06-06) so a bare form would work; but if
+        # LiteLLM's DB were ever wiped or the key renamed, the series vanishes
+        # and this rule would go quiet at exactly the moment it is needed.
+        # `or vector(0)` guarantees a sample to compare against.
+        - alert: LiteLLMPipelineSilent
+          expr: |
+            (
+              sum(increase(litellm_requests_total{key_alias="n8n-intake", status="success"}[12h]))
+                or vector(0)
+            ) == 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "n8n intake pipeline has produced no successful LLM call in 12h"
+            description: "Zero successful LiteLLM requests for key_alias=n8n-intake over 12h. The digest is scheduled hourly, so this means the pipeline is not working — check the model name it is calling still exists (`ollama list` / LiteLLM /v1/models). This is the exact failure that went unnoticed from 2026-06-06 to 2026-08-19."
+
+        # --- Total failure on a consumer+model pair ---------------------------
+        # Catches an ACTIVE failure storm — the case where requests do reach
+        # the spend log and all of them fail.
+        #
+        # `unless` not `and`, deliberately. `and on(key_alias, model)` would
+        # require a matching success series to exist, and a consumer that has
+        # NEVER succeeded on a model has no success series at all — so the
+        # alert could never fire for the worst case it is meant to catch.
+        # That is precisely the bug fixed in #181 (BeelinkCPUSaturated could
+        # never fire — vector-match mismatch). `unless` is a set difference and
+        # is well-defined when the right-hand side is empty.
+        #
+        # > 10 in an hour, not > 0: a couple of failures is a retry, not an
+        # outage, and this is a critical-severity page.
+        - alert: LiteLLMConsumerAllFailing
+          expr: |
+            sum by (key_alias, model) (increase(litellm_requests_total{status="failure"}[1h])) > 10
+              unless
+            sum by (key_alias, model) (increase(litellm_requests_total{status="success"}[1h])) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.key_alias }} → {{ $labels.model }} is failing 100% of calls"
+            description: "{{ $value }} failed LiteLLM requests in the last hour for key_alias={{ $labels.key_alias }}, model={{ $labels.model }}, and zero successes. Most likely the model name no longer resolves, or the key's allowlist no longer includes it."
+
+        # --- Elevated (but not total) failure rate -----------------------------
+        # Degraded rather than dead.
+        #
+        # THRESHOLD IS 50%, AND THAT NUMBER IS MEASURED, NOT GUESSED.
+        # Cumulative failure ratios observed on 2026-08-19:
+        #   opencode-coder / hot-coder      288 / 79,776   =  0.36%
+        #   mealie         / qwen3.6-35b     28 /    196   = 14.3%
+        #   dewey          / gemma3-27b      56 /    308   = 18.2%   <- worst legitimate
+        # A 20% threshold would page on dewey's normal behaviour. 50% sits
+        # clear of the real noise floor while still catching a consumer that
+        # is half-broken. If dewey's baseline is ever driven down, this can
+        # come down with it.
+        - alert: LiteLLMConsumerFailureRateHigh
+          expr: |
+            (
+              sum by (key_alias, model) (increase(litellm_requests_total{status="failure"}[1h]))
+                /
+              sum by (key_alias, model) (increase(litellm_requests_total[1h]))
+            ) > 0.50
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.key_alias }} → {{ $labels.model }} failing over half its calls"
+            description: "Failure ratio {{ $value | humanizePercentage }} over 1h for key_alias={{ $labels.key_alias }}, model={{ $labels.model }}. Baseline for the noisiest legitimate consumer (dewey/gemma3-27b) is ~18%."
+
+        # --- KNOWN GAP, recorded rather than quietly omitted -------------------
+        # None of the above detects the STRUCTURAL version of Fault B: a
+        # consumer configured to call a model that LiteLLM does not serve, but
+        # which is not currently sending traffic. Catching that needs a metric
+        # of "models LiteLLM serves" to diff against "models consumers name",
+        # and the exporter publishes no such series today.
+        #
+        # Until it does, that check belongs in CI against the manifests, not
+        # in Prometheus. See OQ4 in the incident doc — Mealie was found calling
+        # the same dead model, by reading the exporter output by hand.
