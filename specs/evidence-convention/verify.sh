@@ -26,14 +26,26 @@ IDX=scripts/loop-index.py
 MET=scripts/loop-metrics.sh
 AUD=scripts/loop-meta-audit.py
 
+# STAGING, for MODIFICATION tasks. The three-verdict contract is written for creation —
+# "pend = the artifact does not exist yet". These tasks edit files that always exist, so
+# there is no artifact to presence-gate on and the naive reading makes every unmade change
+# a FAIL. That is spec.md §11's own warning: "task 1 is gated on task 9's work, can never
+# pass, burns its retries, and stops for a human on iteration one." It did, on iteration
+# one — T1 was implemented CORRECTLY, both its checks went PASS, and the run still exited
+# non-zero on T2's FAILs, so ralph reset the worktree and destroyed the work.
+#
+# The discriminator for a modification is therefore:
+#   still the ORIGINAL known-good line  -> pend   (not built yet — a later task owns it)
+#   changed to something unrecognised   -> FAIL   (exists and is wrong)
+# STRICT=1 promotes the pends, so nothing hides at the end.
 echo "== T1  status sweep is configurable (AC-4)"
 if [ -f "$HB" ]; then
   if grep -qE 'mmin[[:space:]]+"?\+\$\{RALPH_STATUS_KEEP_MIN:-1440\}' "$HB"; then
     ok "status-sweep-configurable" presence
   elif grep -qE 'mmin[[:space:]]+\+1440' "$HB"; then
-    no "status-sweep-configurable" "still hardcoded -mmin +1440; committed status files would be deleted daily"
+    pend "status-sweep-configurable" "still the original hardcoded -mmin +1440"
   else
-    no "status-sweep-configurable" "neither the hardcoded sweep nor RALPH_STATUS_KEEP_MIN found — did the sweep move?"
+    no "status-sweep-configurable" "neither the original sweep nor RALPH_STATUS_KEEP_MIN found — the sweep was changed to something unrecognised"
   fi
   grep -q 'RALPH_STATUS_KEEP_MIN' "$HB" \
     && ok "status-keep-min-documented" presence \
@@ -47,14 +59,18 @@ for f in "$LOG:LOG_ROOT:runs" "$HB:HB_DIR:status"; do
   line="$(grep -m1 "^[[:space:]]*$var=" "$file")"
   case "$line" in
     *".evidence/$leaf"*) ok "$var-defaults-to-repo" presence ;;
-    *'$HOME/.harness'*)  no "$var-defaults-to-repo" "still defaults to \$HOME/.harness; the record must live in the repo it describes" ;;
+    # the ORIGINAL default — T2 has not run yet, and a later task owning the change is
+    # never a FAIL. See the staging note above T1.
+    *'$HOME/.harness'*)  pend "$var-defaults-to-repo" "still the original \$HOME/.harness default" ;;
     "")                  no "$var-defaults-to-repo" "no assignment to $var found in $file" ;;
-    *)                   no "$var-defaults-to-repo" "unrecognised default: $line" ;;
+    *)                   no "$var-defaults-to-repo" "changed to an unrecognised default: $line" ;;
   esac
-  # the override seam must survive: an explicit env var is still honoured verbatim
+  # The override seam is an INVARIANT, not a deliverable: it is true today and must stay
+  # true through T2. Invariant negatives never pend — "not my task yet" is not a defence
+  # for breaking something that already works.
   case "$line" in
-    *'${RALPH_LOG_DIR:'*|*'${RALPH_STATUS_DIR:'*) ok "$var-override-preserved" presence ;;
-    *) no "$var-override-preserved" "the explicit RALPH_*_DIR override was dropped; ralph-log.sh:28 promises it verbatim" ;;
+    *'${RALPH_LOG_DIR:'*|*'${RALPH_STATUS_DIR:'*) ok "$var-override-preserved" negative ;;
+    *) no "$var-override-preserved" "the explicit RALPH_*_DIR override was dropped; ralph-log.sh:28 promises it verbatim" negative ;;
   esac
 done
 
