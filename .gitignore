@@ -33,3 +33,8 @@ opencode.json
 # path), configure that at user scope (~/.claude.json) instead — don't add
 # it here, or a future untracking pass will just re-exclude the whole file.
 .serena/
+
+# Playwright MCP scratch output — never deliberate work, and ralph stages with
+# `git add -A`, so anything untracked here lands in whatever task commits next
+# (docs/lessons.md C4).
+.playwright-mcp/
