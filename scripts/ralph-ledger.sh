@@ -13,11 +13,15 @@ ledger_dir() {
 ledger_key() {
   local project slug
   project="$(git remote -v 2>/dev/null | awk '/^origin.*\(push\)/{gsub(/\.git$/,"",$2);print $2}' | head -1)"
-  [ -n "$project" ] || project="$(git rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null)"
-  [ -n "$project" ] || return 0
+  if [ -z "$project" ]; then
+    project="$(git rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null)"
+  fi
+  if [ -z "$project" ]; then
+    return 0
+  fi
   project="$(printf '%s' "$project" | sed 's|[^a-zA-Z0-9_-]|-|g')"
   slug="$(printf '%s' "${SPEC_DIR:-specs}" | sed 's|^/||' | sed 's|/|-|g')"
-  printf '%s' "$project-$slug"
+  printf '%s' "${project}__${slug}"
 }
 
 ledger_file() {
@@ -36,34 +40,37 @@ ledger_record() {
     if(t=="PASS"||t=="OK")print $2
   }' | paste -sd ',' -)"
   [ -n "$checks" ] || return 0
-  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$task" "specs" "$commit" "$attempt" "1" "$checks")"
-  local file dir
+  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$task" "$commit" "$attempt" "1" "1" "$checks")"
+  local file dir tmp
   file="$(ledger_file)" || return 0
   dir="$(dirname "$file")"
   mkdir -p "$dir" 2>/dev/null || return 0
-  printf '%s\n' "$row" > "$file" 2>/dev/null || return 0
+  tmp="$(mktemp)" 2>/dev/null || return 0
+  [ -f "$file" ] && cat "$file" > "$tmp" 2>/dev/null
+  printf '%s\n' "$row" >> "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
   return 0
 }
 
 ledger_resume_index() {
-  local tasks_file gate_output idx line task commit attempt status checks
+  local tasks_file gate_output idx line task commit attempt status checks pass_names
   tasks_file="$1"; shift; gate_output="$*"
   local key file
   key="$(ledger_key)" || return 0
   file="$(ledger_dir)/$key.tsv" 2>/dev/null || return 0
   [ -f "$file" ] || { printf '%s' "0"; return 0; }
   idx=0
-  while IFS='\t' read -r task spec commit attempt status checks; do
+  while IFS='\t' read -r task commit attempt status checks pass_names; do
     idx=$((idx + 1))
     [ "$status" = "1" ] || continue
     if ! git merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
       printf '%s' "$idx"; return 0
     fi
-    if ! printf '%s\n' "$gate_output" | awk '{
+    local current_passes
+    current_passes="$(printf '%s\n' "$gate_output" | awk '{
       t=toupper($1); if(t=="PASS"||t=="OK")print $2
-    }' | grep -qxF "$checks"; then
-      printf '%s' "$idx"; return 0
-    fi
+    }' | sort -u | tr '\n' ',' | sed 's/,$//')"
+    [ "$checks" = "$current_passes" ] || { printf '%s' "$idx"; return 0; }
   done < "$file"
   printf '%s' "0"
 }
@@ -99,13 +106,23 @@ ledger_cli() {
       rm -f "$tmp" 2>/dev/null
       ;;
     "")
-      local key file
-      key="$(ledger_key)" || return 0
-      file="$(ledger_dir)/$key.tsv" 2>/dev/null || return 0
-      [ -f "$file" ] || { printf '%s\n' "no ledger"; return 0; }
-      awk -F'\t' '{printf "%s\n",$1}' "$file"
-      ;;
-    *) return 0 ;;
+       local key file
+       key="$(ledger_key)" || return 0
+       file="$(ledger_dir)/$key.tsv" 2>/dev/null || return 0
+       [ -f "$file" ] || { printf '%s\n' "no ledger"; return 0; }
+       awk -F'\t' '{printf "%s\n",$1}' "$file"
+       ;;
+     clear)
+       local key file
+       key="$(ledger_key)" || return 0
+       file="$(ledger_dir)/$key.tsv" 2>/dev/null || return 0
+       [ -f "$file" ] || return 0
+       rm -f "$file" 2>/dev/null
+       ;;
+    *)
+    printf '%s\n' "usage: $0 [ledger_key|ledger_file|ledger_record <task> <commit> <attempt> <gate-output>|ledger_resume_index <tasks.txt> <gate-output>|forget <task>|clear]" >&2
+    exit 2
+    ;;
   esac
   return 0
 }
