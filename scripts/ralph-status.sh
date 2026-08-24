@@ -7,17 +7,25 @@
 # this agent doing right now?" over `docker exec cat` — no tmux, no guessing.
 #
 # Contract — file: $RALPH_STATUS_DIR/<agent>-<pid>.json (default dir
-# ~/.harness/status). Written ATOMICALLY (tmp + mv) so a reader never sees a
-# half-written object. Fields:
+# ~/.harness/status/<repo>, scoped so two projects' loops cannot collide on a
+# recycled PID; an explicit RALPH_STATUS_DIR is used verbatim). Written
+# ATOMICALLY (tmp + mv) so a reader never sees a half-written object. Fields:
 #   agent pid repo branch spec task task_index total_tasks attempt
 #   max_attempts phase verify_pass last_commit started updated
 # phase ∈ starting | running | verifying | passed | failed | stopped | done
+#       | killed | stalled | timeout          (the last three: see hb_mark)
 # verify_pass ∈ true | false | null   (JSON literals, unquoted)
 # started/updated/… are unix seconds.
 #
 # Liveness rule for a collector: a file whose phase is running|verifying but
 # whose `updated` is more than a few minutes old is a DEAD loop (a killed
 # process can't update its own file) — treat it as stale, not active.
+#
+# That rule works LIVE and is worthless afterwards: at any later date every run
+# is stale, so a killed run and a completed one read identically. Whoever ends a
+# loop should therefore write its epitaph — see hb_mark, and the supervisor that
+# calls it. Four killed runs sat at `running` permanently before this existed
+# (2026-08-24 observability brief, D5).
 #
 # Best-effort by design: every write is guarded so a full disk, a missing
 # $HOME, or a read-only mount can NEVER fail the loop it's reporting on.
@@ -32,13 +40,19 @@ _hb_esc() {
 hb_init() {
   HB_AGENT="${RALPH_AGENT:-qwen}"
   HB_ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-  HB_REPO="$(basename "$HB_ROOT" 2>/dev/null || echo '?')"
+  # HB_REPO is now a PATH COMPONENT (HB_DIR below), not just a JSON field. A relative ROOT
+  # would make it "." and silently un-scope the store back into the shared root — which is the
+  # exact contamination the scoping exists to prevent. Resolve, then reject the degenerate cases.
+  HB_REPO="$(basename "$(git -C "$HB_ROOT" rev-parse --show-toplevel 2>/dev/null \
+                         || (cd "$HB_ROOT" 2>/dev/null && pwd) \
+                         || printf '%s' "$HB_ROOT")" 2>/dev/null || echo '')"
+  case "$HB_REPO" in ''|.|..|/) HB_REPO="unknown-repo" ;; esac
   HB_SPEC="${SPEC_DIR:-}"
   HB_TOTAL="$(grep -cve '^[[:space:]]*$' "${TASKS:-/dev/null}" 2>/dev/null || echo 0)"
   HB_MAX="$(( ${RETRIES:-2} + 1 ))"
   HB_STARTED="$(date +%s 2>/dev/null || echo 0)"
   HB_TASK=""; HB_TIDX=0; HB_ATTEMPT=0
-  HB_DIR="${RALPH_STATUS_DIR:-$HOME/.harness/status}"
+  HB_DIR="${RALPH_STATUS_DIR:-$HOME/.harness/status/$HB_REPO}"
   mkdir -p "$HB_DIR" 2>/dev/null || true
   HB_FILE="$HB_DIR/${HB_AGENT}-$$.json"
   # Cap accumulation: drop this agent's terminal files older than a day.
@@ -61,6 +75,25 @@ hb_write() {
     printf '"phase":"%s","verify_pass":%s,"last_commit":"%s","started":%s,"updated":%s}\n' \
       "$phase" "$verify" "$(_hb_esc "$commit")" "${HB_STARTED:-0}" "$now"
   } > "$HB_FILE.tmp" 2>/dev/null && mv -f "$HB_FILE.tmp" "$HB_FILE" 2>/dev/null || true
+}
+
+# hb_mark <status-file> <phase> — stamp a TERMINAL phase on a file this process does NOT own.
+#
+# For a supervisor that has just killed a hung loop. The killed process cannot write its own
+# final state, so the file freezes at whatever it last said — `running`, forever. The collector's
+# staleness rule papers over that while the run is recent and stops meaning anything once it is
+# not. A record whose last state was written by whoever ended it needs no heuristic to read.
+#
+# Call it AFTER the kill, so the victim's keep-alive ticker (which dies with its parent) cannot
+# race the write back to `running`. Rewrites in place, atomically, and never fails: a supervisor
+# must not die because it could not annotate a log.
+hb_mark() {
+  local f="${1:-}" phase="${2:-killed}" now
+  [ -f "$f" ] || return 0
+  now="$(date +%s 2>/dev/null || echo 0)"
+  sed -e "s/\"phase\":\"[^\"]*\"/\"phase\":\"$phase\"/" \
+      -e "s/\"updated\":[0-9]*/\"updated\":$now/" "$f" > "$f.mark" 2>/dev/null \
+    && mv -f "$f.mark" "$f" 2>/dev/null || true
 }
 
 # --- keep-alive ticker -------------------------------------------------------------------
