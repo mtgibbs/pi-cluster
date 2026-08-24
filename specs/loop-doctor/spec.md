@@ -180,11 +180,23 @@ door open — the §3.2 schema deliberately leaves room for `tokens`/`turns`/`to
 
 ## 6. Prior decisions / facts the implementer must know · [S]
 
-- **Artifact locations, literal.** Heartbeats: `${RALPH_STATUS_DIR:-$HOME/.harness/status}/<agent>-<pid>.json`,
-  written atomically (tmp + `mv`) by `scripts/ralph-status.sh`. Logs:
-  `${RALPH_LOG_DIR:-$HOME/.harness/logs}/<agent>-<pid>/T<idx>-attempt<n>.{log,diff}`, written by
-  `scripts/ralph-log.sh`. **A run may have a log dir with no heartbeat, or a heartbeat with no
-  log dir.** Both are normal; handle each.
+- **Artifact locations, literal.** Heartbeats:
+  `${RALPH_STATUS_DIR:-$HOME/.harness/status/<repo>}/<agent>-<pid>.json`, written atomically
+  (tmp + `mv`) by `scripts/ralph-status.sh`. Logs:
+  `${RALPH_LOG_DIR:-$HOME/.harness/logs/<repo>}/<agent>-<pid>/<task>-attempt<n>.{log,diff}`,
+  written by `scripts/ralph-log.sh`. **A run may have a log dir with no heartbeat, or a
+  heartbeat with no log dir.** Both are normal; handle each.
+- **The default roots carry a `<repo>` level; an explicit `--status-dir`/`--log-dir` does not**
+  (2026-08-24; the roots were flat until then, and one evidence bundle collected three unrelated
+  projects). So discovery walks `<root>/*/[<agent>-<pid>]` when the root is a default and
+  `<root>/[<agent>-<pid>]` when it was given explicitly — and every gate fixture, which passes
+  the directory explicitly, keeps the flat shape. Where a run has no heartbeat, the path's
+  `<repo>` component is now the only source for the `repo` field; take it from there.
+- **`<task>` in a log filename is the TASK LABEL, not the queue index** (same date). `T21` means
+  the run implemented T21. It used to mean "21st in this invocation's queue", which collided
+  across runs and named a different task nearly every time. The `^T[0-9]+-attempt[0-9]+` matcher
+  is unchanged and still authoritative: a spec whose tasks are not labelled `T<n>` produces a
+  name that does not match, and that is an honest `unparsed`, not a silent mislabel.
 - **`.diff` is written on exactly one path.** `ralph-qwen.sh:140` calls `log_failure` *only*
   after a verify failure, deliberately *before* the tree reset that would erase the evidence.
   Therefore **`.diff` present ⇔ the gate ran and said no** — the healthy failure. Its absence is

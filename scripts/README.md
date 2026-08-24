@@ -116,6 +116,26 @@ brief to keep in sync.
   On a laptop there is no outer sandbox — use `CODEX_SANDBOX=workspace-write`.
 - **Watchdog:** `CODEX_RUN_TIMEOUT` (default 900s), same background-kill pattern as `oc`.
 
+## `supervise.sh` — restart a loop that never started
+
+    scripts/supervise.sh <strategy> <spec-dir>          # from the target worktree root
+    OC_RUN_TIMEOUT=2400 RALPH_RETRIES=3 scripts/supervise.sh build-then-judge specs/v1
+
+Wraps `run-loop.sh` and recovers the one fault the `oc` watchdog cannot: opencode logs a
+`stream` line, never receives a first token, and never returns. Four for four in one session —
+one run sat 53 minutes against a 2400 s budget — so detection has to live outside the timeout
+that failed to fire.
+
+- **Discriminator is size, not staleness.** ≤40 B *and* stale = stillborn; an 82 KB log idle
+  25 minutes is a healthy run buffering. Kills the process group, then sweeps by name.
+- **Snapshots before killing.** ralph writes its `.diff` only when *verify* fails, so a killed
+  attempt leaves no evidence unless someone takes it first: log dir, worktree diff, status and
+  untracked files land in `~/.harness/evidence/<repo>/killed-attempts/`.
+- **Stamps the epitaph.** Calls `hb_mark <status-file> killed`, so the orphaned heartbeat says
+  `killed` instead of freezing at `running` forever.
+- **Not a retry loop.** It never re-runs a task that failed *verification* — that is ralph's
+  job and it burns attempts deliberately. Any nonzero exit that is not a hang stops the run.
+
 ## `agent-bus` — Matrix chat CLI
 
 Post/read/wait on the homelab Matrix chat bus over the plain client-server API (pure
@@ -166,6 +186,12 @@ JUDGE_CMD=scripts/ralph-judge-codex.sh EXECUTOR_CMD=scripts/ralph-judge-exec-qwe
 
 State + report land under the worktree's git-dir (`ralph-judge/ledger.jsonl`, `report.json`);
 exit 0 = completed (see report), 1 = aborted fail-closed, 2 = gate-unstable/needs a human.
+
+The **ledger is cumulative** across invocations; the report describes all of it. Read the two
+counts together: `rounds_run` is this invocation's rounds, `ledger_sessions` is how many
+invocations the `accepted`/`rejected`/`gate_gaps` lists span. Every record carries `session`
+and a `head` SHA, so a finding can be joined to the build it was found against — and a dry
+re-run that recorded nothing will correctly show its own `session` absent from the ledger.
 
 ## Running loops from a fresh worktree — the opencode.json gotcha
 

@@ -26,18 +26,36 @@ GATE_TIMEOUT="${GATE_TIMEOUT:-300}"
 
 outcome="aborted"; rounds_run=0; s_base=""; total_base=""
 LEDGER=""; REPORT=""
+# One id per invocation, stamped onto every ledger record by ledger_add.
+# WHY: `rounds_run` counts THIS process's rounds while the lists below are slurped from the
+# whole ledger, which is appended to across every invocation and never reset. The report on
+# disk therefore read `"rounds_run": 1` beside 54 cumulative gate-gaps, and every finding
+# carried round 1 or 2 because each invocation restarted the counter — roughly eleven judge
+# sessions compressed into two apparent rounds. The counter was not imprecise, it described a
+# population it had not measured (2026-08-24 observability brief, D4). Keeping both numbers and
+# labelling which is which costs one field and loses nothing; `ledger_sessions` is what tells a
+# reader how many invocations the cumulative lists span. It counts invocations that RECORDED
+# something, not invocations that ran — a dry re-run contributes no rows and is not one of them,
+# which is why the report's own `session` can legitimately be absent from that set.
+RJ_SESSION="$(date +%s 2>/dev/null || echo 0)-$$"
 
 # ---- report on every exit path; the ledger is the source of truth ----------------------
+# rounds_run  = rounds THIS session ran.  ledger_sessions = invocations the lists span.
+# accepted/rejected/gate_gaps are CUMULATIVE over the ledger — they always were.
 write_report(){
   [ -n "$LEDGER" ] && [ -d "${JUDGE_STATE_DIR:-/nonexistent}" ] || return 0
   local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/rj-report.XXXXXX")"
   jq -n --slurpfile L <(cat "$LEDGER" 2>/dev/null) \
     --arg sd "$SPEC_DIR" --arg oc "$outcome" --arg sb "$s_base" --arg tb "$total_base" \
-    --argjson rr "$rounds_run" '
+    --arg sid "$RJ_SESSION" --argjson rr "$rounds_run" '
     { spec_dir: $sd,
       baseline: { score: (if $sb=="" then null else ($sb|tonumber) end),
                   total: (if $tb=="" then null else ($tb|tonumber) end) },
+      session: $sid,
       rounds_run: $rr,
+      # records written before the session field existed have .session == null; they collapse
+      # into one legacy bucket, which is the honest answer for "how many runs was that".
+      ledger_sessions: ([$L[]? | .session] | unique | length),
       accepted:  [$L[]? | select(.decision=="accepted")  | .id],
       rejected:  [$L[]? | select(.decision=="rejected")  | .id],
       gate_gaps: [$L[]? | select(.decision=="gate-gap")  | .id],
@@ -60,7 +78,13 @@ mkdir -p "$JUDGE_STATE_DIR" || die 1 "cannot create JUDGE_STATE_DIR"
 LEDGER="$JUDGE_STATE_DIR/ledger.jsonl"; REPORT="$JUDGE_STATE_DIR/report.json"
 touch "$LEDGER"
 
-ledger_add(){ printf '%s\n' "$1" >> "$LEDGER"; }
+# Stamped here, not at the call sites, so no future decision path can forget it. jq is a hard
+# preflight requirement above; the raw append is a belt-and-braces fallback that keeps a record
+# rather than losing one.
+ledger_add(){
+  printf '%s' "$1" | jq -c --arg s "$RJ_SESSION" '. + {session:$s}' >> "$LEDGER" 2>/dev/null \
+    || printf '%s\n' "$1" >> "$LEDGER"
+}
 ledger_has(){ grep -q "\"id\":\"$1\"" "$LEDGER"; }
 
 # ---- portable watchdog (macOS has no coreutils timeout) --------------------------------
@@ -117,9 +141,9 @@ s_base="$G_score"; total_base="$G_total"
 apply_cycle(){ # <finding-json> <round> -> 0 accepted, 1 rejected-continue; may die
   local f="$1" round="$2" id problem before_head erc res
   id="$(printf '%s' "$f" | jq -r .id)"; problem="$(printf '%s' "$f" | jq -r .problem)"
-  rejrec(){ printf '%s' "$f" | jq -c --arg reason "$1" --argjson r "$round" \
-    '{id:.id,decision:"rejected",reason:$reason,round:$r,finding:.}'; }
   before_head="$(git rev-parse HEAD)"
+  rejrec(){ printf '%s' "$f" | jq -c --arg reason "$1" --argjson r "$round" --arg h "$before_head" \
+    '{id:.id,decision:"rejected",reason:$reason,round:$r,head:$h,finding:.}'; }
   run_bounded "$EXECUTOR_TIMEOUT" $EXECUTOR_CMD "$f"; erc=$?
   if [ "$erc" != 0 ]; then
     restore "$before_head"
@@ -215,7 +239,13 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
     processed=$((processed+1)); [ "$processed" -gt "$MAX_FINDINGS_PER_ROUND" ] && break
     kind="$(printf '%s' "$line" | jq -r .kind)"
     if [ "$kind" = "gate-gap" ]; then
-      ledger_add "$(printf '%s' "$line" | jq -c --argjson r "$round" '{id:.id,decision:"gate-gap",round:$r,finding:.}')"
+      # `head` is the whole point: a gate-gap is a claim about a BUILD ("the ship queue never
+      # drains"), and without the SHA it cannot be joined to the commit that answered it. The
+      # accepted path has stamped before_head/after_head from the start; this path stamped
+      # nothing, and gate-gaps were 54 of 56 findings, so 28 suggested gate changes were
+      # hand-transcribed by a human reading prose (brief D3 / lessons.md D4).
+      ledger_add "$(printf '%s' "$line" | jq -c --argjson r "$round" --arg h "$(git rev-parse HEAD)" \
+        '{id:.id,decision:"gate-gap",round:$r,head:$h,finding:.}')"
       continue
     fi
     # first fresh mutate finding only; later ones wait for a future round against new HEAD

@@ -121,13 +121,13 @@ Do not touch anything outside this task's scope. Reuse existing patterns; never 
 URLs/UIDs. When done, stop.${feedback}"
 
     # Fresh session each attempt (no `codex exec resume`) = no context bloat.
-    run_codex "$prompt" "$(log_path "$HB_TIDX" "$attempt")"; _rc=$?
+    run_codex "$prompt" "$(log_path "$HB_TASK" "$attempt")"; _rc=$?
     # An executor that never started is NOT a failed attempt — it is a broken container, and
     # letting it fall through to verify is how a no-op run reports success. Observed 2026-07-22:
     # oc died in <1s with "current working directory was deleted" on every attempt, each log 247
     # bytes, and the loop happily marked 3/3 done. A real attempt (even one the watchdog kills at
     # OC_RUN_TIMEOUT) leaves a substantial transcript; a stillborn one leaves a stub.
-    _log="$(log_path "$HB_TIDX" "$attempt")"
+    _log="$(log_path "$HB_TASK" "$attempt")"
     _sz=$(wc -c < "$_log" 2>/dev/null || echo 0)
     if [ "$_rc" != 0 ] && [ "$_sz" -lt 512 ]; then
       echo "✋ ABORT: the executor did not start (exit $_rc, ${_sz}B of output) — the container needs attention, not another retry." >&2
@@ -151,7 +151,7 @@ URLs/UIDs. When done, stop.${feedback}"
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
-    log_failure "$HB_TIDX" "$attempt" "$out"   # BEFORE the reset below erases the evidence
+    log_failure "$HB_TASK" "$attempt" "$out"   # BEFORE the reset below erases the evidence
     retry_record "$out"
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
     _regression_block=""
