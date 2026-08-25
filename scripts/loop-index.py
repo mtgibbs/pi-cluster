@@ -292,10 +292,49 @@ def load_log_dirs(evid, repo):
                 except OSError:
                     pass
             mt = max((os.path.getmtime(os.path.join(d, f)) for f in files), default=None)
+            # PER-TASK BREAKDOWN, from the attempt filenames.
+            #
+            # A run dir is not one task. `.evidence/status/<pid>.json` is a heartbeat — one
+            # file per executor PROCESS, rewritten in place as the loop advances — so a run
+            # that did T1, T2 and T3 leaves a single status file saying "T3". Attributing the
+            # whole dir to that one label is why an index row's `runs` was [] for every task
+            # but the last, and why attempts_observed / failed_observed / stillborn came out
+            # null across the board (observed on all five specs of 2026-08-25).
+            #
+            # The filenames already carry the answer: `T2-attempt1.diff` names its own task
+            # unambiguously WITHIN its dir. Since pi-cluster#194 the label is written there
+            # rather than the queue position — confirmed against runs whose queue had been
+            # trimmed, where the file is `T4-attempt1.log` and not `T1-attempt1.log`.
+            #
+            # Counted per (dir, label) and merged with max() for the same reason the totals
+            # below are: the same dir can be discovered under two bases and must not double.
+            per_task = defaultdict(lambda: {"attempt_logs": 0, "failed_diffs": 0,
+                                            "stillborn": 0})
+            for f in files:
+                m = re.match(rf"^({LABEL})-attempt\d+\.(log|diff)$", f)
+                if not m:
+                    continue
+                slot = per_task[m.group(1)]
+                if m.group(2) == "log":
+                    slot["attempt_logs"] += 1
+                    try:
+                        if os.path.getsize(os.path.join(d, f)) <= 40:
+                            slot["stillborn"] += 1
+                    except OSError:
+                        pass
+                else:
+                    slot["failed_diffs"] += 1
+
             rec = out.setdefault(pid, {
                 "pid": pid, "attempt_logs": 0, "failed_diffs": 0, "stillborn": 0,
                 "task_guess": None, "project_guess": None, "where": [], "mtime": None,
+                "by_task": {},
             })
+            for label, counts in per_task.items():
+                slot = rec["by_task"].setdefault(
+                    label, {"attempt_logs": 0, "failed_diffs": 0, "stillborn": 0})
+                for k, v in counts.items():
+                    slot[k] = max(slot[k], v)
             rec["attempt_logs"] = max(rec["attempt_logs"], len(logs))
             rec["failed_diffs"] = max(rec["failed_diffs"], len(diffs))
             rec["stillborn"] = max(rec["stillborn"], stillborn)
@@ -489,53 +528,53 @@ def build(repo, evid, project_names, spec=None):
     findings, judge_report, judge_why = load_judge(repo, spec)
     metrics = load_metrics(evid, repo)
 
-    # pid -> task, preferring the status file, falling back to log content
+    # (pid, task) -> record. ONE ENTRY PER TASK THE PROCESS WORKED ON, not one per process.
+    #
+    # The status heartbeat names only the task a process finished on, so keying by pid alone
+    # discards every earlier task in that run — the defect this expansion removes. Where the
+    # attempt filenames give a per-task breakdown, use it and mark task_source accordingly;
+    # otherwise fall back to the old single-record behaviour so pre-#194 dirs still index.
     runs = {}
+    seen_pids = set()
     for pid, rec in logdirs.items():
         st = status.get(pid, {})
-        task = st.get("task") or rec.get("task_guess")
         project = st.get("repo") or rec.get("project_guess")
-        runs[pid] = {
-            **rec,
-            "task": task,
-            "project": project,
-            "task_source": "status" if st.get("task") else ("log-content" if rec.get("task_guess") else None),
-            "status": st or None,
-        }
+        by_task = rec.get("by_task") or {}
+        base = {k: v for k, v in rec.items() if k != "by_task"}
+        seen_pids.add(pid)
+        if by_task:
+            for label, counts in sorted(by_task.items()):
+                runs[(pid, label)] = {
+                    **base, **counts,
+                    "task": label,
+                    "project": project,
+                    "task_source": "log-filename",
+                    "status": st or None,
+                }
+        else:
+            runs[(pid, None)] = {
+                **base,
+                "task": st.get("task") or rec.get("task_guess"),
+                "project": project,
+                "task_source": "status" if st.get("task") else ("log-content" if rec.get("task_guess") else None),
+                "status": st or None,
+            }
     for pid, st in status.items():
-        if pid not in runs:
-            runs[pid] = {"pid": pid, "task": st.get("task"), "project": st.get("repo"),
-                         "task_source": "status", "status": st, "attempt_logs": 0,
-                         "failed_diffs": 0, "stillborn": 0, "where": [], "mtime": None}
+        if pid not in seen_pids:
+            runs[(pid, None)] = {"pid": pid, "task": st.get("task"), "project": st.get("repo"),
+                                 "task_source": "status", "status": st, "attempt_logs": 0,
+                                 "failed_diffs": 0, "stillborn": 0, "where": [], "mtime": None}
 
     ours = {p for p in project_names}
     runs_by_task = defaultdict(list)
     foreign, unknown = [], []
-    for pid, r in runs.items():
+    for _key, r in runs.items():   # _key is (pid, task-label-or-None); the record carries both
         if r.get("project") and r["project"] not in ours:
             foreign.append(r)
             continue
         if not r.get("task"):
             unknown.append(r)
             continue
-        # KNOWN GAP, deliberately not patched here — see docs and the PR that added this note.
-        #
-        # A row's `runs` is [] for most tasks the loop actually ran, and every field derived
-        # from it (attempts_observed, failed_observed, gate_pass/fail/pend, evidence_classes)
-        # comes out null. The cause is NOT this join: load_status already normalises the task
-        # to its bare label, so labels match fine.
-        #
-        # The cause is that `.evidence/status/<pid>.json` is one file per executor PROCESS,
-        # rewritten in place as the loop advances through the queue. A run that did T1, T2 and
-        # T3 leaves a single status file saying "T3". So T1 and T2 get no run attributed, and
-        # the whole dir's attempt counts land on whichever task the process happened to finish
-        # on. Verified 2026-08-25 on specs/interruption: one run dir (qwen-35992), three tasks,
-        # status says T3 — and the index showed T1 runs=0, T2 runs=0, T3 runs=1.
-        #
-        # The real join key is the per-attempt FILENAME inside the run dir (T1-attempt1.log),
-        # which names its own task unambiguously within that dir. Fixing it means teaching
-        # load_log_dirs to bucket attempts by label instead of returning per-dir totals, which
-        # is a bigger change than the defect list this commit closes.
         runs_by_task[r["task"]].append(r)
 
     # task -> commit(s)
