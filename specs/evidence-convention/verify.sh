@@ -25,6 +25,8 @@ HB=scripts/ralph-status.sh
 IDX=scripts/loop-index.py
 MET=scripts/loop-metrics.sh
 AUD=scripts/loop-meta-audit.py
+QWEN=scripts/ralph-qwen.sh
+JUDGE=scripts/ralph-judge.sh
 
 # STAGING, for MODIFICATION tasks. The three-verdict contract is written for creation —
 # "pend = the artifact does not exist yet". These tasks edit files that always exist, so
@@ -90,16 +92,46 @@ done
 # §6b, and it is a real ordering constraint, not a style note: a task that rewrites the
 # script bash is currently executing kills the run mid-flight. Keep it last.
 if [ -f specs/evidence-convention/tasks.txt ]; then
-  selfedit=$(grep -n 'ralph-qwen.sh' specs/evidence-convention/tasks.txt | head -1 | cut -d: -f1)
-  total=$(grep -c . specs/evidence-convention/tasks.txt)
-  if [ -z "$selfedit" ]; then
-    ok "self-editing-task-is-last" negative
-  elif [ "$selfedit" = "$total" ]; then
-    ok "self-editing-task-is-last" negative
+  # Self-editing tasks must form a contiguous SUFFIX: bash reads the running script
+  # incrementally, so any task after one that rewrites ralph-qwen.sh runs against a file
+  # that moved under it. More than one such task is fine; a non-self-editing task after
+  # them is not.
+  first_self=$(grep -n 'ralph-qwen.sh' specs/evidence-convention/tasks.txt | head -1 | cut -d: -f1)
+  last_other=$(grep -vn 'ralph-qwen.sh' specs/evidence-convention/tasks.txt | grep -c . >/dev/null; grep -n . specs/evidence-convention/tasks.txt | grep -v 'ralph-qwen.sh' | tail -1 | cut -d: -f1)
+  if [ -z "$first_self" ]; then
+    ok "self-editing-tasks-are-a-suffix" negative
+  elif [ -z "$last_other" ] || [ "$last_other" -lt "$first_self" ]; then
+    ok "self-editing-tasks-are-a-suffix" negative
   else
-    no "self-editing-task-is-last" "the task editing ralph-qwen.sh is line $selfedit of $total; bash reads scripts incrementally and the run dies mid-edit (§6b)" negative
+    no "self-editing-tasks-are-a-suffix" "task line $last_other does not edit ralph-qwen.sh but follows line $first_self which does; bash reads scripts incrementally (§6b)" negative
   fi
 fi
+
+echo "== T4  'did work happen' vs 'was evidence collected' are separate questions"
+# The convention put the harness's own bookkeeping into the tree the harness measures.
+# Two control-flow decisions broke on that, both by asking git status about EVERYTHING:
+#   ralph-qwen.sh  no-op guard      -> its own status heartbeat counted as "work happened"
+#   ralph-judge.sh clean preflight  -> its own index made the tree permanently dirty
+# Presence of evidence is not proof of work. Scope the work question AND assert the
+# evidence question separately — excluding .evidence/ on its own just moves the blind spot.
+for pair in "$QWEN:noop-guard" "$JUDGE:judge-preflight"; do
+  file="${pair%%:*}"; name="${pair##*:}"
+  if [ ! -f "$file" ]; then pend "$name-scopes-to-work" "$file absent"; continue; fi
+  if grep -qE "status --porcelain.*:!\.evidence" "$file"; then
+    ok "$name-scopes-to-work" presence
+  elif grep -qE "status --porcelain" "$file"; then
+    pend "$name-scopes-to-work" "still asks git status about the whole tree"
+  else
+    no "$name-scopes-to-work" "no git status --porcelain in $file — did the check move?"
+  fi
+done
+# The positive half. Without it, excluding .evidence/ means a silent indexing failure looks
+# exactly like a healthy run, because loop-index.py is invoked best-effort (`|| WARN`).
+if [ -f "$QWEN" ]; then
+  grep -qE 'index\.jsonl' "$QWEN" \
+    && ok "evidence-collection-is-asserted" presence \
+    || pend "evidence-collection-is-asserted" "nothing checks that indexing produced a row"
+else pend "evidence-collection-is-asserted" "$QWEN absent"; fi
 
 echo "== the tools are generic (AC-3, AC-5) — negative, always armed"
 # AC-5 is the whole point of the spec: a project name in harness tooling is the defect.
