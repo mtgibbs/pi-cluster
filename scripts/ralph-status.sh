@@ -8,7 +8,11 @@
 #
 # Contract — file: $RALPH_STATUS_DIR/<agent>-<pid>.json (default dir
 # ~/.harness/status/<repo>, scoped so two projects' loops cannot collide on a
-# recycled PID; an explicit RALPH_STATUS_DIR is used verbatim). Written
+# recycled PID; an explicit RALPH_STATUS_DIR is used verbatim).
+# Environment variables:
+#   RALPH_STATUS_DIR — output directory (default ~/.harness/status/<repo>)
+#   RALPH_STATUS_KEEP_MIN — status file retention in minutes (default 1440)
+# Written
 # ATOMICALLY (tmp + mv) so a reader never sees a half-written object. Fields:
 #   agent pid repo branch spec task task_index total_tasks attempt
 #   max_attempts phase verify_pass last_commit started updated
@@ -56,7 +60,7 @@ hb_init() {
   mkdir -p "$HB_DIR" 2>/dev/null || true
   HB_FILE="$HB_DIR/${HB_AGENT}-$$.json"
   # Cap accumulation: drop this agent's terminal files older than a day.
-  find "$HB_DIR" -name "${HB_AGENT}-*.json" -mmin +1440 -delete 2>/dev/null || true
+  find "$HB_DIR" -name "${HB_AGENT}-*.json" -mmin "+${RALPH_STATUS_KEEP_MIN:-1440}" -delete 2>/dev/null || true
 }
 
 # hb_write <phase> [verify_pass]  — emit the current status. Never fails.
