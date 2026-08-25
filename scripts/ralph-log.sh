@@ -34,7 +34,7 @@
 log_init() {
   LOG_OK=0
   [ "${RALPH_LOG:-on}" = "on" ] || { echo "logs: off (RALPH_LOG=off)" >&2; return 0; }
-  LOG_ROOT="${RALPH_LOG_DIR:-$HOME/.harness/logs/$(basename "$(git -C "${ROOT:-.}" rev-parse --show-toplevel 2>/dev/null || echo unknown-repo)")}"
+  LOG_ROOT="${RALPH_LOG_DIR:-$(git -C "${ROOT:-.}" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.harness")/.evidence/runs}"
   LOG_DIR="$LOG_ROOT/${HB_AGENT:-${RALPH_AGENT:-agent}}-$$"
   mkdir -p "$LOG_DIR" 2>/dev/null || { echo "logs: unavailable ($LOG_DIR not writable)" >&2; return 0; }
   # Cap accumulation the same way the heartbeat does — these hold whole model transcripts.

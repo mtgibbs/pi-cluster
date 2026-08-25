@@ -1,0 +1,9 @@
+# Raw executor transcripts. Bulky, and ralph stages with `git add -A` — without this
+# they land in whatever task commits next, under that task's message. That is
+# docs/lessons.md C4, and it happened here: a T1 commit with ZERO source changes,
+# carrying only .evidence/runs/qwen-19281/T1-attempt1.log and a status JSON.
+#
+# NOT ignored, deliberately: index.md, index.jsonl, metrics.jsonl, status/,
+# judge-ledger.jsonl. Those are small and are what makes the record survive a clone.
+# Lose runs/ and you keep every task, attempt, verdict, timing and finding.
+runs/
