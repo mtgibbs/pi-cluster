@@ -91,7 +91,8 @@ def store_bases(repo, kind):
 
 
 # Executor run-directory prefixes. Every loop names its run dir `<agent>-<pid>`, and the
-# agent is whatever RALPH_AGENT was — `qwen` for ralph-qwen.sh, `codex` for ralph-codex.sh.
+# agent is whatever RALPH_AGENT was — set per strategy (scripts/loops/*.env), since one build
+# loop now drives every executor through a binding.
 #
 # This used to be the bare literal "qwen-*" at all three enumeration sites, which meant every
 # codex run was invisible to store 3: the dirs were written, and nothing ever listed them.

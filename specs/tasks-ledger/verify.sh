@@ -20,7 +20,6 @@ set -uo pipefail
 
 L="scripts/ralph-ledger.sh"
 Q="scripts/ralph-qwen.sh"
-C="scripts/ralph-codex.sh"
 FIX="specs/tasks-ledger/fixtures"
 ROOT_ABS="$(pwd)"
 fail=0
@@ -56,9 +55,9 @@ else
   pend "scope:out-of-scope-files-untouched (base '$BASE' unresolvable)"
 fi
 
-# §8.4 — the final STRICT backstop must survive untouched in both twins. A resumed run is held
+# §8.4 — the final STRICT backstop must survive untouched in the build loop. A resumed run is held
 # to the whole spec or the resume is just a way to launder unbuilt work.
-for f in "$Q" "$C"; do
+for f in "$Q"; do
   n="$(basename "$f")"
   grep -q 'STRICT=1 bash "\$VERIFY"' "$f" 2>/dev/null \
     && ok "scope:$n-strict-backstop-intact" || no "scope:$n-strict-backstop-intact"
@@ -68,7 +67,7 @@ done
 # Structural, and deliberately checked against ALL THREE files including the helper. Nothing in
 # scripts/ writes tasks.txt today; this preserves that property, it does not establish it.
 w=""
-for f in "$L" "$Q" "$C"; do
+for f in "$L" "$Q"; do
   [ -f "$f" ] || continue
   # strip comments first — a comment mentioning redirection must not trip this (the loop-doctor
   # ac15 lesson: the third gate defect in this repo's history was a grep that matched a comment)
@@ -298,7 +297,7 @@ rm -rf "$T5"
 if [ ! -f "$L" ] || ! grep -q 'ledger_record' "$Q" 2>/dev/null; then
   for c in ac6:resume-skips-proven-tasks ac6:skip-line-names-task-and-commit \
            ac7:not-ancestor-not-skipped ac8:reverted-not-skipped \
-           ac9:walk-stops-at-first-gap ac13:twins-identical; do
+           ac9:walk-stops-at-first-gap ; do
     pend "$c"
   done
 else
@@ -356,11 +355,7 @@ else
   fi
   rm -rf "$T9"
 
-  # ---- AC13: the twins cannot drift. Compare the extracted ledger call sites, not a count.
-  qs="$(grep -n 'ledger_' "$Q" 2>/dev/null | sed 's/^[0-9]*://' | sed 's/^[[:space:]]*//')"
-  cs="$(grep -n 'ledger_' "$C" 2>/dev/null | sed 's/^[0-9]*://' | sed 's/^[[:space:]]*//')"
-  if [ -n "$qs" ] && [ "$qs" = "$cs" ]; then ok "ac13:twins-identical"
-  else no "ac13:twins-identical — ralph-qwen.sh and ralph-codex.sh ledger lines differ"; fi
+  # AC13 (twin symmetry) removed by specs/executor-binding — see run-regression-guard.
 fi
 
 echo

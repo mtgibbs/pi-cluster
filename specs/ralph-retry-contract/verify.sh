@@ -18,7 +18,6 @@
 set -uo pipefail
 
 Q="scripts/ralph-qwen.sh"
-C="scripts/ralph-codex.sh"
 H="scripts/ralph-retry.sh"
 FIX="specs/ralph-retry-contract/fixtures"
 ROOT_ABS="$(pwd)"          # $OLDPWD is unreliable inside the nested subshells below
@@ -48,7 +47,7 @@ else
 fi
 
 # AC10 — the reset must never gain teeth it should not have (§8.1).
-for f in "$Q" "$C"; do
+for f in "$Q"; do
   n="$(basename "$f")"
   if [ -f "$f" ]; then
     grep -Eq 'reset --hard|clean -fdx|clean .*-x' "$f" \
@@ -132,7 +131,7 @@ fi
 
 # --------------------------------------------------------------------------------- T2 (pend)
 # Presence-gate: the literal edit exists in BOTH twins. Then assert the behaviour.
-if grep -q 'reset -q -- \.' "$Q" 2>/dev/null && grep -q 'reset -q -- \.' "$C" 2>/dev/null; then
+if grep -q 'reset -q -- \.' "$Q" 2>/dev/null; then
   T7="$(run_loop stage-and-fail 1)"
   v="$(cat "$T7/mock/verdict" 2>/dev/null || echo MISSING)"
   [ "$v" = "CLEAN" ] && ok "ac7:staged-file-gone-next-attempt" \
@@ -146,7 +145,7 @@ fi
 
 # --------------------------------------------------------------------------------- T3 (pend)
 if grep -q 'section 10 acceptance criteria' "$Q" 2>/dev/null; then
-  for f in "$Q" "$C"; do
+  for f in "$Q"; do
     n="$(basename "$f")"
     grep -q "section 10 acceptance criteria and section 7 norms" "$f" \
       && ok "ac11:$n-section-pointers" || no "ac11:$n-section-pointers"
@@ -157,17 +156,14 @@ if grep -q 'section 10 acceptance criteria' "$Q" 2>/dev/null; then
   done
   # AC12 — the twins must not drift: the shared clauses are byte-identical.
   a="$(grep -h 'section 10 acceptance criteria\|Do not run git add\|reset -q -- \.' "$Q" | sed 's/^[[:space:]]*//')"
-  b="$(grep -h 'section 10 acceptance criteria\|Do not run git add\|reset -q -- \.' "$C" | sed 's/^[[:space:]]*//')"
-  [ -n "$a" ] && [ "$a" = "$b" ] && ok "ac12:twins-do-not-drift" || no "ac12:twins-do-not-drift"
+  # ac12 (twin symmetry) removed by specs/executor-binding — the twin is gone.
 else
   pend "ac11:ralph-qwen.sh-section-pointers"; pend "ac11:ralph-qwen.sh-index-prohibition"
-  pend "ac11:ralph-qwen.sh-old-wording-removed"; pend "ac11:ralph-codex.sh-section-pointers"
-  pend "ac11:ralph-codex.sh-index-prohibition"; pend "ac11:ralph-codex.sh-old-wording-removed"
-  pend "ac12:twins-do-not-drift"
+  pend "ac11:ralph-qwen.sh-old-wording-removed"
 fi
 
 # --------------------------------------------------------------------------------- T4 (pend)
-if grep -q 'ralph-retry.sh' "$Q" 2>/dev/null && grep -q 'ralph-retry.sh' "$C" 2>/dev/null; then
+if grep -q 'ralph-retry.sh' "$Q" 2>/dev/null; then
   T9="$(run_loop trade-checks 2)"
   P="$T9/mock/prompts.txt"
   # AC9 — attempt 2 regressed `alpha`; attempt 3's prompt must name it under a heading.

@@ -49,7 +49,7 @@ for phase in $STRATEGY_PHASES; do
   case "$phase" in
     build)
       [ -f "$SPEC_DIR/tasks.txt" ] || { echo "run-loop: build phase needs $SPEC_DIR/tasks.txt" >&2; exit 1; }
-      bash "$SCRIPT_DIR/ralph-qwen.sh" "$SPEC_DIR" ;;
+      bash "${BUILD_CMD:-$SCRIPT_DIR/ralph-qwen.sh}" "$SPEC_DIR" ;;
     judge)
       bash "$SCRIPT_DIR/ralph-judge.sh" "$SPEC_DIR" ;;
     *)

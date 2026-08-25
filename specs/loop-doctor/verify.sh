@@ -45,7 +45,7 @@ stray="$(find specs/loop-doctor -type f \
 BASE="${LOOP_DOCTOR_BASE:-origin/main}"
 if git rev-parse --verify --quiet "$BASE" >/dev/null 2>&1; then
   if git diff --quiet "$BASE" -- \
-       scripts/ralph-qwen.sh scripts/ralph-codex.sh scripts/ralph-judge.sh \
+       scripts/ralph-qwen.sh scripts/ralph-judge.sh \
        scripts/ralph-status.sh scripts/ralph-log.sh scripts/ralph-bus.sh \
        scripts/run-loop.sh scripts/gate-score.sh scripts/loop-report.sh \
        scripts/harness harness-console 2>/dev/null; then

@@ -20,7 +20,7 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
-| Heartbeat | `scripts/ralph-status.sh` (sourced by `ralph-qwen`/`ralph-codex`) | writes a live JSON status file per loop to `<repo>/.evidence/status/<spec-slug>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
+| Heartbeat | `scripts/ralph-status.sh` (sourced by the build loop and the judge loop) | writes a live JSON status file per loop to `<repo>/.evidence/status/<spec-slug>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
 | Attempt logs | `scripts/ralph-log.sh` (sourced by both loops) | `<repo>/.evidence/runs/<spec-slug>/<agent>-<pid>/<task>-attempt<n>.{log,diff}`. Named by **task label** (`T21`), not queue position — those coincide on a cold start and diverge on any requeue, and the old name collided across every run in the root. `.diff` exists ⇔ the gate ran and said no |
 | Supervisor | `scripts/supervise.sh` | wraps `run-loop.sh`; kills + relaunches a stillborn executor (≤40 B log, no growth), snapshots the evidence first, marks the heartbeat `killed`. Never retries a *verify* failure |
 | SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
@@ -216,7 +216,7 @@ context, just a second compose service with its own volume.
 | `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh`. Single-repo (pi-cluster). |
 | `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh` (delegates to qwen like a laptop session), **plus `ctx`** (local agent-history search) and this laptop's synced Claude memory. **General workstation, not repo-locked** — clone anything under `/Users/mtgibbs/dev/`. |
 | `coding-harness-claude-2` | **Second, independent Claude Code instance** — same role/image as `coding-harness-claude`, own `$HOME`/repo-mirror/tmux session, so two windows can drive parallel work without sharing state. Added 2026-07-14. **Provisioned but not activated** — see below. |
-| `coding-harness-codex` | **OpenAI Codex CLI** (`codex` 0.144.6), driving `scripts/ralph-codex.sh`. Also carries opencode/`oc` (delegate down to qwen) and `ctx`. General workstation, same two-mount shape as the claude containers. Added 2026-07-20. **Provisioned but not activated** — needs its one-time login, see below. |
+| `coding-harness-codex` | **OpenAI Codex CLI** (`codex` 0.144.6), driving the build loop via `scripts/exec-codex.sh`. Also carries opencode/`oc` (delegate down to qwen) and `ctx`. General workstation, same two-mount shape as the claude containers. Added 2026-07-20. **Provisioned but not activated** — needs its one-time login, see below. |
 
 **Why a third executor, and which one to reach for.** The three differ by
 *budget*, not just by model — that's the whole reason codex earns a container:
@@ -230,25 +230,33 @@ context, just a second compose service with its own volume.
 That distinction is the point. Handing work to `coding-harness-claude` saves no
 budget; handing it to `coding-harness-codex` adds a parallel lane.
 
-**Driving codex — `scripts/ralph-codex.sh`.** Same spec-dir contract
-(`spec.md` / `verify.sh` / `tasks.txt`), same fresh-session-per-attempt, same
-deterministic external gate, same `exit 2` stop-for-a-human as `ralph-qwen.sh`.
-The loop carries the rigor; only the executor swaps. Three deliberate
-differences:
+**Driving codex — a binding, not a second loop.** There is ONE build loop
+(`scripts/ralph-qwen.sh`); the executor is `RALPH_EXEC_CMD`, exactly as the judge loop
+already takes `JUDGE_CMD`/`EXECUTOR_CMD`. Run it with a strategy:
 
-- **No second brief to maintain.** Codex reads `AGENTS.md` natively — the same
-  lean brief qwen already uses.
-- **The codesheet defaults OFF.** Its 20–56% saving was measured on a 30B with
-  a small window; that result is **unmeasured** for codex, which has its own
-  repo navigation and prompt cache. `RALPH_SHEET=on` to A/B it — don't assume
-  the qwen number transfers.
-- **Sandboxing is the container's job, not codex's.** Defaults to
-  `--sandbox danger-full-access`, which is precisely the "externally
-  sandboxed" case codex's own help describes: read-only rootfs, `cap_drop:
-  ALL`, non-root, no socket/kubeconfig/NAS, PR-gated output. Nested
-  landlock+seccomp under `cap_drop: ALL` is unreliable and buys nothing here.
-  **Running it on the laptop instead? There is no outer sandbox — override:**
-  `CODEX_SANDBOX=workspace-write scripts/ralph-codex.sh specs/<feature>`.
+```bash
+scripts/run-loop.sh build-codex specs/<feature>    # scripts/loops/build-codex.env
+```
+
+`scripts/ralph-codex.sh` used to be a 204-line copy of the whole loop, and three specs carried
+rules to keep the two in sync (`run-regression-guard` AC11, `tasks-ledger` AC13,
+`ralph-retry-contract` §230). All of it existed to change one line — the executor invocation.
+Deleted in `specs/executor-binding`; adding an executor is now a binding plus a `.env`.
+
+What `build-codex.env` sets, and why:
+
+- **`RALPH_AGENT=codex`** — with one loop, the agent no longer follows from which script was
+  invoked, so without this a Codex run is filed as `qwen-<pid>` in `.evidence/`.
+- **`RALPH_SHEET=off`** — the codesheet's 20–56% saving was measured on a 30B with a small
+  window; **unmeasured** for codex, which has its own repo navigation and prompt cache.
+  `RALPH_SHEET=on` to A/B it — don't assume the qwen number transfers.
+- **No second brief.** Codex reads `AGENTS.md` natively — the same lean brief qwen uses.
+- **Sandboxing is the container's job.** `exec-codex.sh` defaults to
+  `--sandbox danger-full-access`, precisely the "externally sandboxed" case codex's own help
+  describes: read-only rootfs, `cap_drop: ALL`, non-root, no socket/kubeconfig/NAS, PR-gated
+  output. Nested landlock+seccomp under `cap_drop: ALL` is unreliable and buys nothing.
+  **On the laptop there is no outer sandbox — override:**
+  `CODEX_SANDBOX=workspace-write scripts/run-loop.sh build-codex specs/<feature>`.
 
 **General workstation, not pi-cluster-only:** `coding-harness-claude` mounts
 `/Users/mtgibbs/dev` (not just a scratch dir) specifically so it matches the

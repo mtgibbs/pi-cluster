@@ -71,7 +71,7 @@ kill_tree(){ # <pgid>
   # and a detached or re-parented executor survives the group kill. This WILL take out any other
   # ralph loop on this host — acceptable because the supervisor is meant to own the machine's
   # loop, and a survivor holds the GPU lane the relaunch needs.
-  for pat in 'run-loop.sh' 'ralph-qwen.sh' 'ralph-codex.sh' 'ralph-judge.sh' '/oc run'; do
+  for pat in 'run-loop.sh' 'ralph-qwen.sh' 'ralph-judge.sh' 'exec-qwen.sh' 'exec-codex.sh'; do
     pgrep -f "$pat" 2>/dev/null | while read -r p; do kill -9 "$p" 2>/dev/null; done
   done
   pgrep -x opencode 2>/dev/null | while read -r p; do kill -9 "$p" 2>/dev/null; done
