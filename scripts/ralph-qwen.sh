@@ -123,7 +123,7 @@ URLs/UIDs. When done, stop.${feedback}"
     # specs/model-watch: opencode asked to Read `/specs/model-watch/spec.md` (absolute,
     # from filesystem root), opencode auto-rejected it as an external directory, the model
     # produced no file, and the staged gate passed T1 with "nothing to commit".
-    if [ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+    if [ -z "$(git -C "$ROOT" status --porcelain -- . ':!.evidence' 2>/dev/null)" ]; then
       echo "  ✗ attempt $attempt changed nothing — a no-op is a failure, not a pass" >&2
       hb_write failed false
       feedback="
@@ -141,7 +141,18 @@ paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this tim
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
       retry_record "$out"
-      scripts/loop-index.py --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 || { echo "WARN: loop-index.py failed"; }
+      scripts/loop-index.py --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 || { echo "WARN: loop-index.py failed" >&2; }
+      # "Did work happen" and "was evidence collected" are two questions. The guard above
+      # now excludes .evidence/ from the first one — which would silently hide a broken
+      # indexer, since loop-index.py is best-effort. So ask the second question directly:
+      # the row for this task must exist. Warn, never fail: recording the run must not be
+      # able to fail the run it is recording.
+      _idx="$ROOT/.evidence/index.jsonl"
+      if [ ! -s "$_idx" ]; then
+        echo "WARN: no .evidence/index.jsonl after ${HB_TASK%% *} — the record was not collected" >&2
+      elif ! grep -q "\"task\": *\"${HB_TASK%% *}\"" "$_idx" 2>/dev/null; then
+        echo "WARN: .evidence/index.jsonl has no row for ${HB_TASK%% *} — indexing ran but did not record this task" >&2
+      fi
       break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2

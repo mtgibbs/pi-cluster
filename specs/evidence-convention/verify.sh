@@ -114,23 +114,31 @@ echo "== T4  'did work happen' vs 'was evidence collected' are separate question
 #   ralph-judge.sh clean preflight  -> its own index made the tree permanently dirty
 # Presence of evidence is not proof of work. Scope the work question AND assert the
 # evidence question separately — excluding .evidence/ on its own just moves the blind spot.
-for pair in "$QWEN:noop-guard" "$JUDGE:judge-preflight"; do
-  file="${pair%%:*}"; name="${pair##*:}"
-  if [ ! -f "$file" ]; then pend "$name-scopes-to-work" "$file absent"; continue; fi
-  if grep -qE "status --porcelain.*:!\.evidence" "$file"; then
-    ok "$name-scopes-to-work" presence
-  elif grep -qE "status --porcelain" "$file"; then
-    pend "$name-scopes-to-work" "still asks git status about the whole tree"
-  else
-    no "$name-scopes-to-work" "no git status --porcelain in $file — did the check move?"
-  fi
+# Asserted as a NEGATIVE: no unscoped `git status --porcelain` may remain in either
+# decider. The first version grepped for the PRESENCE of one scoped call and passed while
+# two of ralph-judge.sh's three call sites were still unscoped — a presence check over a
+# file with several call sites, which is the exact false-PASS class this gate exists to
+# catch. Search proves absence; presence proves nothing about the other lines.
+unscoped=""
+for file in "$QWEN" "$JUDGE"; do
+  [ -f "$file" ] || continue
+  hits="$(grep -nE 'git .*status --porcelain' "$file" | grep -v ":\!\.evidence" | cut -d: -f1 | tr '\n' ',')"
+  [ -n "$hits" ] && unscoped="$unscoped $file:${hits%,}"
 done
+if [ ! -f "$QWEN" ] || [ ! -f "$JUDGE" ]; then
+  pend "work-question-excludes-evidence" "harness scripts absent"
+elif [ -n "$unscoped" ]; then
+  no "work-question-excludes-evidence" "unscoped git status --porcelain at$unscoped — every reader that DECIDES must exclude .evidence (§6d)" negative
+else
+  ok "work-question-excludes-evidence" negative
+fi
+
 # The positive half. Without it, excluding .evidence/ means a silent indexing failure looks
 # exactly like a healthy run, because loop-index.py is invoked best-effort (`|| WARN`).
 if [ -f "$QWEN" ]; then
   grep -qE 'index\.jsonl' "$QWEN" \
     && ok "evidence-collection-is-asserted" presence \
-    || pend "evidence-collection-is-asserted" "nothing checks that indexing produced a row"
+    || no "evidence-collection-is-asserted" "excluding .evidence from the work question without asserting collection just moves the blind spot (§6d)"
 else pend "evidence-collection-is-asserted" "$QWEN absent"; fi
 
 echo "== the tools are generic (AC-3, AC-5) — negative, always armed"
