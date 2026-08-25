@@ -147,7 +147,11 @@ URLs/UIDs. When done, stop.${feedback}"
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
       retry_record "$out"
-      scripts/loop-index.py --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 || { echo "WARN: loop-index.py failed"; }
+      # $(dirname $0), not a bare `scripts/…` — see the note in ralph-qwen.sh. That path
+      # resolved against the TARGET worktree, which under the evidence convention has no
+      # scripts/ dir at all.
+      "$(dirname "$0")/loop-index.py" --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 \
+        || { echo "WARN: loop-index.py failed"; }
       break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2

@@ -360,7 +360,7 @@ def load_supervisor(evid):
 # --------------------------------------------------------------------------
 # store 6 — the judge ledger
 # --------------------------------------------------------------------------
-def find_judge_dir(repo):
+def find_judge_dir(repo, spec=None):
     """Locate ralph-judge/, which hides in whichever git dir the judge ran under.
 
     ralph-judge.sh puts its state at `git rev-parse --git-path ralph-judge`. Run from
@@ -381,9 +381,44 @@ def find_judge_dir(repo):
     candidates = [os.path.join(common, "ralph-judge")]
     candidates += sorted(glob.glob(os.path.join(common, "worktrees", "*", "ralph-judge")))
     found = [c for c in candidates if os.path.exists(os.path.join(c, "ledger.jsonl"))]
+    # Also accept a published copy in the repo. ralph-judge.sh copies its record to
+    # .evidence/judge/<spec>/ at exit precisely because the git-dir original dies with the
+    # worktree — so once a worktree is gone, this is the only place the findings survive.
+    found += sorted(glob.glob(os.path.join(repo, EVIDENCE, "judge", "*")))
+    found = [c for c in found if os.path.exists(os.path.join(c, "ledger.jsonl"))]
     if not found:
         return None, (f"no ledger.jsonl under {len(candidates)} candidate location(s) "
                       f"below {common}")
+
+    # Select by SPEC, not by size.
+    #
+    # "Prefer the largest" is wrong the moment a repo has more than one loop worktree, and it
+    # fails silently: on 2026-08-25 notes-from-hearing had five, and indexing ANY of the five
+    # new specs attached the 31 KB specs/v1 ledger from the main checkout — 56 findings from a
+    # frozen spec — because it was simply the biggest file. Every per-spec index generated that
+    # night reported another spec's findings as its own.
+    #
+    # A judge dir knows what it judged: report.json carries spec_dir. Match on it. Size is only
+    # the tie-break among dirs that genuinely judged this spec.
+    if spec:
+        want = os.path.basename(spec.rstrip("/"))
+        matched = []
+        for c in found:
+            try:
+                with open(os.path.join(c, "report.json")) as fh:
+                    sd = (json.load(fh) or {}).get("spec_dir") or ""
+            except Exception:
+                continue
+            if os.path.basename(sd.rstrip("/")) == want:
+                matched.append(c)
+        if matched:
+            found = matched
+        else:
+            # Honest empty beats another spec's data. A ledger we cannot attribute to this
+            # spec is not this spec's evidence, and "0 findings" here would be the
+            # zero-instead-of-unavailable failure this module's own rule forbids.
+            return None, (f"no judge ledger identifies spec_dir {want!r} "
+                          f"({len(found)} ledger(s) found, all for other specs)")
     if len(found) > 1:
         # Prefer the largest; report the ambiguity rather than silently picking.
         found.sort(key=lambda d: os.path.getsize(os.path.join(d, "ledger.jsonl")),
@@ -391,8 +426,8 @@ def find_judge_dir(repo):
     return found[0], None
 
 
-def load_judge(repo):
-    jd, why = find_judge_dir(repo)
+def load_judge(repo, spec=None):
+    jd, why = find_judge_dir(repo, spec)
     if jd is None:
         return None, {}, why
     ledger = os.path.join(jd, "ledger.jsonl")
@@ -451,7 +486,7 @@ def build(repo, evid, project_names, spec=None):
     status = load_status(repo)
     logdirs = load_log_dirs(evid, repo)
     sup_by_task, sup_orphans = load_supervisor(evid)
-    findings, judge_report, judge_why = load_judge(repo)
+    findings, judge_report, judge_why = load_judge(repo, spec)
     metrics = load_metrics(evid, repo)
 
     # pid -> task, preferring the status file, falling back to log content
@@ -483,6 +518,24 @@ def build(repo, evid, project_names, spec=None):
         if not r.get("task"):
             unknown.append(r)
             continue
+        # KNOWN GAP, deliberately not patched here — see docs and the PR that added this note.
+        #
+        # A row's `runs` is [] for most tasks the loop actually ran, and every field derived
+        # from it (attempts_observed, failed_observed, gate_pass/fail/pend, evidence_classes)
+        # comes out null. The cause is NOT this join: load_status already normalises the task
+        # to its bare label, so labels match fine.
+        #
+        # The cause is that `.evidence/status/<pid>.json` is one file per executor PROCESS,
+        # rewritten in place as the loop advances through the queue. A run that did T1, T2 and
+        # T3 leaves a single status file saying "T3". So T1 and T2 get no run attributed, and
+        # the whole dir's attempt counts land on whichever task the process happened to finish
+        # on. Verified 2026-08-25 on specs/interruption: one run dir (qwen-35992), three tasks,
+        # status says T3 — and the index showed T1 runs=0, T2 runs=0, T3 runs=1.
+        #
+        # The real join key is the per-attempt FILENAME inside the run dir (T1-attempt1.log),
+        # which names its own task unambiguously within that dir. Fixing it means teaching
+        # load_log_dirs to bucket attempts by label instead of returning per-dir totals, which
+        # is a bigger change than the defect list this commit closes.
         runs_by_task[r["task"]].append(r)
 
     # task -> commit(s)
@@ -843,9 +896,28 @@ def main():
                          "within a spec dir.")
     ap.add_argument("--project", action="append", default=None,
                     help="directory name(s) that count as this project (repeatable)")
-    ap.add_argument("-o", "--out", default=os.path.join(EVIDENCE, "index.md"))
-    ap.add_argument("--jsonl", default=os.path.join(EVIDENCE, "index.jsonl"))
+    ap.add_argument("-o", "--out", default=None,
+                    help="markdown output path. Defaults to .evidence/index-<spec>.md when "
+                         "--spec is given, .evidence/index.md otherwise.")
+    ap.add_argument("--jsonl", default=None,
+                    help="jsonl output path. Same defaulting rule as --out.")
     args = ap.parse_args()
+
+    # Per-spec output is the DEFAULT, not an opt-in, because this file is a whole-file
+    # rewrite and --spec scopes what goes into it. With one shared index.jsonl and N spec
+    # dirs, every regeneration silently drops the other N-1 specs' rows: reproduced
+    # 2026-08-25 on notes-from-hearing, where indexing one spec took the committed index
+    # from 28 rows to 24. The tool's own --spec help already says task labels are unique
+    # only within a spec dir; the filename now says the same thing.
+    # A repo with no --spec keeps index.md/index.jsonl, so single-spec repos are unchanged.
+    if args.spec:
+        stem = "index-" + os.path.basename(args.spec.rstrip("/"))
+    else:
+        stem = "index"
+    if args.out is None:
+        args.out = os.path.join(EVIDENCE, stem + ".md")
+    if args.jsonl is None:
+        args.jsonl = os.path.join(EVIDENCE, stem + ".jsonl")
 
     if args.evid is None:
         args.evid = os.environ.get("EVID") or os.path.join(args.repo, EVIDENCE)

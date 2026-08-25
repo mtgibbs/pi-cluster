@@ -80,6 +80,32 @@ log_failure() {
     git -C "${ROOT:-.}" diff 2>/dev/null
     printf '\n=== untracked files created ===\n'
     git -C "${ROOT:-.}" ls-files --others --exclude-standard 2>/dev/null
+    # …and their CONTENTS, not just their names.
+    #
+    # `git diff` covers tracked files only, so for any task whose deliverable is a NEW file —
+    # which is most net-new work — this evidence recorded a filename and nothing else, and
+    # `git clean -fd` then deleted the file. Observed 2026-08-25 on specs/asset-ladder T3:
+    # three attempts each wrote VoiceCapture/SpeechAssetProbe.swift, the gate reported 16 of
+    # 20 checks passing, and the run could not be replayed or salvaged because the only
+    # surviving trace was the path.
+    printf '\n=== untracked file contents ===\n'
+    git -C "${ROOT:-.}" ls-files --others --exclude-standard -z 2>/dev/null \
+    | while IFS= read -r -d '' _p; do
+        case "$_p" in .evidence/*) continue ;; esac   # our own record, not the model's work
+        _abs="${ROOT:-.}/$_p"
+        [ -f "$_abs" ] || continue
+        # Skip anything that is not text, and cap each file: this is diagnostic evidence, not
+        # a backup, and one stray binary would make the whole .diff unreadable.
+        if LC_ALL=C grep -qI . "$_abs" 2>/dev/null; then
+          printf -- '--- %s ---\n' "$_p"
+          head -c 65536 "$_abs" 2>/dev/null
+          [ "$(wc -c < "$_abs" 2>/dev/null || echo 0)" -gt 65536 ] \
+            && printf '\n[truncated at 64 KiB]\n'
+          printf '\n'
+        else
+          printf -- '--- %s --- [binary, not captured]\n' "$_p"
+        fi
+      done
   } > "$f" 2>/dev/null || true
 }
 
