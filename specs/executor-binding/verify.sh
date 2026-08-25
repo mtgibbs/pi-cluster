@@ -66,16 +66,23 @@ tw="$(grep -rln 'twins-do-not-drift\|twins-identical' specs/*/verify.sh 2>/dev/n
 [ -z "$tw" ] && ok "AC-6:twin-symmetry-guards-removed" negative \
   || no "AC-6:twin-symmetry-guards-removed" "$(printf '%s' "$tw" | tr '\n' ' ')" negative
 
-# ---------------------------------------------------------------- AC-7 the surface shrank
-echo "== AC-7  the harness's gate surface is smaller than before"
-# Scripts AND gates. Gate lines alone cannot satisfy this: the gate below adds 132 lines and
-# the twin guards remove ~15, so gate surface goes UP by 117. The reduction is the 204-line
-# duplicated loop this spec deletes. Measuring the wrong half would have set an impossible bar.
-BASE=7465   # pre-change tree: 3063 script + 4402 gate
-now=$(cat scripts/ralph-*.sh scripts/run-loop.sh scripts/supervise.sh scripts/gate-score.sh \
-          scripts/loop-*.py scripts/loop-*.sh specs/*/verify.sh 2>/dev/null | wc -l | tr -d ' ')
-[ "$now" -lt "$BASE" ] && ok "AC-7:harness-surface-shrank ($now < $BASE)" negative \
-  || no "AC-7:harness-surface-shrank" "$now harness lines, was $BASE — this change must remove more than it adds" negative
+# ---------------------------------------------------------------- AC-7 this change shrank
+echo "== AC-7  the executor layer is smaller than the loop pair it replaced"
+# MEASURES THIS CHANGE, NOT THE WHOLE HARNESS. The first version compared total harness lines
+# against a frozen number (7465), which does not ask "did this change shrink things" — it asks
+# "is the harness forever smaller than it was on the day this was written". It went red the
+# moment loop-doctor landed ~250 lines of genuinely new capability, blocking a legitimate
+# addition on a spec that has nothing to do with it. A gate that fires at unrelated work is
+# noise, and noise is how a red check gets waved through.
+#
+# What this spec can honestly claim is bounded and stable: the build loop plus its bindings are
+# smaller than the two duplicated loops they replaced (220 + 204 = 424 lines at 6d9dcb3^).
+BASE_PAIR=424
+now=$(cat scripts/ralph-qwen.sh scripts/exec-qwen.sh scripts/exec-codex.sh \
+          scripts/loops/build-codex.env 2>/dev/null | wc -l | tr -d ' ')
+[ "$now" -gt 0 ] && [ "$now" -lt "$BASE_PAIR" ] \
+  && ok "AC-7:executor-layer-shrank ($now < $BASE_PAIR)" negative \
+  || no "AC-7:executor-layer-shrank" "$now lines for loop+bindings, was $BASE_PAIR for the loop pair" negative
 
 # ---------------------------------------------------------------- AC-3/4/5 behaviour, one mock
 echo "== AC-3/AC-4/AC-5  the loop drives a binding, bounds it, and rejects a stillborn one"

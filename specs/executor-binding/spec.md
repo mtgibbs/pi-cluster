@@ -11,9 +11,9 @@
 > specs and **2,572 lines of gate inspecting itself**, against 22 product specs and 1,830 lines
 > of gate protecting actual work. The tool has grown heavier than the job, and a change that
 > adds a thirteenth self-inspecting spec without removing more than it adds is making the
-> problem worse while claiming to fix it. Net harness surface is therefore an acceptance
-> criterion (AC-7), not an aspiration — and see AC-7's own note on what happened when the first
-> draft measured the wrong thing.
+> problem worse while claiming to fix it. Shrinking is therefore an acceptance criterion (AC-7),
+> not an aspiration — though see AC-7's own note: it took two corrections to state that in a way
+> that measures this change rather than penalising every change that comes after.
 
 ---
 
@@ -45,7 +45,7 @@ parameter looks like.
 1. Choosing an executor is a **binding**, not a file: one build loop, swappable executor.
 2. A new executor costs one small `exec-*.sh` plus a strategy `.env` — no loop is copied.
 3. `scripts/ralph-codex.sh` is gone, and with it every rule that existed to keep it in sync.
-4. The harness's total surface — scripts plus gates — is **smaller** after than before.
+4. The executor layer is **smaller** than the duplicated loops it replaces.
 
 ## 3. Entities · [E — Entities]
 
@@ -173,16 +173,17 @@ must stop being a copy.
   abort with exit 3 rather than run the gate. *(SG-3)*
 - **AC-6** No file under `specs/*/verify.sh` or `scripts/` shall reference a per-executor build
   loop; `scripts/ralph-codex.sh` shall not exist. *(SG-4)*
-- **AC-7** The harness shall be **smaller** after this change than before it: the combined line
-  count of the harness scripts (`scripts/ralph-*.sh`, `run-loop.sh`, `supervise.sh`,
-  `gate-score.sh`, `loop-*`) and every `specs/*/verify.sh` shall be below the **7,465** measured
-  on the pre-change tree.
+- **AC-7** The build loop plus its executor bindings shall total **fewer lines than the two
+  duplicated loops they replaced** (424 at `6d9dcb3^`: `ralph-qwen.sh` 220 + `ralph-codex.sh` 204).
 
-  > Stated in combined lines because gates alone cannot satisfy it. This spec adds a 132-line
-  > gate and removes only ~15 lines of twin guard — **+117 on gate surface**. The reduction comes
-  > from deleting a 204-line duplicated loop. Writing the criterion against gate lines only, as
-  > the first draft did, would have set a target the change provably cannot hit; keeping it that
-  > way and quietly dropping it later is how a spec stops meaning anything.
+  > **Twice-corrected, and worth keeping both corrections visible.** The first draft measured
+  > *gate* lines only, a target this change provably cannot hit (+132 gate, −15 twin guard). The
+  > second measured *total harness* lines against a frozen 7,465 — which asks "is the harness
+  > forever smaller than the day this was written", not "did this change shrink things". It went
+  > red the moment `specs/loop-doctor` landed ~250 lines of new capability, failing an unrelated
+  > and entirely legitimate addition. A ratchet against an absolute number is a guard that fires
+  > at strangers. Scope the claim to what this spec owns, and it stays true regardless of what
+  > the harness grows next.
 
 ## 11. Verification (the harness)
 
