@@ -120,8 +120,14 @@ every existing parser untouched.
   moment it goes quiet. → AC-5.
 - **SG-3 — an explicit `RALPH_LOG_DIR`/`RALPH_STATUS_DIR` is used verbatim as the root.** Every
   gate in this repo redirects these into `$TMPDIR`; breaking the seam breaks them all. → AC-7.
-- **SG-4 — the twins do not drift.** Anything true of `ralph-qwen.sh` is true of
-  `ralph-codex.sh`. → AC-10.
+- **SG-4 — evidence pathing has exactly one source.** No loop script computes a `LOG_DIR`,
+  `LOG_ROOT`, `HB_DIR` or `HB_STATUS_ROOT` of its own; every loop takes it from the two sourced
+  helpers. Stated as single-source rather than as twin-symmetry deliberately: `run-loop.sh`'s
+  build phase invokes `ralph-qwen.sh` and nothing else, and every strategy in `scripts/loops/`
+  binds Codex as the **judge**, not as a builder — so a rule naming a qwen/codex pair protects a
+  roster the architecture has already moved past, and would flag the removal of an unused loop as
+  drift. Two loops with identical *wrong* pathing also satisfy a symmetry check perfectly.
+  → AC-10.
 
 ## 9. Task breakdown · [O — Operations]
 
@@ -153,8 +159,9 @@ every existing parser untouched.
   runs equally with `qwen-` prefixed ones.
 - **AC-9** When the index renders a run's name, it shall render the directory that exists on
   disk, and shall not compose a name from a hardcoded executor prefix.
-- **AC-10** Both `ralph-qwen.sh` and `ralph-codex.sh` shall obtain this behaviour from the
-  shared helpers; neither shall define its own evidence pathing. *(SG-4)*
+- **AC-10** No loop script shall define its own evidence pathing; each shall obtain it from the
+  sourced helpers. The check discovers loops rather than naming them, and fails if it finds none
+  to check. *(SG-4)*
 
 ## 11. Verification (the harness)
 

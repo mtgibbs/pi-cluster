@@ -255,17 +255,42 @@ else
 fi
 
 # ================================================================ AC-10 SG-4, twins don't drift
-echo "== AC-10  both loops take this from the shared helpers (SG-4)"
-drift=""
-for f in "$QWEN" "$CODEX"; do
-  [ -f "$f" ] || { drift="${drift:+$drift }$f(absent)"; continue; }
-  grep -q 'ralph-log.sh'    "$f" || drift="${drift:+$drift }$f(no-log-helper)"
-  grep -q 'ralph-status.sh' "$f" || drift="${drift:+$drift }$f(no-status-helper)"
-  # Neither loop may compute its own evidence path — that is how the twins drift apart.
-  grep -qE '^[[:space:]]*(LOG_DIR|HB_DIR|LOG_ROOT)=' "$f" && drift="${drift:+$drift }$f(defines-own-pathing)"
+echo "== AC-10  evidence pathing lives in the helpers, not in any loop (SG-4)"
+# EXECUTOR-AGNOSTIC ON PURPOSE. The obvious way to write this is `for f in ralph-qwen.sh
+# ralph-codex.sh` — assert the twins carry identical call sites, the way run-regression-guard
+# AC11 and tasks-ledger AC13 do. That is the wrong invariant twice over:
+#
+#   1. It hardcodes a roster. `run-loop.sh`'s build phase invokes ralph-qwen.sh and nothing
+#      else; every strategy in scripts/loops/ binds Codex as the JUDGE, not as a builder. A
+#      check naming a pair goes stale the moment the roster changes — and would report the
+#      deletion of an unused loop as "drift", turning a correct cleanup red.
+#   2. It asserts symmetry when the thing worth protecting is SINGLE SOURCE. Two loops with
+#      identical wrong pathing satisfy a twin check perfectly.
+#
+# So: discover the loops, and assert none of them computes an evidence path. One loop or five,
+# qwen or codex or neither, this says the same true thing.
+drift=""; loops=""; sourced=0
+for f in scripts/ralph-*.sh scripts/run-loop.sh; do
+  [ -f "$f" ] || continue
+  # The helpers ARE the single source — they define this pathing, which is the point.
+  case "$f" in */ralph-log.sh|*/ralph-status.sh) continue ;; esac
+  # A loop CALLS the helpers' entry points; it does not merely mention them. ralph-bus.sh
+  # references ralph-status.sh in its header and is itself a sourced helper, not a loop.
+  grep -qE '(^|;)[[:space:]]*(hb_init|log_init)\b' "$f" || continue
+  loops="${loops:+$loops }$(basename "$f")"
+  grep -q 'ralph-log.sh' "$f" && grep -q 'ralph-status.sh' "$f" && sourced=$((sourced+1))
+  grep -qE '^[[:space:]]*(LOG_DIR|LOG_ROOT|HB_DIR|HB_STATUS_ROOT)=' "$f" \
+    && drift="${drift:+$drift }$(basename "$f")(defines-own-pathing)"
 done
-[ -z "$drift" ] && ok "AC-10:twins-share-the-helpers" negative \
-  || no "AC-10:twins-share-the-helpers" "$drift" negative
+# A negative check that would be true of an empty set proves nothing (PR #188: a check must tell
+# its signal from what would be true anyway). Require at least one real loop before believing it.
+if [ "$sourced" -lt 1 ]; then
+  no "AC-10:pathing-only-in-helpers" "no loop script sources both helpers — the check would pass vacuously" negative
+elif [ -n "$drift" ]; then
+  no "AC-10:pathing-only-in-helpers" "$drift" negative
+else
+  ok "AC-10:pathing-only-in-helpers ($loops)" negative
+fi
 
 # ================================================================ this spec follows the convention
 echo "== the spec directory follows the convention it documents"
