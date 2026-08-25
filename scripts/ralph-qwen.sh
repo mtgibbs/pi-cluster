@@ -149,6 +149,14 @@ paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this tim
       # tools by its own location.
       "$(dirname "$0")/loop-index.py" --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 \
         || { echo "WARN: loop-index.py failed" >&2; }
+      # loop-metrics.sh had NO CALLERS. It was written to answer "how is the loop doing" —
+      # attempts per task, whether cost is falling, how much of the gate is real evidence —
+      # and nothing ever invoked it, so .evidence/metrics.jsonl went stale and the 2026-08-25
+      # run had no cost record of any kind. Wiring it here, beside the indexer, on the same
+      # best-effort contract: recording a run must never be able to fail the run.
+      SPEC_DIR="$SPEC_DIR" "$(dirname "$0")/loop-metrics.sh" \
+        "${HB_TASK%%:*}" "$ROOT" "${LOG_DIR:-}" \
+        >/dev/null 2>&1 || { echo "WARN: loop-metrics.sh failed" >&2; }
       # "Did work happen" and "was evidence collected" are two questions. The guard above
       # now excludes .evidence/ from the first one — which would silently hide a broken
       # indexer, since loop-index.py is best-effort. So ask the second question directly:
