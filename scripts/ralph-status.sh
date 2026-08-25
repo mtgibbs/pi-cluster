@@ -56,7 +56,7 @@ hb_init() {
   HB_MAX="$(( ${RETRIES:-2} + 1 ))"
   HB_STARTED="$(date +%s 2>/dev/null || echo 0)"
   HB_TASK=""; HB_TIDX=0; HB_ATTEMPT=0
-  HB_DIR="${RALPH_STATUS_DIR:-$HOME/.harness/status/$HB_REPO}"
+  HB_DIR="${RALPH_STATUS_DIR:-$(git -C "${ROOT:-.}" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.harness")/.evidence/status}"
   mkdir -p "$HB_DIR" 2>/dev/null || true
   HB_FILE="$HB_DIR/${HB_AGENT}-$$.json"
   # Cap accumulation: drop this agent's terminal files older than a day.
