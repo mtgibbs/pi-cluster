@@ -77,7 +77,7 @@ for f in "$LOG:LOG_ROOT:runs" "$HB:HB_DIR:status"; do
 done
 
 echo "== T3  the record is distilled by the harness, not by the project (AC-2)"
-for f in scripts/ralph-qwen.sh scripts/ralph-codex.sh; do
+for f in scripts/ralph-qwen.sh; do   # one build loop since specs/executor-binding
   if [ ! -f "$f" ]; then pend "$(basename "$f")-indexes-after-task" "$f absent"; continue; fi
   if ! grep -q 'loop-index.py' "$f"; then
     pend "$(basename "$f")-indexes-after-task" "no loop-index.py call"

@@ -17,7 +17,6 @@
 set -uo pipefail
 
 Q="scripts/ralph-qwen.sh"
-C="scripts/ralph-codex.sh"
 H="scripts/ralph-retry.sh"
 FIX="specs/run-regression-guard/fixtures"
 ROOT_ABS="$(pwd)"
@@ -51,8 +50,8 @@ else
   pend "scope:out-of-scope-files-untouched (base '$BASE' unresolvable)"
 fi
 
-# §5 — the final STRICT backstop must survive untouched in both twins.
-for f in "$Q" "$C"; do
+# §5 — the final STRICT backstop must survive untouched in the build loop.
+for f in "$Q"; do
   n="$(basename "$f")"
   grep -q 'STRICT=1 bash "\$VERIFY"' "$f" 2>/dev/null \
     && ok "scope:$n-strict-backstop-intact" || no "scope:$n-strict-backstop-intact"
@@ -179,7 +178,7 @@ else
 fi
 
 # ----------------------------------------------------------------------------- T2/T3 (pend)
-if grep -q 'retry_run_regressions' "$Q" 2>/dev/null && grep -q 'retry_run_regressions' "$C" 2>/dev/null; then
+if grep -q 'retry_run_regressions' "$Q" 2>/dev/null; then
   T7="$(run_loop destroy-earlier 1)"
   # AC7 — the destroying task must NOT be committed. base + T1 only.
   c7="$(git -C "$T7/repo" log --oneline | wc -l | tr -d ' ')"
@@ -207,15 +206,13 @@ if grep -q 'retry_run_regressions' "$Q" 2>/dev/null && grep -q 'retry_run_regres
     && ok "ac9:evidence-preserved" || no "ac9:evidence-preserved"
   rm -rf "$T7"
 
-  # AC11 — the twins carry identical guard call sites.
-  a="$(grep -h 'retry_run_init\|retry_run_record\|retry_run_regressions\|CROSS-TASK REGRESSION' "$Q" | sed 's/^[[:space:]]*//')"
-  b="$(grep -h 'retry_run_init\|retry_run_record\|retry_run_regressions\|CROSS-TASK REGRESSION' "$C" | sed 's/^[[:space:]]*//')"
-  [ -n "$a" ] && [ "$a" = "$b" ] && ok "ac11:twins-do-not-drift" || no "ac11:twins-do-not-drift"
+  # AC11 (twin symmetry) removed by specs/executor-binding: the codex builder it compared
+  # against is deleted — one build loop, executor is a binding. Behaviour checks above are intact.
 else
   pend "ac7:destroying-task-not-committed"; pend "ac8:regression-heading-in-next-prompt"
   pend "ac8:names-regressed-check"; pend "ac8:names-owning-task"
   pend "ac9:stop-message-names-the-cause"; pend "ac9:stop-line-names-destroying-task"
-  pend "ac9:evidence-preserved"; pend "ac11:twins-do-not-drift"
+  pend "ac9:evidence-preserved"
 fi
 
 exit "$fail"

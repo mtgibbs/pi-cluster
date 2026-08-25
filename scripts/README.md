@@ -81,7 +81,7 @@ harness attach qwen              # pop in and drive opencode/qwen live
 harness attach claude            # pop in to a real Claude Code session
 harness attach codex             # pop in to an OpenAI Codex CLI session
 harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
-harness run codex "specs/foo"    # same, but ralph-codex — a separate billing lane
+harness run codex "specs/foo"    # same loop, Codex binding — a separate billing lane
 harness status                   # are the containers up?
 harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index (default: claude)
 harness push-memory              # laptop main -> GitHub -> container fetch (no auto-merge)
@@ -102,19 +102,26 @@ calls so the sheet is never injected twice.
 - **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
 - **Opt-out:** `RALPH_SHEET=off`.
 
-## `ralph-codex.sh` — the same loop, driven by the OpenAI Codex CLI
+## Executor bindings — one build loop, swappable executor
 
-Structurally identical to `ralph-qwen.sh` — same spec-dir contract, same fresh session per
-attempt, same deterministic `verify.sh` gate, same stop-for-a-human. Only the executor swaps
-(`codex exec` instead of `oc run`), and codex reads `AGENTS.md` natively so there's no second
-brief to keep in sync.
+`ralph-qwen.sh` drives whatever `RALPH_EXEC_CMD` points at. A binding is a few lines: take the
+prompt as `$1`, read `ROOT` from the environment, run the tool, let stdout be the transcript.
+The loop owns the tasks, the gate, the retries, the evidence and the watchdog.
 
-- **Use:** `scripts/ralph-codex.sh specs/<feature>` from a git worktree on a throwaway branch.
-- **Codesheet defaults OFF here** (`RALPH_SHEET=on` to enable) — the 20-56% win was measured
-  on a 30B with a small window and is unmeasured for codex.
-- **Sandbox:** defaults to `danger-full-access` because the *container* is the boundary.
-  On a laptop there is no outer sandbox — use `CODEX_SANDBOX=workspace-write`.
-- **Watchdog:** `CODEX_RUN_TIMEOUT` (default 900s), same background-kill pattern as `oc`.
+| binding | executor |
+|---|---|
+| `scripts/exec-qwen.sh` | `oc run` (the default when `RALPH_EXEC_CMD` is unset) |
+| `scripts/exec-codex.sh` | `codex exec` — sandbox via `CODEX_SANDBOX`, default `danger-full-access` because the container is the boundary |
+
+Pick one with a strategy: `scripts/run-loop.sh build-codex specs/<feature>`. Adding a third
+executor is a binding plus a `.env`, not a copy of the loop — this replaced a 204-line duplicate
+that three specs had to police for drift. See `specs/executor-binding`.
+
+- **Knobs:** `RALPH_EXEC_TIMEOUT` (default 480s, enforced by the loop for every binding),
+  `RALPH_SHEET` (codesheet; on by default, `build-codex.env` turns it off — the 20-56% win was
+  measured on a 30B and is unmeasured for Codex).
+- **`RALPH_AGENT` names the executor in the evidence.** A strategy must set it, or a Codex run
+  is filed as `qwen-<pid>`.
 
 ## `supervise.sh` — restart a loop that never started
 

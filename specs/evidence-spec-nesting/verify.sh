@@ -37,7 +37,6 @@ LOG=scripts/ralph-log.sh
 HB=scripts/ralph-status.sh
 IDX=scripts/loop-index.py
 QWEN=scripts/ralph-qwen.sh
-CODEX=scripts/ralph-codex.sh
 ROOT_ABS="$(pwd)"
 SLUG=asset-ladder                       # the fixture's spec dir basename
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/esn.XXXXXX")"
@@ -257,13 +256,13 @@ fi
 # ================================================================ AC-10 SG-4, twins don't drift
 echo "== AC-10  evidence pathing lives in the helpers, not in any loop (SG-4)"
 # EXECUTOR-AGNOSTIC ON PURPOSE. The obvious way to write this is `for f in ralph-qwen.sh
-# ralph-codex.sh` — assert the twins carry identical call sites, the way run-regression-guard
-# AC11 and tasks-ledger AC13 do. That is the wrong invariant twice over:
+# <the other loop>` — assert two loops carry identical call sites, the way run-regression-guard
+# AC11 and tasks-ledger AC13 used to. That is the wrong invariant twice over:
 #
-#   1. It hardcodes a roster. `run-loop.sh`'s build phase invokes ralph-qwen.sh and nothing
-#      else; every strategy in scripts/loops/ binds Codex as the JUDGE, not as a builder. A
-#      check naming a pair goes stale the moment the roster changes — and would report the
-#      deletion of an unused loop as "drift", turning a correct cleanup red.
+#   1. It hardcodes a roster. There is ONE build loop and the executor is a binding
+#      (specs/executor-binding); a check naming a pair goes stale the moment the roster
+#      changes — and would report the deletion of a loop as "drift", turning a correct
+#      cleanup red. That is exactly what happened: the second builder is now gone.
 #   2. It asserts symmetry when the thing worth protecting is SINGLE SOURCE. Two loops with
 #      identical wrong pathing satisfy a twin check perfectly.
 #

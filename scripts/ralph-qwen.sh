@@ -1,26 +1,60 @@
 #!/usr/bin/env bash
-# ralph-qwen.sh — a bounded SDD loop for the local coding model.
+# ralph-qwen.sh — THE bounded SDD build loop. One loop; the executor is a binding
+# (RALPH_EXEC_CMD), so this drives qwen, Codex, or anything else without being copied.
+# The filename still says qwen for now — renaming it ripples into seven specs' gates;
+# see specs/executor-binding §5.
 #
 # Philosophy (learned the hard way): qwen3-coder is a fast, faithful, literal STAMPER
 # with no stamina, taste, or self-checking. So we don't make it smarter — we build the
 # fixture around it. This loop is the conveyor belt + jig + inspector:
 #
 #   for each task in the spec:
-#     fresh opencode session (no context accumulation)   <- bound the context
+#     fresh executor session (no context accumulation)   <- bound the context
 #     give it ONE task + the spec as source               <- bound the scope
-#     timebox the run (oc's watchdog)                     <- a stall can't cost hours
+#     timebox the run (run_bounded, below)                <- a stall can't cost hours
 #     run verify.sh — the DETERMINISTIC gate, not the model's self-report
 #     pass -> commit ; fail -> retry with the failure fed back ; stuck -> stop for a human
 #
 # The model executes; the loop carries the rigor; the human reviews the PR at the end.
 #
 # Usage (run from inside a git worktree on a throwaway branch):
-#   scripts/ralph-qwen.sh specs/<feature>
+#   scripts/ralph-qwen.sh specs/<feature>              # default binding: qwen
+#   scripts/run-loop.sh build-codex specs/<feature>    # or pick a strategy
 # spec dir must contain: spec.md, verify.sh, tasks.txt (one task per line, e.g. "T1: arr widgets")
 set -uo pipefail
 
 SPEC_DIR="${1:?usage: ralph-qwen.sh <spec-dir>}"
 RETRIES="${RALPH_RETRIES:-2}"
+
+# The executor is a binding, exactly as JUDGE_CMD/EXECUTOR_CMD are for ralph-judge.sh. A
+# strategy in scripts/loops/ sets it; unset, the loop drives qwen and behaves as it always has.
+# The binding takes ONE argument (the prompt), reads ROOT from the environment, and writes the
+# transcript to stdout. It owns no tasks, no gate, no evidence — see specs/executor-binding §3.
+# Expanded UNQUOTED at the call site, exactly as ralph-judge.sh expands $EXECUTOR_CMD, so a
+# binding may carry arguments ("bash /path/x.sh", or a wrapper plus flags) rather than having to
+# be a single executable file.
+_SD="$(cd "$(dirname "$0")" && pwd)"
+RALPH_EXEC_CMD="${RALPH_EXEC_CMD:-$_SD/exec-qwen.sh}"
+EXEC_TIMEOUT="${RALPH_EXEC_TIMEOUT:-480}"
+
+# Portable watchdog, same shape as ralph-judge.sh's. It lives in the LOOP, not in the binding:
+# oc happens to carry its own timeout and codex did not, so the old codex copy hand-rolled one
+# and a third executor would have had to remember to. A bound every attempt gets is a property
+# of the loop. Not timeout(1) — stock macOS does not ship it.
+run_bounded() { # <seconds> <cmd...> -> 124 on timeout, else the command's exit code
+  local secs="$1"; shift
+  "$@" & local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$secs" ]; then
+      echo "  ! executor exceeded ${secs}s — killing (likely a stalled session)." >&2
+      kill -TERM "$pid" 2>/dev/null; sleep 1; kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null; return 124
+    fi
+    sleep 1; waited=$((waited+1))
+  done
+  wait "$pid"
+}
+
 SPEC="$SPEC_DIR/spec.md"; VERIFY="$SPEC_DIR/verify.sh"; TASKS="$SPEC_DIR/tasks.txt"
 for f in "$SPEC" "$VERIFY" "$TASKS"; do [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 ROOT="$(git rev-parse --show-toplevel)"
@@ -63,7 +97,7 @@ fi
 # regenerated after commits — stability beats freshness for caching, and each
 # task is bounded anyway. Measured: 20-56% less context at equal-or-better
 # accuracy (docs/research/codemap-serena-token-efficiency.md). RALPH_SHEET=off
-# disables. oc gets OC_SHEET=off below so the sheet isn't injected twice.
+# disables. The qwen binding sets OC_SHEET=off so the sheet isn't injected twice.
 SHEET=""
 SHEET_GEN="$(dirname "$0")/gen-codesheet.mjs"
 if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/dev/null 2>&1; then
@@ -93,17 +127,21 @@ Do not run git add, git commit, or git stash — the loop owns the index.
 Do not touch anything outside this task's scope. Reuse existing patterns; never invent
 URLs/UIDs. When done, stop.${feedback}"
 
-    # Fresh session each attempt (no -c/--continue) = no context bloat. oc adds the
-    # 1Password key + a watchdog timeout so a stalled stream can't hang for hours.
-    # OC_SHEET=off: the sheet is already in the prompt (once, loop-stable) above.
+    # Fresh session each attempt (no continuation) = no context bloat. The executor is a
+    # BINDING, not a hardcoded command: whoever the loop drives, it is invoked the same way,
+    # bounded the same way, and its transcript kept the same way. That seam is why there is one
+    # build loop rather than one per executor — a duplicated loop is what a missing parameter
+    # looks like, and the copy this replaced cost three specs a rule apiece to keep in sync.
+    # See specs/executor-binding §1.
     # Keep the transcript. This used to go to /dev/null, which made every STOP undiagnosable.
-    OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" \
+    # shellcheck disable=SC2086  # deliberate word-split: see below
+    run_bounded "$EXEC_TIMEOUT" $RALPH_EXEC_CMD "$prompt" \
       > "$(log_path "$HB_TASK" "$attempt")" 2>&1; _rc=$?
     # An executor that never started is NOT a failed attempt — it is a broken container, and
     # letting it fall through to verify is how a no-op run reports success. Observed 2026-07-22:
-    # oc died in <1s with "current working directory was deleted" on every attempt, each log 247
-    # bytes, and the loop happily marked 3/3 done. A real attempt (even one the watchdog kills at
-    # OC_RUN_TIMEOUT) leaves a substantial transcript; a stillborn one leaves a stub.
+    # the executor died in <1s with "current working directory was deleted" on every attempt,
+    # each log 247 bytes, and the loop happily marked 3/3 done. A real attempt (even one the
+    # watchdog kills at EXEC_TIMEOUT) leaves a substantial transcript; a stillborn one a stub.
     _log="$(log_path "$HB_TASK" "$attempt")"
     _sz=$(wc -c < "$_log" 2>/dev/null || echo 0)
     if [ "$_rc" != 0 ] && [ "$_sz" -lt 512 ]; then
