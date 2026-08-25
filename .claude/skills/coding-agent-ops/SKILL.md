@@ -20,10 +20,33 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
 | Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
-| Heartbeat | `scripts/ralph-status.sh` (sourced by `ralph-qwen`/`ralph-codex`) | writes a live JSON status file per loop to `~/.harness/status/<repo>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
-| Attempt logs | `scripts/ralph-log.sh` (sourced by both loops) | `~/.harness/logs/<repo>/<agent>-<pid>/<task>-attempt<n>.{log,diff}`. Named by **task label** (`T21`), not queue position — those coincide on a cold start and diverge on any requeue, and the old name collided across every run in the root. `.diff` exists ⇔ the gate ran and said no |
+| Heartbeat | `scripts/ralph-status.sh` (sourced by `ralph-qwen`/`ralph-codex`) | writes a live JSON status file per loop to `<repo>/.evidence/status/<spec-slug>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
+| Attempt logs | `scripts/ralph-log.sh` (sourced by both loops) | `<repo>/.evidence/runs/<spec-slug>/<agent>-<pid>/<task>-attempt<n>.{log,diff}`. Named by **task label** (`T21`), not queue position — those coincide on a cold start and diverge on any requeue, and the old name collided across every run in the root. `.diff` exists ⇔ the gate ran and said no |
 | Supervisor | `scripts/supervise.sh` | wraps `run-loop.sh`; kills + relaunches a stillborn executor (≤40 B log, no growth), snapshots the evidence first, marks the heartbeat `killed`. Never retries a *verify* failure |
 | SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
+
+**Evidence layout — one key, four subtrees.** Everything a run leaves behind is filed under the
+**spec slug** (the spec dir's basename), so the whole record for a feature is one directory walk:
+
+```
+<repo>/.evidence/
+  runs/<spec-slug>/<agent>-<pid>/<task>-attempt<n>.{log,diff}   gitignored (bulky)
+  status/<spec-slug>/<agent>-<pid>.json                          committed
+  judge/<spec>/{ledger.jsonl,report.json}                        committed
+  supervisor/<spec>/…                                            committed
+  index.md · index.jsonl · metrics.jsonl                          committed, derived
+```
+
+Two rules that make this survive scale, both easy to break by accident:
+
+- **The slug is a directory level, never part of the leaf name.** Readers parse `<agent>-<pid>`
+  out of the leaf (`loop-index.py` splits on the first dash; `scripts/harness` globs it).
+  Folding the slug in gives a "pid" of `asset-ladder-37173`, which matches no status file — the
+  index still generates, with every run silently unattributed.
+- **Sweep at the run level, not the spec level.** `RALPH_LOG_KEEP_MIN` reaping at depth 1 would
+  take a feature's entire history the moment it went quiet, because a directory's mtime tracks
+  its newest child. `ralph-log.sh` reaps `-mindepth 2 -maxdepth 2` and then prunes emptied slug
+  dirs.
 | History search | `ctx` (`~/.local/bin/ctx`, data `~/.ctx`) | indexes Claude + opencode sessions; **orchestrator-side only** — qwen never calls it. opencode imports are lite fidelity (diffs + timing, no prose); the Claude sessions *about* a run carry the analysis |
 
 ## Day-to-day usage

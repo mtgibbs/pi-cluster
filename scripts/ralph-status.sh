@@ -6,11 +6,19 @@
 # small JSON status file per running loop so a collector can answer "what is
 # this agent doing right now?" over `docker exec cat` — no tmux, no guessing.
 #
-# Contract — file: $RALPH_STATUS_DIR/<agent>-<pid>.json (default dir
-# ~/.harness/status/<repo>, scoped so two projects' loops cannot collide on a
-# recycled PID; an explicit RALPH_STATUS_DIR is used verbatim).
+# Contract — file: $RALPH_STATUS_DIR/<spec-slug>/<agent>-<pid>.json (the root
+# defaults to the target repo's own .evidence/status, scoped so two projects'
+# loops cannot collide on a recycled PID; an explicit RALPH_STATUS_DIR is used
+# verbatim). <spec-slug> is the spec directory's basename — the same level
+# ralph-log.sh puts run dirs under, and the same key .evidence/judge/<spec>/ and
+# .evidence/supervisor/<spec>/ already use, so the four stores walk alike.
+#
+# The slug is a DIRECTORY, not part of the filename: `scripts/harness` and
+# loop-index.py both parse the pid out of the leaf, and both already handle one
+# level of nesting (`status/*.json` and `status/*/*.json`; harness_roots()).
+# Renaming the leaf would have broken those parsers; adding a level does not.
 # Environment variables:
-#   RALPH_STATUS_DIR — output directory (default ~/.harness/status/<repo>)
+#   RALPH_STATUS_DIR — output root (default <target-repo>/.evidence/status)
 #   RALPH_STATUS_KEEP_MIN — status file retention in minutes (default 1440)
 # Written
 # ATOMICALLY (tmp + mv) so a reader never sees a half-written object. Fields:
@@ -34,6 +42,26 @@
 # Best-effort by design: every write is guarded so a full disk, a missing
 # $HOME, or a read-only mount can NEVER fail the loop it's reporting on.
 
+# _ralph_slug <spec-dir> — the feature identifier: the spec directory's basename,
+# lowercased and reduced to a single filename-safe path component
+# ("specs/Asset Ladder/" -> "asset-ladder"). Falls back to "nospec" so the level is
+# never empty and a status file can never land in the root.
+#
+# Deliberately duplicated verbatim in ralph-log.sh. Both files are best-effort
+# helpers whose contract is that either may be absent without breaking the loop, so
+# neither may depend on the other. Keep the two copies identical.
+#
+# Derived at runtime from SPEC_DIR — never a literal. specs/evidence-convention AC-5
+# forbids any project's name appearing in a harness file, and that is the point: the
+# harness learns the feature from the target repo it was pointed at.
+_ralph_slug() {
+  local s="${1:-}"
+  s="${s%/}"; s="${s##*/}"
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-' \
+        | sed -e 's/-\{2,\}/-/g' -e 's/^[-.]*//' -e 's/-*$//' | cut -c1-40)"
+  printf '%s' "${s:-nospec}"
+}
+
 # Escape a string for embedding in a JSON double-quoted value.
 _hb_esc() {
   printf '%s' "${1-}" \
@@ -56,11 +84,32 @@ hb_init() {
   HB_MAX="$(( ${RETRIES:-2} + 1 ))"
   HB_STARTED="$(date +%s 2>/dev/null || echo 0)"
   HB_TASK=""; HB_TIDX=0; HB_ATTEMPT=0
+  HB_SLUG="$(_ralph_slug "$HB_SPEC")"
   HB_DIR="${RALPH_STATUS_DIR:-$(git -C "${ROOT:-.}" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.harness")/.evidence/status}"
-  mkdir -p "$HB_DIR" 2>/dev/null || true
+  # The root stays addressable: the sweeps below run from it so they still span every spec,
+  # not just the one this loop happens to be running. HB_DIR then descends into this run's
+  # feature. Assigned in this order deliberately — evidence-convention's AC-1 gate reads the
+  # FIRST `HB_DIR=` line and requires the override seam and the .evidence default to be
+  # visible on it, so the root keeps that shape and the slug is appended after.
+  HB_STATUS_ROOT="$HB_DIR"
+  HB_DIR="$HB_DIR/$HB_SLUG"
   HB_FILE="$HB_DIR/${HB_AGENT}-$$.json"
   # Cap accumulation: drop this agent's terminal files older than a day.
-  find "$HB_DIR" -name "${HB_AGENT}-*.json" -mmin "+${RALPH_STATUS_KEEP_MIN:-1440}" -delete 2>/dev/null || true
+  #
+  # BEFORE the mkdir below, not after: unlike ralph-log.sh — whose slug directory always holds
+  # the run dir it just created — this store's file is not written until the first hb_write, so
+  # a slug directory created here would still be empty when the -empty sweep ran and would be
+  # deleted out from under it. Sweep first, then create.
+  #
+  # Swept from the ROOT, not from our own slug directory. The sweep has no -maxdepth, so
+  # rooting it here keeps it reaching every spec's files the way it did when the store was
+  # flat; rooted at $HB_DIR it would only ever reap the spec currently being run, and any
+  # feature that finished would keep its files forever — an accumulation cap that stops
+  # capping the moment you move on is worse than none, because it still looks like one.
+  find "$HB_STATUS_ROOT" -name "${HB_AGENT}-*.json" -mmin "+${RALPH_STATUS_KEEP_MIN:-1440}" -delete 2>/dev/null || true
+  # Slug directories emptied by that sweep, same as ralph-log.sh. Ours gets its file below.
+  find "$HB_STATUS_ROOT" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
+  mkdir -p "$HB_DIR" 2>/dev/null || true
 }
 
 # hb_write <phase> [verify_pass]  — emit the current status. Never fails.
