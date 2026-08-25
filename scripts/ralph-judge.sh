@@ -61,7 +61,31 @@ write_report(){
       gate_gaps: [$L[]? | select(.decision=="gate-gap")  | .id],
       outcome: $oc }' > "$tmp" && mv "$tmp" "$REPORT"
 }
-trap write_report EXIT
+
+# publish_evidence — copy the record into the repo, where something will actually find it.
+#
+# The working ledger lives under the git dir (see JUDGE_STATE_DIR below for why it must stay
+# there). That directory is not part of the repo, is not gitignored-but-present, and is
+# DELETED WITH THE WORKTREE. On 2026-08-25 four runs produced 22 spec-anchored findings, each
+# carrying a suggested_change naming the check that would catch it, and every one of them was
+# one `git worktree remove` away from gone; they were copied out by hand.
+#
+# Runs last, after every restore(), so `git clean -fd` can never reach what it writes.
+# Best-effort by contract: recording the run must not be able to fail the run it is recording.
+publish_evidence(){
+  [ -n "$LEDGER" ] && [ -s "$LEDGER" ] || return 0
+  local top dest
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [ -n "$top" ] || return 0
+  dest="$top/.evidence/judge/$(basename "$SPEC_DIR")"
+  mkdir -p "$dest" 2>/dev/null || return 0
+  cp "$LEDGER" "$dest/ledger.jsonl" 2>/dev/null || true
+  [ -f "$REPORT" ] && cp "$REPORT" "$dest/report.json" 2>/dev/null
+  return 0
+}
+
+on_exit(){ write_report; publish_evidence; }
+trap on_exit EXIT
 
 die(){ echo "ralph-judge: $2" >&2; outcome="${3:-aborted}"; exit "$1"; }
 
@@ -73,6 +97,11 @@ command -v jq >/dev/null 2>&1 || die 1 "jq is required"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ -z "${RJ_EXPECTED_BRANCH:-}" ] || [ "$BRANCH" = "$RJ_EXPECTED_BRANCH" ] \
   || die 1 "on branch $BRANCH, expected $RJ_EXPECTED_BRANCH"
+# Stays under the git dir. Relocating it into .evidence/ looks tempting — see the publish step
+# at the end of this file for why the record still needs to reach the repo — but restore()
+# below runs `git clean -fd` with no exclusions on every rejected mutation, so a ledger living
+# in the worktree would be deleted mid-run by the loop's own arbitration. Publish a copy at
+# exit instead; do not move the working file.
 JUDGE_STATE_DIR="${JUDGE_STATE_DIR:-$(git rev-parse --git-path ralph-judge)}"
 mkdir -p "$JUDGE_STATE_DIR" || die 1 "cannot create JUDGE_STATE_DIR"
 LEDGER="$JUDGE_STATE_DIR/ledger.jsonl"; REPORT="$JUDGE_STATE_DIR/report.json"

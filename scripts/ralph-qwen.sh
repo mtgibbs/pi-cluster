@@ -141,17 +141,32 @@ paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this tim
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
       retry_record "$out"
-      scripts/loop-index.py --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 || { echo "WARN: loop-index.py failed" >&2; }
+      # $(dirname $0), NOT a bare `scripts/…`: that path was relative to the TARGET
+      # worktree, and a project that correctly owns only specs and gates has no scripts/
+      # dir at all. notes-from-hearing#9 removed the harness from the product repo exactly
+      # as the convention asks, and every task of every run after it printed
+      # "scripts/loop-index.py: No such file or directory". The harness must reach its own
+      # tools by its own location.
+      "$(dirname "$0")/loop-index.py" --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 \
+        || { echo "WARN: loop-index.py failed" >&2; }
+      # loop-metrics.sh had NO CALLERS. It was written to answer "how is the loop doing" —
+      # attempts per task, whether cost is falling, how much of the gate is real evidence —
+      # and nothing ever invoked it, so .evidence/metrics.jsonl went stale and the 2026-08-25
+      # run had no cost record of any kind. Wiring it here, beside the indexer, on the same
+      # best-effort contract: recording a run must never be able to fail the run.
+      SPEC_DIR="$SPEC_DIR" "$(dirname "$0")/loop-metrics.sh" \
+        "${HB_TASK%%:*}" "$ROOT" "${LOG_DIR:-}" \
+        >/dev/null 2>&1 || { echo "WARN: loop-metrics.sh failed" >&2; }
       # "Did work happen" and "was evidence collected" are two questions. The guard above
       # now excludes .evidence/ from the first one — which would silently hide a broken
       # indexer, since loop-index.py is best-effort. So ask the second question directly:
       # the row for this task must exist. Warn, never fail: recording the run must not be
       # able to fail the run it is recording.
-      _idx="$ROOT/.evidence/index.jsonl"
+      _idx="$ROOT/.evidence/index-$(basename "$SPEC_DIR").jsonl"
       if [ ! -s "$_idx" ]; then
-        echo "WARN: no .evidence/index.jsonl after ${HB_TASK%% *} — the record was not collected" >&2
+        echo "WARN: no $(basename "$_idx") after ${HB_TASK%% *} — the record was not collected" >&2
       elif ! grep -q "\"task\": *\"${HB_TASK%% *}\"" "$_idx" 2>/dev/null; then
-        echo "WARN: .evidence/index.jsonl has no row for ${HB_TASK%% *} — indexing ran but did not record this task" >&2
+        echo "WARN: $(basename "$_idx") has no row for ${HB_TASK%% *} — indexing ran but did not record this task" >&2
       fi
       break
     fi

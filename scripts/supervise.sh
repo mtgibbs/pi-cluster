@@ -36,9 +36,15 @@ WORKTREE="$(git rev-parse --show-toplevel 2>/dev/null)" \
 REPO="$(basename "$WORKTREE")"
 
 EVID="${SUPERVISE_EVIDENCE_DIR:-$HOME/.harness/evidence/$REPO}"
-RUNTAG="${SUPERVISE_RUNTAG:-run}"
 STATUS_DIR="${RALPH_STATUS_DIR:-$HOME/.harness/status/$REPO}"
 
+# One tag per INVOCATION, not one per install. `attempt` resets to 1 every time supervise.sh
+# is started, so a fixed RUNTAG means the second invocation's launch1 overwrites the first
+# invocation's launch1. The comment below already records that a fixed name was silently
+# overwritten by every relaunch — that was fixed for relaunches WITHIN one invocation and left
+# broken ACROSS them. specs/asset-ladder needed four invocations on 2026-08-25 and three of its
+# launch logs are gone. Seconds since epoch is enough to separate them and still sorts.
+RUNTAG="${SUPERVISE_RUNTAG:-run-$(date +%s)}"
 STILLBORN_BYTES="${STILLBORN_BYTES:-40}"    # 31 = banner only; anything real is far larger
 STILLBORN_AFTER="${STILLBORN_AFTER:-300}"   # seconds with no growth before we call it dead
 MAX_RESTARTS="${MAX_RESTARTS:-8}"
@@ -86,6 +92,20 @@ while [ "$restarts" -le "$MAX_RESTARTS" ]; do
   # A killed attempt can leave the worktree dirty. ralph resets between its OWN attempts; after
   # an external kill nobody has. `git clean -fd` (no -x) leaves .gitignore'd build caches alone —
   # a cold SPM cache would surface as a build failure and read as a spec violation.
+  #
+  # SAY WHAT IT DISCARDS. This reset cannot tell a killed attempt's debris from an operator's
+  # deliberate edit — and the spec dir is exactly where the documented recovery procedure tells
+  # you to make one. `docs/NEXT-RUN.md` says to trim tasks.txt when a task is already done;
+  # doing so and relaunching on 2026-08-25 silently reverted the trim, ran the completed T1
+  # three times, and STOPped on "changed nothing". Nothing in the output said why, so it read
+  # as operator error. Naming the spec-dir files it is about to throw away costs one git call
+  # and turns a silent trap into a visible one.
+  _dirty="$( cd "$WORKTREE" && git status --porcelain -- "$SPEC_DIR" 2>/dev/null )"
+  if [ -n "$_dirty" ]; then
+    log "NOTE: discarding uncommitted changes under $SPEC_DIR before launch:"
+    printf '%s\n' "$_dirty" | sed 's/^/    /'
+    log "      if that was a deliberate queue trim, COMMIT it — this reset runs every launch."
+  fi
   ( cd "$WORKTREE" && git checkout -- . 2>/dev/null; git clean -fdq 2>/dev/null ) || true
 
   log "launching $STRATEGY on $SPEC_DIR (run $attempt, restarts used $restarts/$MAX_RESTARTS)"

@@ -55,7 +55,13 @@ retry_regressions() {
 $1
 EOF
   local i count=0
-  for i in "${regressions[@]}"; do
+  # `"${regressions[@]}"` on an EMPTY array is an unbound-variable error under `set -u` in
+  # bash 3.2 — which is what macOS ships, and what every loop on the laptop runs under. The
+  # common case IS empty (no regressions), so this fired on every retry rather than rarely:
+  # observed on all 5 spec runs of 2026-08-25, meaning the regression block this function
+  # exists to build has never once reached an executor.
+  # `${a[@]+"${a[@]}"}` expands to nothing when unset and to the quoted elements otherwise.
+  for i in ${regressions[@]+"${regressions[@]}"}; do
     printf '%s\n' "$i"
     count=$((count + 1))
     [ "$count" -lt 10 ] || break
