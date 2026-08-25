@@ -1,6 +1,6 @@
 # Spec: loop-doctor — read the harness's own telemetry and name the fault
 
-- **Status:** Draft v0.1
+- **Status:** Done v1.0
 - **Owner:** Matt (design by Claude; executor TBD)
 - **Constitution:** `specs/constitution.md` + `specs/amendments.md` (v1.3.0) (+ `/CLAUDE.md` Core Mandates)
 - **Touches:** new `scripts/loop-doctor.sh`; new `specs/loop-doctor/{tasks.txt,verify.sh,fixtures/}`.
