@@ -90,25 +90,65 @@ def store_bases(repo, kind):
     return [d] if os.path.isdir(d) else []
 
 
-def harness_roots(base, leaf_glob):
+# Executor run-directory prefixes. Every loop names its run dir `<agent>-<pid>`, and the
+# agent is whatever RALPH_AGENT was — `qwen` for ralph-qwen.sh, `codex` for ralph-codex.sh.
+#
+# This used to be the bare literal "qwen-*" at all three enumeration sites, which meant every
+# codex run was invisible to store 3: the dirs were written, and nothing ever listed them.
+# The twins are supposed to be interchangeable (run-regression-guard AC11 exists to keep them
+# from drifting), so an index that can only see one of them under-reports by whole runs.
+RUN_GLOBS = ("qwen-*", "codex-*")
+
+
+def glob_runs(d):
+    """Every `<agent>-<pid>` run directory directly under `d`, sorted, any executor."""
+    hits = []
+    for g in RUN_GLOBS:
+        hits += glob.glob(os.path.join(d, g))
+    return sorted(hits)
+
+
+def run_name(r):
+    """The run directory's name as it exists on disk, for a record from any store.
+
+    Records built from store 3 carry it verbatim. Records that only ever appeared in the
+    status store (store 2) have no directory, so fall back to composing it — using that
+    record's own agent, never a hardcoded one.
+    """
+    return r.get("run_dir") or "{}-{}".format(r.get("agent") or "qwen", r.get("pid"))
+
+
+def harness_roots(base, leaf_globs=RUN_GLOBS):
     """Every directory under `base` that may hold run artefacts, old layout and new.
 
-    Returns [(path, repo_or_None)] — repo is the scoping directory name when the
-    artefacts came from the repo-scoped layout, None when they were flat.
+    Returns [(path, scope_or_None)] — scope is the containing directory's name when the
+    artefacts were one level down, None when they sat flat in `base`.
+
+    The scope level carries whatever the writer scoped by. It was the REPO under #194's
+    `~/.harness/<repo>/` layout; in a target repo's own `.evidence/` the repo is already
+    the root, so the level is the SPEC SLUG that ralph-log.sh/ralph-status.sh write. Both
+    read the same way — one level, named for the thing the runs below it have in common —
+    which is why this function needed no change to discover the nested layout.
     """
+    if isinstance(leaf_globs, str):         # tolerate a single glob, as before
+        leaf_globs = (leaf_globs,)
     roots = []
     if not os.path.isdir(base):
         return roots
-    if glob.glob(os.path.join(base, leaf_glob)):
+
+    def has_run(d):
+        return any(glob.glob(os.path.join(d, g)) for g in leaf_globs)
+
+    if has_run(base):
         roots.append((base, None))          # old flat layout
     for entry in sorted(os.listdir(base)):
         d = os.path.join(base, entry)
         if not os.path.isdir(d) or not REPO_DIR_RE.match(entry):
             continue
-        if entry.startswith("qwen-") or entry.startswith("codex-"):
-            continue                        # that's a run dir, not a repo scope
-        if glob.glob(os.path.join(d, leaf_glob)):
-            roots.append((d, entry))        # repo-scoped layout
+        if any(entry.startswith(g[:-1]) for g in RUN_GLOBS):
+            continue                        # that's a run dir, not a scope
+        if has_run(d):
+            roots.append((d, entry))        # scoped layout (repo, or spec slug)
     return roots
 
 # TASK LABEL GRAMMAR — one definition, because there is more than one dialect in the wild
@@ -214,6 +254,12 @@ def load_status(repo):
         if m:
             task = m.group(1)
         runs[pid] = {
+            # `agent` and `spec` are written by ralph-status.sh and were being dropped here.
+            # Without `agent`, rendering a status-only run fell back to a hardcoded "qwen-",
+            # naming a directory that does not exist for every codex run. `spec` is the scope
+            # the run dirs are now filed under, so carrying it lets a reader go from an index
+            # row straight to the right directory instead of searching for the pid.
+            "agent": d.get("agent"), "spec": d.get("spec"),
             "pid": pid, "task": task, "repo": d.get("repo"), "branch": d.get("branch"),
             "task_index": d.get("task_index"), "total_tasks": d.get("total_tasks"),
             "attempt": d.get("attempt"), "max_attempts": d.get("max_attempts"),
@@ -275,12 +321,17 @@ def load_log_dirs(evid, repo):
     out = {}
     bases = []
     for b in store_bases(repo, "logs"):
-        bases += [(r, "logs", sc) for r, sc in harness_roots(b, "qwen-*")]
+        bases += [(r, "logs", sc) for r, sc in harness_roots(b)]
     bases += [(r, "evidence", sc)
-              for r, sc in harness_roots(os.path.join(evid, "attempts"), "qwen-*")]
-    for base, where, scope_repo in bases:
-        for d in sorted(glob.glob(os.path.join(base, "qwen-*"))):
-            pid = os.path.basename(d).split("-", 1)[1]
+              for r, sc in harness_roots(os.path.join(evid, "attempts"))]
+    for base, where, scope in bases:
+        for d in glob_runs(base):
+            # `<agent>-<pid>`. split on the FIRST dash: the agent never contains one, and a
+            # pid never does either, so this is exact. It is also why the spec slug is a
+            # DIRECTORY level rather than part of this name — folding it in here would make
+            # the pid "asset-ladder-37173" and silently match no status file.
+            name = os.path.basename(d)
+            agent, pid = name.split("-", 1)
             task, project, files = scan_log_dir(d)
             logs = [f for f in files if f.endswith(".log")]
             diffs = [f for f in files if f.endswith(".diff")]
@@ -329,6 +380,10 @@ def load_log_dirs(evid, repo):
                 "pid": pid, "attempt_logs": 0, "failed_diffs": 0, "stillborn": 0,
                 "task_guess": None, "project_guess": None, "where": [], "mtime": None,
                 "by_task": {},
+                # The directory's real name and the level it was found under. Rendering used to
+                # rebuild the name as f"qwen-{pid}", which is a lie for a codex run and would
+                # send a reader looking for a path that does not exist. Carry what was seen.
+                "agent": agent, "run_dir": name, "scope": scope,
             })
             for label, counts in per_task.items():
                 slot = rec["by_task"].setdefault(
@@ -563,7 +618,8 @@ def build(repo, evid, project_names, spec=None):
         if pid not in seen_pids:
             runs[(pid, None)] = {"pid": pid, "task": st.get("task"), "project": st.get("repo"),
                                  "task_source": "status", "status": st, "attempt_logs": 0,
-                                 "failed_diffs": 0, "stillborn": 0, "where": [], "mtime": None}
+                                 "failed_diffs": 0, "stillborn": 0, "where": [], "mtime": None,
+                                 "agent": st.get("agent")}
 
     ours = {p for p in project_names}
     runs_by_task = defaultdict(list)
@@ -639,7 +695,13 @@ def build(repo, evid, project_names, spec=None):
             "committed_at": last["at"] if last else None,
             "requeued": len(cs) > 1,
             "diff": diffstat(repo, last["sha"]) if last else None,
+            # `agent`/`run_dir`/`spec` ride along so a row can NAME the directory it came from.
+            # This projection is a whitelist, so anything not listed here is dropped — which is
+            # how the rendered name ended up being rebuilt from a hardcoded prefix downstream.
             "runs": [{"pid": r["pid"], "attempt_logs": r.get("attempt_logs"),
+                      "agent": r.get("agent") or (r.get("status") or {}).get("agent"),
+                      "run_dir": r.get("run_dir"),
+                      "spec": (r.get("status") or {}).get("spec"),
                       "failed_diffs": r.get("failed_diffs"),
                       "stillborn": r.get("stillborn"),
                       "task_source": r.get("task_source"),
@@ -793,7 +855,7 @@ def render(data, repo):
                 verdict = "PASS" if verdict is True else ("FAIL" if verdict is False else "—")
                 when = ts(run["started"]) if run["started"] else (
                     ts(run["mtime"]) + "~" if run.get("mtime") else "—")
-                A(f"    - `qwen-{run['pid']}` · {when} · {dur(run['started'], run['updated'])} · "
+                A(f"    - `{run_name(run)}` · {when} · {dur(run['started'], run['updated'])} · "
                   f"{n(run['attempt_logs'])} attempt logs / {n(run['failed_diffs'])} failed-diffs "
                   f"· phase `{n(run['phase'])}` · verify {verdict} "
                   f"· task id via {n(run['task_source'])} · {tag}")
@@ -867,7 +929,7 @@ def render(data, repo):
           "These are almost certainly pre-convention leftovers:")
         A("")
         for r in data["foreign_runs"]:
-            A(f"- `qwen-{r['pid']}` → `{r.get('project')}`")
+            A(f"- `{run_name(r)}` → `{r.get('project')}`")
         A("")
     if data["unknown_runs"]:
         A(f"**{len(data['unknown_runs'])} runs cannot be attributed to a task** — no status file "
@@ -876,7 +938,7 @@ def render(data, repo):
         A("| pid | attempt logs | failed diffs | project |")
         A("|---|---|---|---|")
         for r in sorted(data["unknown_runs"], key=lambda x: x.get("mtime") or 0):
-            A(f"| `qwen-{r['pid']}` | {n(r.get('attempt_logs'))} | {n(r.get('failed_diffs'))} "
+            A(f"| `{run_name(r)}` | {n(r.get('attempt_logs'))} | {n(r.get('failed_diffs'))} "
               f"| {n(r.get('project'))} |")
         A("")
     if data["findings"] is None:
