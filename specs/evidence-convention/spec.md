@@ -46,13 +46,19 @@ to any task, permanently.
 └── .evidence/                   the harness writes here
     ├── index.md / index.jsonl   distilled record — COMMITTED
     ├── metrics.jsonl            one row per task — COMMITTED
-    ├── status/                  pid → task heartbeats — COMMITTED
+    ├── status/<spec-slug>/      <agent>-<pid>.json heartbeats — COMMITTED
     ├── judge-ledger.jsonl       findings + decisions — COMMITTED
-    └── runs/                    raw transcripts — GITIGNORED
+    └── runs/<spec-slug>/        <agent>-<pid>/ raw transcripts — GITIGNORED
 ```
 
 A spec directory may be named for a feature or `initial_implementation`. The distinction is
 naming only; the harness treats them identically. `specs/*/` is discovered, never enumerated.
+
+**`<spec-slug>` is the spec directory's basename**, and both stores are filed under it so a
+feature's whole record is one directory walk rather than a join against another store — the same
+key `judge/<spec>/` and `supervisor/<spec>/` already use. The leaf stays exactly `<agent>-<pid>`,
+because every reader parses the pid out of it. Added by `specs/evidence-spec-nesting`, which owns
+that level and the sweep depth it requires; see its §8 for the two ways to get it wrong quietly.
 
 **Why `.evidence/` is a dotfolder in the repo.** It is metadata *about* the project rather
 than part of it, so it is hidden — but it is *in the repo*, because a record that does not
