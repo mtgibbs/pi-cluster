@@ -141,7 +141,7 @@ paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this tim
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
       retry_record "$out"
-      scripts/loop-index.py --repo "$ROOT" 2>&1 || { echo "WARN: loop-index.py failed"; }
+      scripts/loop-index.py --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 || { echo "WARN: loop-index.py failed"; }
       break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2

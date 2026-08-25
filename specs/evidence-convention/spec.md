@@ -100,6 +100,48 @@ written, `runs/` is free to expire.
 | `log_task()` handles both task-line dialects | `ralph-log.sh` | `T1: …` and `T01 kit-package: …` both yield a clean label |
 | the judge ledger sits at `git rev-parse --git-path ralph-judge` | `ralph-judge.sh:58` | resolves differently in a linked worktree than in the main checkout; search both |
 
+## 6b. A task that edits the running loop must be last, and the loop re-invoked
+
+**Observed 2026-08-24, first supervised run.** All three tasks passed verify, then the run
+exited 2 with:
+
+```
+scripts/ralph-qwen.sh: line 198: syntax error: unexpected end of file
+```
+
+`bash -n` on the committed file is clean. Bash reads a script **incrementally**, by byte
+offset, so rewriting `ralph-qwen.sh` while bash is executing it leaves the running shell
+reading the *new* file from an offset that lands mid-token. The work was correct and
+committed; the process that made it died on its own edit.
+
+Two rules follow, and neither is optional:
+
+1. A task that modifies the executor script it runs under is **ordered last** in
+   `tasks.txt`.
+2. After such a task, the loop is **re-invoked**, never resumed. A nonzero exit at that
+   point is expected and is not evidence of a defect — check `bash -n` on the file before
+   treating it as one.
+
+`log_init`/`hb_init` resolve their roots once at startup (`ralph-qwen.sh:74`), so a run
+that changes those defaults still records itself in the OLD location. The change takes
+effect on the next invocation. That is not a bug; it just means the evidence for the run
+that moved the evidence lives where the evidence used to be.
+
+## 6c. Task labels are unique only within a spec directory
+
+25 of pi-cluster's `tasks.txt` files define a `T1`. A tool that indexes a whole repo by
+bare label merges unrelated features and reports every one of them as requeued —
+`loop-index.py` did exactly that on its first run here, turning three real tasks into nine
+with false collision flags.
+
+`loop-index.py` therefore takes `--spec`, and the loop passes its own `SPEC_DIR`. The
+commit walk is bounded at the spec directory's introducing commit, which is derivable
+(`git log --diff-filter=A -- <spec>/spec.md`) and needs no new metadata.
+
+`notes-from-hearing` never hit this because it had exactly one spec directory, so `T01`
+through `T28` happened to be globally unique. That is the hazard of building a convention
+against a single example.
+
 ## 7. Norms · [N]
 
 - bash 3.2 (macOS): no `declare -A`, no `mapfile`.

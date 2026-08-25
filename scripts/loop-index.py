@@ -111,7 +111,18 @@ def harness_roots(base, leaf_glob):
             roots.append((d, entry))        # repo-scoped layout
     return roots
 
-TASK_RE = re.compile(r"\b(T\d{2}[a-z]?)\b")
+# TASK LABEL GRAMMAR — one definition, because there is more than one dialect in the wild
+# and hardcoding either one is how this tool ended up unable to index the repo it lives in:
+#
+#   bare-label     tasks.txt "T1: create scripts/..."    commit "<agent>: T1 — ..."
+#   label+slug     tasks.txt "T01 kit-package: ..."      commit "<agent>: T01 kit-package — ..."
+#
+# So: T, one to three digits, optional suffix letter. The slug after it is OPTIONAL, and
+# the agent prefix is any "word(word):" rather than literally ralph(qwen) — a tool that
+# names one executor is a tool that stops working when you change executors.
+LABEL = r"T\d{1,3}[a-z]?"
+AGENT_PREFIX = r"(?:[a-z]+\([a-z0-9-]+\):\s*)?"
+TASK_RE = re.compile(rf"\b({LABEL})\b")
 
 
 def sh(args, cwd=None):
@@ -122,10 +133,30 @@ def sh(args, cwd=None):
 # --------------------------------------------------------------------------
 # store 1 — git: the task commits, and the gate commits between them
 # --------------------------------------------------------------------------
-def load_commits(repo):
+def spec_birth(repo, spec):
+    """The commit that introduced this spec dir — a derivable lower bound for its work.
+
+    Task labels are unique only WITHIN a spec directory: pi-cluster has 25 different
+    tasks.txt files that each define a T1. Indexing a whole repo by bare label therefore
+    merges unrelated features and reports every one of them as "requeued". Bounding the
+    commit walk at the spec's own birth is what makes the label unambiguous again.
+    """
+    if not spec:
+        return None
+    out = sh(["git", "log", "--diff-filter=A", "--format=%H", "--reverse",
+              "--", os.path.join(spec, "spec.md")], cwd=repo).split()
+    return out[0] if out else None
+
+
+def load_commits(repo, spec=None):
     """Every commit on this branch, tagged with the task id it names (if any)."""
     fmt = "%H%x1f%h%x1f%aI%x1f%s%x1f%b%x1e"
-    out = sh(["git", "log", "--reverse", f"--format={fmt}"], cwd=repo)
+    args = ["git", "log", "--reverse", f"--format={fmt}"]
+    birth = spec_birth(repo, spec)
+    if birth:
+        args.append(f"{birth}~1..HEAD" if sh(["git", "rev-parse", f"{birth}~1"],
+                                             cwd=repo).strip() else "HEAD")
+    out = sh(args, cwd=repo)
     commits = []
     for rec in out.split("\x1e"):
         rec = rec.strip("\n")
@@ -135,7 +166,7 @@ def load_commits(repo):
         if len(parts) < 4:
             continue
         full, short, when, subject = parts[0], parts[1], parts[2], parts[3]
-        m = re.match(r"^(?:ralph\(qwen\):\s*)?(T\d{2}[a-z]?)\s+([a-z0-9-]+)", subject)
+        m = re.match(rf"^{AGENT_PREFIX}({LABEL})(?:\s+([a-z0-9-]+))?(?=[\s:—-]|$)", subject)
         kind = "task" if m else (
             "gate" if subject.startswith("gate:") else
             "judge" if subject.startswith("judge:") else
@@ -231,7 +262,7 @@ def scan_log_dir(d):
                 project = m.group(1)
         if task is None:
             # the task line the executor was handed, e.g. "T07 session-controller:"
-            m = re.search(r"\b(T\d{2}[a-z]?)\s+[a-z0-9-]{3,30}\s*:", head)
+            m = re.search(rf"\b({LABEL})(?:\s+[a-z0-9-]{{3,30}})?\s*:", head)
             if m:
                 task = m.group(1)
         if task and project:
@@ -289,10 +320,10 @@ def load_supervisor(evid):
             text = open(p, errors="replace").read()
         except Exception:
             continue
-        m = re.match(r"sup-(T\d{2}[a-z]?)", name)
+        m = re.match(rf"sup-({LABEL})", name)
         task = m.group(1) if m else None
         if task is None:
-            m = re.search(r"TASK:\s*(T\d{2}[a-z]?)\b", text)
+            m = re.search(rf"TASK:\s*({LABEL})\b", text)
             task = m.group(1) if m else None
         # Two different files live in this directory and they are not the same thing:
         #   sup-Tnn.log       the SUPERVISOR's own event log — "[supervise HH:MM:SS] ..."
@@ -415,8 +446,8 @@ def load_metrics(evid, repo):
 # --------------------------------------------------------------------------
 # the join
 # --------------------------------------------------------------------------
-def build(repo, evid, project_names):
-    commits = load_commits(repo)
+def build(repo, evid, project_names, spec=None):
+    commits = load_commits(repo, spec)
     status = load_status(repo)
     logdirs = load_log_dirs(evid, repo)
     sup_by_task, sup_orphans = load_supervisor(evid)
@@ -474,7 +505,9 @@ def build(repo, evid, project_names):
     # shows work that succeeded.
     queued = {}
     task_files = []
-    for sd in sorted(glob.glob(os.path.join(repo, SPECS, "*"))):
+    spec_dirs = [os.path.join(repo, spec)] if spec else \
+        sorted(glob.glob(os.path.join(repo, SPECS, "*")))
+    for sd in spec_dirs:
         if not os.path.isdir(sd):
             continue
         for fn, why in (("tasks.txt", "queued"), ("tasks-blocked.txt", "blocked")):
@@ -483,7 +516,7 @@ def build(repo, evid, project_names):
         if not os.path.exists(p):
             continue
         for line in open(p, errors="replace"):
-            m = re.match(r"\s*(T\d{2}[a-z]?)\s+([a-z0-9-]+)", line)
+            m = re.match(rf"\s*({LABEL})(?:\s+([a-z0-9-]+))?\s*[:—-]", line)
             if m:
                 queued.setdefault(m.group(1), {"slug": m.group(2), "state": why,
                                                "spec": _spec})
@@ -804,6 +837,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--evid", default=None)
     ap.add_argument("--repo", default=os.getcwd())
+    ap.add_argument("--spec", default=None,
+                    help="scope to one spec dir (e.g. specs/foo). REQUIRED for correctness "
+                         "in a repo with more than one, since task labels are unique only "
+                         "within a spec dir.")
     ap.add_argument("--project", action="append", default=None,
                     help="directory name(s) that count as this project (repeatable)")
     ap.add_argument("-o", "--out", default=os.path.join(EVIDENCE, "index.md"))
@@ -816,7 +853,7 @@ def main():
     # allowlist existed only because the store was global; under the convention the
     # directory IS the scope, so the check is the repo's own name plus any worktree.
     projects = args.project or repo_names(args.repo)
-    data = build(args.repo, args.evid, projects)
+    data = build(args.repo, args.evid, projects, args.spec)
 
     md = render(data, args.repo)
     out = os.path.join(args.repo, args.out)

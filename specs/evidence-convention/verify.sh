@@ -77,10 +77,29 @@ done
 echo "== T3  the record is distilled by the harness, not by the project (AC-2)"
 for f in scripts/ralph-qwen.sh scripts/ralph-codex.sh; do
   if [ ! -f "$f" ]; then pend "$(basename "$f")-indexes-after-task" "$f absent"; continue; fi
-  grep -q 'loop-index.py' "$f" \
-    && ok "$(basename "$f")-indexes-after-task" presence \
-    || pend "$(basename "$f")-indexes-after-task" "no loop-index.py call"
+  if ! grep -q 'loop-index.py' "$f"; then
+    pend "$(basename "$f")-indexes-after-task" "no loop-index.py call"
+  elif grep -q 'loop-index.py.*--spec' "$f"; then
+    ok "$(basename "$f")-indexes-after-task" presence
+  else
+    # §6c: 25 tasks.txt in this repo define a T1. Indexing unscoped merges unrelated
+    # features and flags all of them as requeued. The call exists and is wrong -> FAIL.
+    no "$(basename "$f")-indexes-after-task" "calls loop-index.py without --spec; task labels are unique only within a spec dir (§6c)"
+  fi
 done
+# §6b, and it is a real ordering constraint, not a style note: a task that rewrites the
+# script bash is currently executing kills the run mid-flight. Keep it last.
+if [ -f specs/evidence-convention/tasks.txt ]; then
+  selfedit=$(grep -n 'ralph-qwen.sh' specs/evidence-convention/tasks.txt | head -1 | cut -d: -f1)
+  total=$(grep -c . specs/evidence-convention/tasks.txt)
+  if [ -z "$selfedit" ]; then
+    ok "self-editing-task-is-last" negative
+  elif [ "$selfedit" = "$total" ]; then
+    ok "self-editing-task-is-last" negative
+  else
+    no "self-editing-task-is-last" "the task editing ralph-qwen.sh is line $selfedit of $total; bash reads scripts incrementally and the run dies mid-edit (§6b)" negative
+  fi
+fi
 
 echo "== the tools are generic (AC-3, AC-5) — negative, always armed"
 # AC-5 is the whole point of the spec: a project name in harness tooling is the defect.
