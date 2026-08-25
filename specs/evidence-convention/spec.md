@@ -142,6 +142,36 @@ commit walk is bounded at the spec directory's introducing commit, which is deri
 through `T28` happened to be globally unique. That is the hazard of building a convention
 against a single example.
 
+## 6d. Evidence is metadata. Its presence is not proof that work happened.
+
+**Observed 2026-08-24, second and third supervised runs.** Putting the record into the
+repo — correct for durability — put the harness's own bookkeeping onto the surface the
+harness measures. Two control-flow decisions broke on it, both by asking `git status` about
+the whole tree:
+
+| Reads | Asks | Broke because |
+|---|---|---|
+| `ralph-qwen.sh` no-op guard | *did the executor do work?* | its own status heartbeat landed in `.evidence/status/`, so a task with nothing left to do "changed something" and committed a T1 whose entire content was one status JSON |
+| `ralph-judge.sh:70` preflight | *is the worktree clean?* | `loop-index.py` runs after every task by design (T3), so the tree is guaranteed dirty exactly when the judge starts. It refused to run at all |
+
+The judge was right to refuse — `fail-closed` is the correct posture. The rule was never
+wrong; the tree became dirty for a reason the rule could not have anticipated.
+
+**The rule this imposes.** *Did the work change* and *was the evidence collected* are two
+questions, and the loop answered both by reading one surface. Separate them:
+
+- The **work** question scopes to the work: `git status --porcelain -- . ':!.evidence'`.
+- The **evidence** question gets its own positive assertion — after a task commits,
+  `.evidence/index.jsonl` must contain a row for that task label.
+
+The second half is not optional. `loop-index.py` is invoked best-effort (`|| WARN`), so
+excluding `.evidence/` from the work question without adding the evidence question just
+moves the blind spot: a silently broken indexer would look exactly like a healthy run.
+
+**Stated as an invariant, because it now has two known violations and will have more:**
+no control-flow decision may treat a change under `.evidence/` as evidence that work
+happened. Collect the metadata, verify you collected it, and never read it as proof.
+
 ## 7. Norms · [N]
 
 - bash 3.2 (macOS): no `declare -A`, no `mapfile`.

@@ -67,7 +67,7 @@ die(){ echo "ralph-judge: $2" >&2; outcome="${3:-aborted}"; exit "$1"; }
 
 # ---- preflight (constitution: clean isolated worktree) ---------------------------------
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die 1 "not inside a git work tree"
-[ -z "$(git status --porcelain)" ] || die 1 "worktree not clean (untracked included) — refusing to run"
+[ -z "$(git status --porcelain -- . ':!.evidence')" ] || die 1 "worktree not clean (untracked included) — refusing to run"
 [ -f "$SPEC_DIR/spec.md" ] && [ -f "$SPEC_DIR/verify.sh" ] || die 1 "$SPEC_DIR lacks spec.md/verify.sh"
 command -v jq >/dev/null 2>&1 || die 1 "jq is required"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -125,7 +125,7 @@ gate(){
 
 restore(){ # <before_head> — exact restore incl. staged + untracked state
   git reset --hard "$1" >/dev/null && git clean -fd >/dev/null
-  [ -z "$(git status --porcelain)" ] || die 1 "restore left a dirty tree — refusing to continue"
+  [ -z "$(git status --porcelain -- . ':!.evidence')" ] || die 1 "restore left a dirty tree — refusing to continue"
 }
 
 # ---- baseline: two consecutive identical converged runs (flake rule) --------------------
@@ -159,7 +159,7 @@ apply_cycle(){ # <finding-json> <round> -> 0 accepted, 1 rejected-continue; may 
   # this also makes the later `git add -A` provably equivalent to scoped staging.
   local want stray
   want="$(printf '%s' "$f" | jq -r .file)"
-  stray="$(git status --porcelain | awk '{print $NF}' | grep -v -x "$want" || true)"
+  stray="$(git status --porcelain -- . ':!.evidence' | awk '{print $NF}' | grep -v -x "$want" || true)"
   if [ -n "$stray" ]; then
     restore "$before_head"
     ledger_add "$(rejrec scope-violation)"
