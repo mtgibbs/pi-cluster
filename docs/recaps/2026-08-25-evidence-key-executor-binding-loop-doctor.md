@@ -146,10 +146,24 @@ the liveness rule in its own header and nothing had ever applied it.
 > **The dogfood that failed, and proved the point.** The intended route was to hand
 > `specs/loop-doctor` to the loop — spec + eval already existed, which is exactly what the north
 > star says the harness should just execute. `oc` is installed and keyed, so a smoke test ran
-> first: it **hung for three minutes and produced nothing**, because LiteLLM is unreachable from
-> this container (egress allowlist). That is `fault: executor-stillborn` — one of the nine
-> classes the tool being built exists to name. The harness's own diagnostic gap ate the attempt
-> to build the harness's diagnostic. Built directly instead.
+> first: it **hung and produced nothing**, verified over 8+ minutes. That is
+> `fault: executor-stillborn` — one of the nine classes the tool being built exists to name. The
+> harness's own diagnostic gap ate the attempt to build the harness's diagnostic. Built directly
+> instead.
+>
+> **The cause, corrected 2026-08-26 (the first diagnosis in this recap was wrong).** It is *not*
+> an egress block. The inference plane is healthy from this container: `http://litellm:4000/v1`
+> — the exact `baseURL` in `~/.config/opencode/opencode.jsonc` — answers `/v1/models` in **8 ms**
+> and completes `hot-coder` in **0.5 s**, streaming and non-streaming both. The original test hit
+> the *public* ingress `ai.lab.mtgibbs.dev`, which is unreachable from here, and concluded the
+> plane was down. **Testing the wrong URL and generalising from it is the same error as trusting
+> a green check that never ran** (§6).
+>
+> The real stall is inside opencode. `~/.local/share/opencode/log/opencode.log` shows it reach
+> `stream providerID=beelink modelID=hot-coder … agent=build` and emit nothing after. So the
+> ralph loop **cannot currently be driven from `coding-harness-claude`**, which is why "run a real
+> overnight loop against this" (§9) is not something this container can do unaided. Container-level
+> fault → report, don't self-patch (`[[feedback_container_config_from_outside]]`).
 
 ## 5. My own guard fired at a stranger (#201)
 
