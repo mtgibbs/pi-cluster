@@ -94,7 +94,7 @@ Two rules learned the expensive way during the token-bench campaign:
 - **An optimization is a hypothesis until an A/B shows otherwise.** Attach the hardware and the
   configuration to every number you record, or it isn't a measurement.
 
-`scripts/token-bench/` is the only measured harness we own (arms, regex grading, `results.jsonl`).
+`harness:scripts/token-bench/` is the only measured harness we own (arms, regex grading, `results.jsonl`).
 It currently varies *context strategy* with the model held fixed. Inverting that — hold the arm
 fixed, vary the model — would turn it into a proper model-comparison rig. **Future work, deliberately
 not built** (2026-08-11 scoping call); until then §4 is manual and that's fine.
@@ -135,5 +135,5 @@ Append a row whenever a candidate is decided. Backfilled from `docs/model-eval-2
 ---
 
 **See also:** `docs/beelink-ai-stack.md` (the stack), `docs/model-eval-2026-05.md` (the worked example
-this generalises), `docs/research/kv-sizing-and-sessions.md` (the math), `scripts/token-bench/README.md`
+this generalises), `docs/research/kv-sizing-and-sessions.md` (the math), `harness:scripts/token-bench/README.md`
 (the harness), `.claude/skills/coding-agent-ops/SKILL.md` (driving `oc` once a model is promoted).

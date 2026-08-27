@@ -1,3 +1,0 @@
-running the gate
-  PASS  alpha
-  PASS  beta

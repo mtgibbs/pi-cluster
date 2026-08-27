@@ -40,7 +40,7 @@ The simulation stands in for a JSON feed of per-agent status. Each agent needs:
 |---|---|---|
 | `id` / `name` / `role` | identity | static |
 | `state` | `idle` \| `running` | tmux `pane_current_command`; heartbeat `phase` |
-| `phase` | picking up / thinking / verifying / passed / retry / stopped | ralph heartbeat (`scripts/ralph-status.sh`) |
+| `phase` | picking up / thinking / verifying / passed / retry / stopped | ralph heartbeat (`harness:scripts/ralph-status.sh`) |
 | `task`, `task_index`, `total_tasks`, `attempt`, `max_attempts` | current work | ralph heartbeat |
 | `tokens` | tokens this session | opencode.db (qwen) / Claude · Codex JSONL |
 | `activity` (0..1) | drives brightness/spin/radius | derived: idle≈0.03, think≈0.5, flare≈0.95, or a real signal |

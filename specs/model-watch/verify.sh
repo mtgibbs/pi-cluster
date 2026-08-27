@@ -5,7 +5,7 @@
 #   STRICT=1 bash specs/model-watch/verify.sh   # final pass: pending work becomes failure
 #   LIVE=1   bash specs/model-watch/verify.sh   # adds the real-HuggingFace smoke (slow, flaky)
 #
-# Three verdicts (specs/TEMPLATE.md §11): ok / no / pend. Checks presence-gate on the
+# Three verdicts (harness:specs/TEMPLATE.md §11): ok / no / pend. Checks presence-gate on the
 # ARTIFACT, so each arms itself as soon as its target exists, in whatever build order.
 #
 # WHY THE FIXTURES EXIST: a previous run passed a structure-only gate while shipping

@@ -99,6 +99,37 @@ Until then, the code stays here. The value of the seam is that extraction will b
 (move the portable side, leave the instance config, update import paths) rather than a
 design exercise.
 
+#### The trigger fired — for the *coding* harness, 2026-08-26
+
+This ADR's litmus ("would a different cluster use this unchanged?") and its trigger wording
+were written for review-hub, but the first thing to actually satisfy them was the **coding
+harness** — the ralph build loop, its executor bindings, the judge loop, the telemetry, and
+the SDD methodology. `notes-from-hearing` adopted the convention (a project brings
+`specs/<feature>/{spec.md,tasks.txt,verify.sh}` and nothing else, pi-cluster #195), deleted
+its copy of the harness, and could then not be dispatched to at all. The trigger had fired and
+nobody had noticed.
+
+Extracted to **[`mtgibbs/harness`](https://github.com/mtgibbs/harness)** with history preserved
+(filter-branch over the portable paths, 1053 commits → 107). pi-cluster dropped its copies in
+Phase 2; what stayed is the instance — `scripts/harness` (which names *this* Beelink and *these*
+containers), `scripts/oc`, the deploy scripts, the doc generators, `reviewhub`, and 27 specs.
+
+Two findings worth carrying back into this ADR:
+
+- **The gates caught two misclassifications the plan got wrong.** `harness-multi-repo` gates
+  `scripts/harness` and `codesheet-docs` gates pi-cluster's `scripts/README.md` — both are
+  instance config by this ADR's own litmus, and both came back. A seam that is *tested* by
+  gates beats one that is only *described*.
+- **Extraction proved the framework had been gated by accident of address.** Sitting next to
+  pi-cluster's `specs/`, the harness looked covered. It was not: `loop-metrics.sh` had never
+  once worked in a container (`stat -f` means *filesystem status* on Linux, so it exits zero
+  and an `|| stat -c` fallback never fires). That is what "portable in place" was worth, and
+  it is the strongest argument for extracting review-hub sooner rather than later.
+
+**review-hub itself has NOT been extracted** — `scripts/reviewhub/`, `triggerable_judge.py`
+and `specs/validators/` all remain here, and its own trigger (a second consumer of the *review*
+framework) has not fired. This subsection records a precedent, not a completed spin-off.
+
 ### Pending framework-grade feature: rollup Check Run
 
 An always-on "review-hub" summary Check Run posted by the receiver itself (not per-validator)

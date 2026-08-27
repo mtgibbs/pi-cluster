@@ -40,17 +40,17 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
   mistake in this repo's loop history** — it has failed a gate on the first attempt of a
   task in two separate runs (`qwen-61568` T1, `qwen-10668` T2), each time on a task whose own
   instructions said, in capitals, not to use it. A task line does not reliably suppress it; this is why the rule lives here instead.
-  When you need a map: `awk` (see `scripts/gate-score.sh`), a temp state file (see
-  `scripts/ralph-retry.sh`), or parallel indexed arrays.
+  When you need a map: `awk` (see `harness:scripts/gate-score.sh`), a temp state file (see
+  `harness:scripts/ralph-retry.sh`), or parallel indexed arrays.
 - **One worktree, one branch — stage only your own files.** Work inside an isolated
   `git worktree` off `origin/main`, **never the operator's primary checkout** (it may hold
-  pre-staged changes that aren't yours). The `ralph-qwen` loop sets the worktree up for you;
+  pre-staged changes that aren't yours). The build loop sets the worktree up for you;
   in an **interactive `oc` session you create it yourself**:
   `git fetch origin && git worktree add -b <topic> /tmp/oc-<topic> origin/main`.
   **Before every commit:** `git add` only the paths YOU changed (never `git add -A` /
   `git commit -a`), then `git status` to confirm nothing else is staged. If your branch is
   wrong or anything unexpected is staged, **STOP and surface it.** Never `git switch`/`checkout`
-  away; never push to `main`. (Full rule: `specs/constitution.md` → "Git discipline — one
+  away; never push to `main`. (Full rule: the harness constitution → "Git discipline — one
   worktree per agent"; global rule: `~/.config/opencode/memory/AGENTS.rules.md`.)
 
 ## Your workflow
@@ -61,6 +61,11 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
 3. Before declaring done, run the spec's §8 verification (or `verify.sh`). Don't claim a
    result you can't verify — if a check fails or you're unsure, **stop and say so.**
 
-> Deeper house rules live in `specs/constitution.md` and the full topology in
-> `ARCHITECTURE.md` (huge — do **not** load it wholesale; the spec gives you the slice you
-> need). Read them only if a spec explicitly points you there.
+> Deeper house rules live in the harness constitution — `specs/{constitution,design-principles,
+> amendments}.md` in **`mtgibbs/harness`**, which travels with the loop rather than with this
+> repo — and the full topology in `ARCHITECTURE.md` (huge — do **not** load it wholesale; the
+> spec gives you the slice you need). Read them only if a spec explicitly points you there.
+>
+> **What this repo owes you is `specs/<feature>/{spec.md,tasks.txt,verify.sh}` and nothing
+> else.** If you are looking for the loop, a binding, the judge, or the SDD template inside
+> this checkout, you are in the wrong repo — they are all in `mtgibbs/harness`.

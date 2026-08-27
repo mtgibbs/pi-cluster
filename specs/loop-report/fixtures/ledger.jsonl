@@ -1,3 +1,0 @@
-{"id":"a","decision":"accepted","round":1}
-{"id":"c","decision":"rejected","reason":"gate-regressed","round":1}
-{"id":"b","decision":"accepted","round":2}

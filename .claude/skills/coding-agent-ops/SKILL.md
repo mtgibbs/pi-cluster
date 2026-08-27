@@ -1,6 +1,6 @@
 ---
 name: coding-agent-ops
-description: Operating the local coding agent — qwen3-coder via opencode, Claude-orchestrated, spec-driven. Use when running/troubleshooting `oc`, the ralph-qwen loop, or the laptop↔Beelink-qwen creds.
+description: Operating the local coding agent — qwen3-coder via opencode, Claude-orchestrated, spec-driven. Use when running/troubleshooting `oc`, the build/judge loops, or the laptop↔Beelink-qwen creds.
 allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 ---
 
@@ -8,7 +8,15 @@ allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 
 The operational runbook for running **qwen3-coder** as an executing coding agent under Claude
 orchestration. For the *why / findings / open decisions*, see `docs/research/local-coding-agent-sdd.md`.
-For the *SDD method* (how to write specs), see `specs/README.md`.
+For the *SDD method* (how to write specs), see `harness:specs/README.md`.
+
+> **`harness:` means [`mtgibbs/harness`](https://github.com/mtgibbs/harness), not this repo.**
+> The framework was extracted on 2026-08-26 (the trigger `docs/adr/008` set — a second repo,
+> `notes-from-hearing`, wanted it). The loop, the bindings, the judge, the telemetry, the
+> `agent-bus` CLI and the SDD methodology all live there; pi-cluster keeps the *instance* —
+> `scripts/harness` (this Beelink, these containers), `scripts/oc`, and its own `specs/`.
+> Containers resolve it as `$HARNESS_DIR` and re-clone it on every dispatch, so a harness fix
+> ships on merge with **no image rebuild**.
 
 ## What's wired (as-built)
 
@@ -19,11 +27,11 @@ For the *SDD method* (how to write specs), see `specs/README.md`.
 | Provider config | `opencode.json` (repo root) | custom `beelink` provider; model = `beelink/hot-coder` (**follows `aimode`**: 30B family / Q8 work); `instructions: ["AGENTS.md"]`; unused tools (`skill`/`task`/`todowrite`) disabled to shrink the preamble |
 | Agent brief | `AGENTS.md` (repo root) | qwen's lean operating brief — NOT `CLAUDE.md` (that's Claude-only, too big) |
 | Launcher | `scripts/oc` → `~/.local/bin/oc` | loads the key, adds a watchdog timeout to `oc run` |
-| Loop | `scripts/ralph-qwen.sh` | one-task-per-iteration, fresh context, verify-gated |
-| Heartbeat | `scripts/ralph-status.sh` (sourced by the build loop and the judge loop) | writes a live JSON status file per loop to `<repo>/.evidence/status/<spec-slug>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
-| Attempt logs | `scripts/ralph-log.sh` (sourced by both loops) | `<repo>/.evidence/runs/<spec-slug>/<agent>-<pid>/<task>-attempt<n>.{log,diff}`. Named by **task label** (`T21`), not queue position — those coincide on a cold start and diverge on any requeue, and the old name collided across every run in the root. `.diff` exists ⇔ the gate ran and said no |
-| Supervisor | `scripts/supervise.sh` | wraps `run-loop.sh`; kills + relaunches a stillborn executor (≤40 B log, no growth), snapshots the evidence first, marks the heartbeat `killed`. Never retries a *verify* failure |
-| SDD docs | `specs/{README,TEMPLATE,constitution,design-principles}.md` | the spec practice |
+| Loop | `harness:scripts/ralph-build.sh` | one-task-per-iteration, fresh context, verify-gated |
+| Heartbeat | `harness:scripts/ralph-status.sh` (sourced by the build loop and the judge loop) | writes a live JSON status file per loop to `<repo>/.evidence/status/<spec-slug>/<agent>-<pid>.json` (task, attempt, phase, verify pass/fail, updated ts) so a dashboard/collector can see loop state without attaching tmux. **Repo-scoped since 2026-08-24** — a flat root merged unrelated projects' runs and a recycled PID would have merged them silently. `hb_mark <file> <phase>` lets a supervisor stamp `killed`/`stalled`/`timeout` on a loop it just ended. Best-effort, no-op if absent. Contract in the file header |
+| Attempt logs | `harness:scripts/ralph-log.sh` (sourced by both loops) | `<repo>/.evidence/runs/<spec-slug>/<agent>-<pid>/<task>-attempt<n>.{log,diff}`. Named by **task label** (`T21`), not queue position — those coincide on a cold start and diverge on any requeue, and the old name collided across every run in the root. `.diff` exists ⇔ the gate ran and said no |
+| Supervisor | `harness:scripts/supervise.sh` | wraps `run-loop.sh`; kills + relaunches a stillborn executor (≤40 B log, no growth), snapshots the evidence first, marks the heartbeat `killed`. Never retries a *verify* failure |
+| SDD docs | `harness:specs/{README,TEMPLATE,constitution,design-principles,amendments}.md` | the spec practice |
 
 **Evidence layout — one key, four subtrees.** Everything a run leaves behind is filed under the
 **spec slug** (the spec dir's basename), so the whole record for a feature is one directory walk:
@@ -67,9 +75,9 @@ on 783 trials: **20–56% less context at equal-or-better accuracy**, ~free
 after first use via prefix caching. Full evidence:
 `docs/research/codemap-serena-token-efficiency.md`.
 
-- Generator: `scripts/gen-codesheet.mjs` (wraps `scripts/token-bench/gen-*.mjs`;
+- Generator: `harness:scripts/gen-codesheet.mjs` (wraps `harness:scripts/token-bench/gen-*.mjs`;
   picks layers from the data — pi-cluster→G, mtgibbs.xyz→S, pi-cluster-mcp→GS).
-- Resolution order: `$OC_SHEET_GEN` → `<target-repo>/scripts/gen-codesheet.mjs`
+- Resolution order: `$OC_SHEET_GEN` → `<target-repo>/harness:scripts/gen-codesheet.mjs`
   → the canonical pi-cluster checkout (`$HOME/dev/…` on the laptop, literal
   `/Users/mtgibbs/dev/…` in the harness containers). No generator → silent
   passthrough, `oc run` works anywhere.
@@ -145,12 +153,12 @@ dedicated opencode **agent**, not more coding-brief prose:
    pruned transcripts after 30 days until `cleanupPeriodDays: 365` was set (2026-07-08),
    so no Claude history exists before ~2026-06-07 — the recaps in `docs/recaps/` are the
    only record of older work.
-2. Write `specs/<feature>/spec.md` from `specs/TEMPLATE.md` (outcomes, scope, EARS §7 criteria).
+2. Write `specs/<feature>/spec.md` from `harness:specs/TEMPLATE.md` (outcomes, scope, EARS §7 criteria).
 3. Plan: resolve correctness + **granularity** (verify the exact field, not a proxy) + **design**
    (idiomatic/tasteful pattern, per `design-principles.md`) unknowns. Fold answers into §10.
 4. Write `specs/<feature>/verify.sh` — §7 compiled to a deterministic static gate (exit 0 = ok).
 5. Decompose §6 into `tasks.txt`; run on a **git worktree/branch**:
-   `scripts/ralph-qwen.sh specs/<feature>`
+   `harness:scripts/ralph-build.sh specs/<feature>`
 6. Review the diff against §7 + eyeball the rendered result (taste); merge via PR. If the
    loop stopped for a human, `ctx setup` re-indexes the failed run so the re-spec's
    prior-art pass (step 1) can cite it.
@@ -213,10 +221,10 @@ context, just a second compose service with its own volume.
 
 | Container | What it is |
 |---|---|
-| `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `scripts/ralph-qwen.sh`. Single-repo (pi-cluster). |
+| `coding-harness-qwen` | opencode + qwen, ralph-loop capable — the remote equivalent of `oc run` / `harness:scripts/ralph-build.sh`. Single-repo (pi-cluster). |
 | `coding-harness-claude` | Real Claude Code CLI. Also carries opencode/`oc`/`ralph-qwen.sh` (delegates to qwen like a laptop session), **plus `ctx`** (local agent-history search) and this laptop's synced Claude memory. **General workstation, not repo-locked** — clone anything under `/Users/mtgibbs/dev/`. |
 | `coding-harness-claude-2` | **Second, independent Claude Code instance** — same role/image as `coding-harness-claude`, own `$HOME`/repo-mirror/tmux session, so two windows can drive parallel work without sharing state. Added 2026-07-14. **Provisioned but not activated** — see below. |
-| `coding-harness-codex` | **OpenAI Codex CLI** (`codex` 0.144.6), driving the build loop via `scripts/exec-codex.sh`. Also carries opencode/`oc` (delegate down to qwen) and `ctx`. General workstation, same two-mount shape as the claude containers. Added 2026-07-20. **Provisioned but not activated** — needs its one-time login, see below. |
+| `coding-harness-codex` | **OpenAI Codex CLI** (`codex` 0.144.6), driving the build loop via `harness:scripts/exec-codex.sh`. Also carries opencode/`oc` (delegate down to qwen) and `ctx`. General workstation, same two-mount shape as the claude containers. Added 2026-07-20. **Provisioned but not activated** — needs its one-time login, see below. |
 
 **Why a third executor, and which one to reach for.** The three differ by
 *budget*, not just by model — that's the whole reason codex earns a container:
@@ -231,17 +239,17 @@ That distinction is the point. Handing work to `coding-harness-claude` saves no
 budget; handing it to `coding-harness-codex` adds a parallel lane.
 
 **Driving codex — a binding, not a second loop.** There is ONE build loop
-(`scripts/ralph-qwen.sh`); the executor is `RALPH_EXEC_CMD`, exactly as the judge loop
+(`harness:scripts/ralph-build.sh`); the executor is `RALPH_EXEC_CMD`, exactly as the judge loop
 already takes `JUDGE_CMD`/`EXECUTOR_CMD`. Run it with a strategy:
 
 ```bash
-scripts/run-loop.sh build-codex specs/<feature>    # scripts/loops/build-codex.env
+harness:scripts/run-loop.sh build-codex specs/<feature>    # harness:scripts/loops/build-codex.env
 ```
 
 `scripts/ralph-codex.sh` used to be a 204-line copy of the whole loop, and three specs carried
 rules to keep the two in sync (`run-regression-guard` AC11, `tasks-ledger` AC13,
 `ralph-retry-contract` §230). All of it existed to change one line — the executor invocation.
-Deleted in `specs/executor-binding`; adding an executor is now a binding plus a `.env`.
+Deleted in `harness:specs/executor-binding`; adding an executor is now a binding plus a `.env`.
 
 What `build-codex.env` sets, and why:
 
@@ -256,7 +264,7 @@ What `build-codex.env` sets, and why:
   describes: read-only rootfs, `cap_drop: ALL`, non-root, no socket/kubeconfig/NAS, PR-gated
   output. Nested landlock+seccomp under `cap_drop: ALL` is unreliable and buys nothing.
   **On the laptop there is no outer sandbox — override:**
-  `CODEX_SANDBOX=workspace-write scripts/run-loop.sh build-codex specs/<feature>`.
+  `CODEX_SANDBOX=workspace-write harness:scripts/run-loop.sh build-codex specs/<feature>`.
 
 **General workstation, not pi-cluster-only:** `coding-harness-claude` mounts
 `/Users/mtgibbs/dev` (not just a scratch dir) specifically so it matches the
@@ -490,6 +498,6 @@ noticing.
 ## Pointers
 
 - Research log (findings, gaps, open decisions): `docs/research/local-coding-agent-sdd.md`
-- SDD method: `specs/README.md`, `specs/TEMPLATE.md`, `specs/constitution.md`, `specs/design-principles.md`
-- Launcher + loop + cred details: `scripts/README.md`, `scripts/oc`, `scripts/ralph-qwen.sh`
+- SDD method: `harness:specs/README.md`, `harness:specs/TEMPLATE.md`, `harness:specs/constitution.md`, `harness:specs/design-principles.md`
+- Launcher + loop + cred details: `scripts/README.md`, `scripts/oc`, `harness:scripts/ralph-build.sh`
 - First worked example: `specs/homepage-refresh/` (spec.md §11 tuning log + verify.sh)
