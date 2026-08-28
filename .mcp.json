@@ -4,7 +4,7 @@
       "type": "http",
       "url": "https://mcp.lab.mtgibbs.dev/mcp",
       "headers": {
-        "X-API-Key": "${MCP_HOMELAB_KEY}"
+        "X-API-Key": "${MCP_HOMELAB_API_KEY}"
       }
     },
     "kiwix": {
