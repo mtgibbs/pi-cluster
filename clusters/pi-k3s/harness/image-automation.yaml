@@ -1,0 +1,54 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: harness-coordinator
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/harness-coordinator
+  interval: 5m0s
+  secretRef:
+    name: ghcr-credentials
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: harness-coordinator
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: harness-coordinator
+  filterTags:
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+  policy:
+    semver:
+      range: ">=0.1.0"
+---
+# Scoped to this directory, matching every other service's automation. The bot commits the tag
+# bump straight to main, which is why the image tag in deployment.yaml carries a $imagepolicy
+# setter comment — remove it and the bump silently stops happening.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: harness-coordinator
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore: update harness-coordinator to {{range .Changed.Changes}}{{.NewValue}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./clusters/pi-k3s/harness
+    strategy: Setters

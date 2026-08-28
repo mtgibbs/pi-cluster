@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_37 services · 68 workloads · 38 Flux Kustomizations · 7 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_38 services · 69 workloads · 39 Flux Kustomizations · 8 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -79,6 +79,10 @@ graph LR
   kd9c6dn["flux-notifications"]
   k1unc8vb --> kd9c6dn
   ka3ayi4["flux-system"]
+  k6vrex["harness"]
+  k1unc8vb --> k6vrex
+  kkuvy6m --> k6vrex
+  k19g0j44 --> k6vrex
   k1uuov05["homepage"]
   kkuvy6m --> k1uuov05
   k19g0j44 --> k1uuov05
@@ -212,6 +216,13 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - ingress: `board.lab.mtgibbs.dev`
 
 ### flux-notifications  ·  Flux: `flux-notifications` (after: `external-secrets-config`)
+
+### harness  ·  Flux: `harness` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
+- **Deployment/harness-coordinator** — `ghcr.io/mtgibbs/harness-coordinator` 🔒priv
+  - creds: `ghcr-pull-secret`, `harness-coordinator`  _(→ secrets-map.md)_
+  - storage: `harness-coordinator-state`
+  - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
+  - ingress: `harness.lab.mtgibbs.dev`
 
 ### homepage  ·  Flux: `homepage` (after: `ingress`, `cert-manager-config`)
 - **Deployment/homepage** — `busybox`, `ghcr.io/gethomepage/homepage`

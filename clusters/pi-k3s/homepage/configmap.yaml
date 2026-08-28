@@ -123,6 +123,11 @@ data:
               key: "{{HOMEPAGE_VAR_TAILSCALE_API_KEY}}"
 
     - AI CORE:
+        - Harness Fleet:
+            icon: mdi-pipe
+            href: https://harness.lab.mtgibbs.dev
+            description: Loop runs — task, attempt, gate verdicts
+            siteMonitor: https://harness.lab.mtgibbs.dev/api/runs
         - Beelink GTR9 Pro:
             icon: mdi-chip
             href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load
