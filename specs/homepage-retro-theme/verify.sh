@@ -154,4 +154,4 @@ exit "$fail"
 # 3. curl_ingress https://home.lab.mtgibbs.dev → 200.
 # 4. curl_ingress https://nas.lab.mtgibbs.dev → non-502 (AC12).
 # 5. Human visual review: phosphor theme, deck order, no sparse bands, HAL-red on a
-#    known-down tile. Taste boundary per specs/design-principles.md.
+#    known-down tile. Taste boundary per harness:specs/design-principles.md.

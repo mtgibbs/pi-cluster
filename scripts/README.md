@@ -51,10 +51,15 @@ reference sheet the repo's shape calls for. Layer selection is automatic, from t
 contents: **symbol graph** for code repos, **edge index** for manifest repos, both
 (domain-disjoint) for mixed repos.
 
-- **Generator:** `scripts/gen-codesheet.mjs`. Resolution order: `$OC_SHEET_GEN` env var,
-  then `<target repo>/scripts/gen-codesheet.mjs`, then the canonical pi-cluster checkout.
-  If none is found, `oc run` works unchanged (silent passthrough).
-- **Opt-out:** `OC_SHEET=off oc run "..."`.
+- **Generator:** `scripts/gen-codesheet.mjs`, which now lives in **`mtgibbs/harness`**.
+  Resolution order: `$OC_SHEET_GEN` env var, then `<target repo>/scripts/gen-codesheet.mjs`,
+  then `$HARNESS_DIR`, then the canonical `harness` checkout (`~/dev/harness`). If none is
+  found, `oc run` works unchanged (silent passthrough) — which is exactly why the harness
+  fallbacks had to be added the moment the generator moved: a dead path here is invisible,
+  not loud.
+- **Opt-out:** `OC_SHEET=off oc run "..."`. The build loop generates the sheet once per loop
+  and sets `OC_SHEET=off` on its own `oc` calls so it is never injected twice; its own
+  opt-out is `RALPH_SHEET=off` (a harness knob — see `harness:scripts/ralph-build.sh`).
 - **Interactive `oc` (TUI) sessions are not injected.**
 
 Measured basis: 20-56% less context at equal-or-better accuracy across 783 trials —
@@ -63,7 +68,7 @@ Measured basis: 20-56% less context at equal-or-better accuracy across 783 trial
 ## `harness` — remote coding-agent containers (Beelink)
 
 Four persistent, sandboxed containers on the Beelink give you the laptop's `oc`/
-`ralph-qwen.sh` setup as a remote session reachable from anywhere over Tailscale —
+`ralph-build.sh` setup as a remote session reachable from anywhere over Tailscale —
 no laptop needs to stay open, and you can pop in and drive it live or fire off a
 loop and check back later. Full details, security model, and the human setup
 steps: `.claude/skills/coding-agent-ops/SKILL.md` → "Remote harness (Beelink)".
@@ -80,7 +85,7 @@ cp scripts/harness ~/.local/bin/harness && chmod +x ~/.local/bin/harness   # ~/.
 harness attach qwen              # pop in and drive opencode/qwen live
 harness attach claude            # pop in to a real Claude Code session
 harness attach codex             # pop in to an OpenAI Codex CLI session
-harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
+harness run qwen "specs/foo"     # fire-and-forget build-loop run; attach anytime to watch
 harness run codex "specs/foo"    # same loop, Codex binding — a separate billing lane
 harness status                   # are the containers up?
 harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index (default: claude)
@@ -92,113 +97,38 @@ Requires: `ssh beelink-ai` already configured (see the local-creds model above).
 
 Deployed via `beelink-ansible/playbooks/50-ai-stack.yml` (source: `beelink-ansible/files/coding-harness-{qwen,claude,codex}/`).
 
-## `ralph-qwen.sh` — bounded SDD loop
+## The loop itself lives in `mtgibbs/harness`
 
-Runs the bounded SDD loop (one task per fresh session, deterministic verify.sh gate, retry
-with failure feedback). Generates the codesheet **ONCE per loop** so the identical bytes
-ride the prefix cache across every task and retry, and sets `OC_SHEET=off` on its own `oc`
-calls so the sheet is never injected twice.
+Everything that *runs* a spec — the build loop, the executor bindings, the judge and its
+bindings, the sourced helpers, the telemetry, the codesheet generator, `agent-bus`, and the
+SDD methodology (`TEMPLATE.md` / `constitution.md` / `design-principles.md` / `amendments.md`)
+— moved to **[`mtgibbs/harness`](https://github.com/mtgibbs/harness)** on 2026-08-26, per the
+trigger `docs/adr/008` set: *extract when a second repo wants the framework*. `notes-from-hearing`
+became that repo.
 
-- **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
-- **Opt-out:** `RALPH_SHEET=off`.
+What this repo keeps is the **instance**: `harness` (which names *this* Beelink and *these*
+containers), `oc`, the deploy scripts, the generated-doc generators, `reviewhub`, and its own
+`specs/`. Read the seam as: **a project brings `specs/<feature>/{spec.md,tasks.txt,verify.sh}`
+and nothing else; the harness owns the rest.**
 
-## Executor bindings — one build loop, swappable executor
-
-`ralph-qwen.sh` drives whatever `RALPH_EXEC_CMD` points at. A binding is a few lines: take the
-prompt as `$1`, read `ROOT` from the environment, run the tool, let stdout be the transcript.
-The loop owns the tasks, the gate, the retries, the evidence and the watchdog.
-
-| binding | executor |
+| you want | it is now at |
 |---|---|
-| `scripts/exec-qwen.sh` | `oc run` (the default when `RALPH_EXEC_CMD` is unset) |
-| `scripts/exec-codex.sh` | `codex exec` — sandbox via `CODEX_SANDBOX`, default `danger-full-access` because the container is the boundary |
+| the build loop (was `ralph-qwen.sh`) | `harness:scripts/ralph-build.sh` — renamed, because the executor has been a binding since #199 |
+| executor bindings | `harness:scripts/exec-{qwen,codex}.sh` |
+| strategies + runner | `harness:scripts/loops/`, `harness:scripts/run-loop.sh` |
+| the judge loop + bindings | `harness:scripts/ralph-judge{,-codex,-exec-qwen}.sh` |
+| stall recovery | `harness:scripts/supervise.sh` |
+| gate scoring | `harness:scripts/gate-score.sh` |
+| run telemetry | `harness:scripts/loop-{index.py,doctor.sh,metrics.sh,report.sh,meta-audit.py}` |
+| heartbeat / attempt evidence / retry | `harness:scripts/ralph-{status,log,retry,bus}.sh` |
+| codesheet generator | `harness:scripts/gen-codesheet.mjs`, `harness:scripts/token-bench/` |
+| Matrix chat CLI | `harness:scripts/agent-bus` (this repo still owns the *service* — `docs/agent-bus.md`, `clusters/pi-k3s/matrix/`) |
+| how to write a spec | `harness:specs/TEMPLATE.md`, `harness:specs/README.md` |
+| the principles a judge cites | `harness:specs/{constitution,design-principles,amendments}.md` |
 
-Pick one with a strategy: `scripts/run-loop.sh build-codex specs/<feature>`. Adding a third
-executor is a binding plus a `.env`, not a copy of the loop — this replaced a 204-line duplicate
-that three specs had to police for drift. See `specs/executor-binding`.
-
-- **Knobs:** `RALPH_EXEC_TIMEOUT` (default 480s, enforced by the loop for every binding),
-  `RALPH_SHEET` (codesheet; on by default, `build-codex.env` turns it off — the 20-56% win was
-  measured on a 30B and is unmeasured for Codex).
-- **`RALPH_AGENT` names the executor in the evidence.** A strategy must set it, or a Codex run
-  is filed as `qwen-<pid>`.
-
-## `supervise.sh` — restart a loop that never started
-
-    scripts/supervise.sh <strategy> <spec-dir>          # from the target worktree root
-    OC_RUN_TIMEOUT=2400 RALPH_RETRIES=3 scripts/supervise.sh build-then-judge specs/v1
-
-Wraps `run-loop.sh` and recovers the one fault the `oc` watchdog cannot: opencode logs a
-`stream` line, never receives a first token, and never returns. Four for four in one session —
-one run sat 53 minutes against a 2400 s budget — so detection has to live outside the timeout
-that failed to fire.
-
-- **Discriminator is size, not staleness.** ≤40 B *and* stale = stillborn; an 82 KB log idle
-  25 minutes is a healthy run buffering. Kills the process group, then sweeps by name.
-- **Snapshots before killing.** ralph writes its `.diff` only when *verify* fails, so a killed
-  attempt leaves no evidence unless someone takes it first: log dir, worktree diff, status and
-  untracked files land in `~/.harness/evidence/<repo>/killed-attempts/`.
-- **Stamps the epitaph.** Calls `hb_mark <status-file> killed`, so the orphaned heartbeat says
-  `killed` instead of freezing at `running` forever.
-- **Not a retry loop.** It never re-runs a task that failed *verification* — that is ralph's
-  job and it burns attempts deliberately. Any nonzero exit that is not a hang stops the run.
-
-## `agent-bus` — Matrix chat CLI
-
-Post/read/wait on the homelab Matrix chat bus over the plain client-server API (pure
-`curl` + `jq`). Shared by laptop-Claude, the harness agents, qwen, and humans (Element Web).
-Full design: `docs/agent-bus.md`.
-
-**Creds** (same tiering as `oc`): picks the identity `AGENT_BUS_IDENTITY` (default
-`laptop-claude`); token resolves `MATRIX_TOKEN` env → macOS Keychain (`agent-bus-<id>`) →
-`op://pi-cluster/agent-bus-<id>/token`. Homeserver defaults to `https://matrix.lab.mtgibbs.dev`.
-
-**Use:**
-
-```
-agent-bus whoami                                  # confirm identity + token
-agent-bus rooms                                   # joined rooms
-agent-bus post agents "hello"                      # post to #agents
-agent-bus post tasks "task: foo done" --thread '$evt'   # reply in-thread
-agent-bus read agents --limit 20                   # recent messages
-agent-bus wait --room tasks --mention --timeout 300     # block until mentioned (/sync)
-agent-bus upload ./plan.md agents                  # upload a file + post the link
-```
-
-**Dependency:** `jq` (the only thing beyond `curl`) — add it to any harness container that
-runs the CLI. Requires the account bootstrap (see `docs/agent-bus.md`) to have populated the
-`agent-bus-<name>` 1Password items.
-
-## `ralph-judge.sh` — the post-convergence judge loop (+ its bindings)
-
-Runs AFTER a spec's gate is green: an independent judge proposes findings against the spec's
-*intent*, an executor applies one mutation per round, and the deterministic gate arbitrates
-every change (spec: `specs/judge-loop/`). Command bindings are REQUIRED and explicit — they
-live at this operator layer by design (first-run triage #3), so the loop never bakes in a
-host's tool paths:
-
-- **`ralph-judge-codex.sh`** — `JUDGE_CMD`: Codex (read-only) emits findings JSONL; also
-  serves `--check-resolution`. A different model family from the executor, on a separate
-  billing lane.
-- **`ralph-judge-exec-qwen.sh`** — `EXECUTOR_CMD`: qwen via `oc run` applies exactly one
-  finding; never commits, never leaves the finding's file.
-
-**Use** (from a clean worktree on a throwaway branch — copy the gitignored `opencode.json`
-in first, or headless `oc` auto-rejects every tool call):
-
-```bash
-JUDGE_CMD=scripts/ralph-judge-codex.sh EXECUTOR_CMD=scripts/ralph-judge-exec-qwen.sh \
-  scripts/ralph-judge.sh specs/<feature>
-```
-
-State + report land under the worktree's git-dir (`ralph-judge/ledger.jsonl`, `report.json`);
-exit 0 = completed (see report), 1 = aborted fail-closed, 2 = gate-unstable/needs a human.
-
-The **ledger is cumulative** across invocations; the report describes all of it. Read the two
-counts together: `rounds_run` is this invocation's rounds, `ledger_sessions` is how many
-invocations the `accepted`/`rejected`/`gate_gaps` lists span. Every record carries `session`
-and a `head` SHA, so a finding can be joined to the build it was found against — and a dry
-re-run that recorded nothing will correctly show its own `session` absent from the ledger.
+The harness is **cloned, not baked into the container images** — `run-task.sh` does a
+`fetch origin` + `reset --hard origin/main` on every dispatch, so a harness fix ships on merge
+with no image rebuild. The containers resolve it as `$HARNESS_DIR`.
 
 ## Running loops from a fresh worktree — the opencode.json gotcha
 
@@ -208,18 +138,9 @@ not inherit it, and headless `oc run` then falls back to the global `edit: ask`,
 **auto-rejects every write**. The failure looks like the model doing nothing: three
 attempts, `STOP — needs a human`, ~700-byte session logs.
 
-Before running any loop in a worktree:
+Before running any loop in a worktree of this repo:
 
     cp opencode.json ../pi-cluster-<task>/opencode.json
 
 Safe: it is ignored at `.gitignore:27`, so the loop's `git add -A` cannot commit it.
 (Learned 2026-08-10 — the loop-report race's first heat burned six sessions on this.)
-
-## loop-report.sh — one-screen summary of a strategy run
-
-    scripts/gate-score.sh specs/<f>/verify.sh > /tmp/gate.log
-    scripts/loop-report.sh --spec specs/<f> --base origin/main --gate-log /tmp/gate.log
-
-Prints branch, commit count, the last gate score line, and the judge ledger summary
-(`judge: none` if no judge ran). Built by the race it now reports on — see
-specs/loop-report/ and the race/* branches for the full evidence trail.

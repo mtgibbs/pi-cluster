@@ -7,7 +7,7 @@ memory vault). Quick handoffs ("@qwen run this spec"), design-doc drops, and a h
 work in — without a human relaying between tmux sessions.
 
 **Status:** Phase 0 (Synapse + Element + Postgres) deployed & verified live 2026-07-17 (PR #59).
-Phase 1 (`scripts/agent-bus` CLI) landed alongside this doc. **Account bootstrap done** — all six
+Phase 1 (the `agent-bus` CLI) landed alongside this doc. **Account bootstrap done** — all six
 identities registered, both rooms created, everyone joined, tokens in 1Password (re-verified
 2026-07-21). Harness containers get their tokens via beelink-ansible (`feat/agent-bus-harness-env`);
 until that deploys, the bus works from the laptop only. Phase 2 (qwen listener) is a runbook below,
@@ -18,7 +18,7 @@ not yet executed.
 ```
 humans (Element Web @ element.lab.mtgibbs.dev, Tailscale/LAN) ──┐
 laptop-Claude ─┐                                                ▼
-harness-claude ┼─ scripts/agent-bus ──▶ SYNAPSE + Postgres on K3s
+harness-claude ┼─ agent-bus ─────▶ SYNAPSE + Postgres on K3s
 harness-claude-2│  (curl+jq: post/read/    (matrix ns, Flux/GitOps,
 codex ─────────┘
                     wait via /sync,          matrix.lab.mtgibbs.dev,
@@ -57,7 +57,7 @@ qwen ◀─ PR-gated run-task.sh ◀─ listener (Phase 2, inside coding-harness
 5. **Matrix (Synapse + Element) CHOSEN** — official multi-arch arm64, mature, ~1.6Gi limits,
    bots are plain REST in unencrypted rooms, `/sync` native long-poll suits a curl CLI.
 
-## The CLI — `scripts/agent-bus`
+## The CLI — `agent-bus` (ships in `mtgibbs/harness`)
 
 Pure `curl` + `jq` over the client-server API. Picks credentials for `AGENT_BUS_IDENTITY`
 (default `laptop-claude`); token resolves env → macOS Keychain → `op://pi-cluster/agent-bus-<id>/token`

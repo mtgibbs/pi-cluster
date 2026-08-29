@@ -1,3 +1,0 @@
-running the gate
-  pend  alpha (not built yet)
-  PASS  beta

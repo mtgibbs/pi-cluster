@@ -1,6 +1,0 @@
-running the fixture gate
-  PASS  alpha
-  FAIL  beta
-  PASS  gamma-must-not-fail-the-parser
-  pend  delta (not built yet)
-FAIL this line has no leading indent and is not a check

@@ -1,1 +1,0 @@
-{"spec_dir":"specs/loop-report","baseline":{"score":1.0,"total":9},"rounds_run":2,"accepted":["a","b"],"rejected":["c"],"gate_gaps":[],"outcome":"dry"}

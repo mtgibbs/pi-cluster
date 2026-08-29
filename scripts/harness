@@ -159,7 +159,7 @@ case "$cmd" in
     ssh "$HOST" "cd /opt/ai-stack && sudo docker compose ps coding-harness-qwen coding-harness-claude coding-harness-claude-2 coding-harness-codex"
     echo
     # Activity: what each agent is DOING right now. Prefers the ralph heartbeat
-    # (scripts/ralph-status.sh) when a loop is running — structured task/attempt/
+    # (harness:scripts/ralph-status.sh) when a loop is running — structured task/attempt/
     # phase — and falls back to the live tmux pane tail otherwise. All reads are
     # best-effort; `|| true` so a status check never trips `set -e`.
     echo "── activity ──────────────────────────────────────────────"

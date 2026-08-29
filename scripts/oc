@@ -78,9 +78,12 @@ if [ "${OC_SHEET:-on}" = "on" ]; then
   if [ -z "$SHEET_GEN" ] && [ -f "$sheet_dir/scripts/gen-codesheet.mjs" ]; then
     SHEET_GEN="$sheet_dir/scripts/gen-codesheet.mjs"
   fi
-  # Canonical checkout: $HOME/dev on the laptop; the harness containers clone
-  # at the literal laptop path (that's what makes memory-dir slugs match).
-  for _cand in "$HOME/dev/pi-cluster" "/Users/mtgibbs/dev/pi-cluster"; do
+  # The generator moved to mtgibbs/harness (2026-08-26). Containers get it as
+  # $HARNESS_DIR (cloned fresh per dispatch); the laptop as a normal checkout in
+  # $HOME/dev. The literal /Users path is kept because the harness containers
+  # clone at the laptop path -- that's what makes memory-dir slugs match.
+  for _cand in "${HARNESS_DIR:-}" "$HOME/dev/harness" "/Users/mtgibbs/dev/harness"; do
+    [ -n "$_cand" ] || continue
     if [ -z "$SHEET_GEN" ] && [ -f "$_cand/scripts/gen-codesheet.mjs" ]; then
       SHEET_GEN="$_cand/scripts/gen-codesheet.mjs"
     fi
