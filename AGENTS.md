@@ -35,6 +35,13 @@ spec you're handed, not on loading the whole repo.** Don't read large files spec
   from**. Never invent URLs, ports, or UIDs — if a value isn't in the spec, it's an open
   question: flag it, don't guess.
 - **Stay in scope.** Do exactly what the spec's scope says; don't refactor adjacent things.
+- **Shell is macOS bash 3.2 — no bash 4 features.** No `declare -A` (associative arrays), no
+  `mapfile`/`readarray`, no `${var,,}`/`${var^^}`. **`declare -A` is the single most repeated
+  mistake in this repo's loop history** — it has failed a gate on the first attempt of a
+  task in two separate runs (`qwen-61568` T1, `qwen-10668` T2), each time on a task whose own
+  instructions said, in capitals, not to use it. A task line does not reliably suppress it; this is why the rule lives here instead.
+  When you need a map: `awk` (see `scripts/gate-score.sh`), a temp state file (see
+  `scripts/ralph-retry.sh`), or parallel indexed arrays.
 - **One worktree, one branch — stage only your own files.** Work inside an isolated
   `git worktree` off `origin/main`, **never the operator's primary checkout** (it may hold
   pre-staged changes that aren't yours). The `ralph-qwen` loop sets the worktree up for you;

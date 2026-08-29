@@ -176,7 +176,9 @@ for c in coding-harness-qwen coding-harness-claude coding-harness-claude-2 codin
   proc=${pane%%|*}; act=${pane#*|}
   case "$proc" in bash|sh|-bash|"") state=idle ;; *) state=busy ;; esac
   [ -n "$act" ] && age=$(( now - act )) || age=0
-  hb=$(docker exec "$c" sh -c 'ls -t "$HOME"/.harness/status/*.json 2>/dev/null | head -1 | xargs cat 2>/dev/null' 2>/dev/null)
+  # Both shapes: the status root is repo-scoped since 2026-08-24, and pre-existing flat files
+  # outlive the change. Newest wins either way.
+  hb=$(docker exec "$c" sh -c 'ls -t "$HOME"/.harness/status/*.json "$HOME"/.harness/status/*/*.json 2>/dev/null | head -1 | xargs cat 2>/dev/null' 2>/dev/null)
   if [ -n "$hb" ]; then
     ph=$(jval "$hb" phase); ti=$(jnum "$hb" task_index); tt=$(jnum "$hb" total_tasks)
     at=$(jnum "$hb" attempt); mx=$(jnum "$hb" max_attempts); tk=$(jval "$hb" task); upd=$(jnum "$hb" updated)

@@ -37,3 +37,28 @@ spec:
     certController:
       image:
         repository: ghcr.io/external-secrets/external-secrets
+
+    # --- added after the 2026-08-11 WASM incident (docs/incidents/) ---
+    # The controller had NO metrics scraped and NO resource limits. It ran 40+ hours
+    # with a dead 1Password provider client and nothing noticed, because there was
+    # nothing to notice WITH.
+    #
+    # serviceMonitor: without this the :8080 metrics endpoint exists but Prometheus
+    # never scrapes it, so any alert rule silently never fires. `release` label must
+    # match the kube-prometheus serviceMonitorSelector (same convention the
+    # PrometheusRules use).
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus
+
+    # Limits are deliberate SELF-HEALING, not capacity planning. The failure mode was a
+    # long-lived process whose embedded WASM runtime stopped being able to allocate —
+    # the pod stayed Ready with 0 restarts and degraded silently forever. A memory
+    # ceiling converts that slow death into an OOM-restart, which recovers on its own.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 128Mi
+      limits:
+        memory: 512Mi

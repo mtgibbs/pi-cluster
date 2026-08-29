@@ -245,6 +245,17 @@ if [ -f "$FXROOT/c1/state/ledger.jsonl" ]; then
   else
     no "AC-c3: gate-gap was executed/applied or not ledgered"
   fi
+  # A gate-gap is a claim about a BUILD ("the gate misses X"), so the record has to name the
+  # build. It did not until 2026-08-24, and gate-gaps were 54 of 56 findings — every one of them
+  # unjoinable to the commit that answered it. Spec §8.10: the audit trail is an interface.
+  /usr/bin/python3 - "$STATE/ledger.jsonl" <<'EOP' && ok "AC-c3b: gate-gap record names its build (head) and its invocation (session)" || no "AC-c3b: gate-gap record lacks a 40-hex head or a session"
+import json,re,sys
+rows=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+gaps=[r for r in rows if r.get("decision")=="gate-gap"]
+assert gaps, "no gate-gap row in the ledger"
+assert all(re.fullmatch(r"[0-9a-f]{40}", r.get("head") or "") for r in gaps), "head missing/not a SHA"
+assert all(r.get("session") for r in gaps), "session missing"
+EOP
 
   # case 9: CROSS-RUN LEDGER — rejected id never replays on a second invocation
   mkcase c9
@@ -262,6 +273,24 @@ if [ -f "$FXROOT/c1/state/ledger.jsonl" ]; then
   else
     no "AC-c4: cross-run replay — run1 exec calls=$r1, after run2=$r2 (want equal, 1) rc=$(cat "$CASE/rc")"
   fi
+  # Two invocations, one ledger — the exact shape that made the old report lie. `rounds_run` is
+  # per-process and the lists are slurped from the whole ledger, so the file read "rounds_run: 1"
+  # beside a cumulative population it had never measured. Both numbers are fine; only the missing
+  # label was the bug. This is the control that fails if they are ever conflated again.
+  /usr/bin/python3 - "$STATE/report.json" "$STATE/ledger.jsonl" <<'EOP' && ok "AC-c4b: report tells its own invocation apart from the population it reports" || no "AC-c4b: report cannot distinguish this invocation from the cumulative ledger"
+import json,sys
+r=json.load(open(sys.argv[1]))
+rows=[json.loads(l) for l in open(sys.argv[2]) if l.strip()]
+# Run 2 was dry: it recorded nothing, so the lists below belong entirely to run 1. That is the
+# exact shape that made the old report lie — "rounds_run: 1" printed beside a population this
+# invocation never measured, with nothing on the file to say so.
+assert r["rounds_run"] == 1, "rounds_run=%r — per-invocation, must not accumulate" % r["rounds_run"]
+assert r["ledger_sessions"] == 1, "ledger_sessions=%r" % r["ledger_sessions"]
+assert r["rejected"] == ["fx-1"], "cumulative list lost its record: %r" % r["rejected"]
+seen = {x.get("session") for x in rows}
+assert r["session"] not in seen, "run 2 recorded nothing, so its session must not appear in the ledger"
+assert None not in seen, "a ledger row carries no session"
+EOP
   # case 12: finding missing the spec's line field -> whole invocation rejected (triage #1)
   mkcase c12
   printf '{"id":"fx-1","file":"solution.txt","category":"clarity","spec_anchor":"s1","problem":"p","suggested_change":"swap|solution.txt|junk comment|good comment","kind":"mutate"}\n' > "$CASE/round-1.jsonl"
@@ -299,10 +328,10 @@ fi
 # T3 — terminate + report. Keyed on the report file (its observable).
 # =====================================================================================
 if [ -f "$FXROOT/c1/state/report.json" ]; then
-  /usr/bin/python3 - "$FXROOT/c1/state/report.json" <<'EOP' && ok "AC-d1: report is valid JSON with the contract fields + accepted id" || no "AC-d1: report.json missing/invalid fields (want spec_dir/baseline/rounds_run/accepted/rejected/gate_gaps/outcome)"
+  /usr/bin/python3 - "$FXROOT/c1/state/report.json" <<'EOP' && ok "AC-d1: report is valid JSON with the contract fields + accepted id" || no "AC-d1: report.json missing/invalid fields (want spec_dir/baseline/session/rounds_run/ledger_sessions/accepted/rejected/gate_gaps/outcome)"
 import json,sys
 r=json.load(open(sys.argv[1]))
-assert set(["spec_dir","baseline","rounds_run","accepted","rejected","gate_gaps","outcome"])<=set(r)
+assert set(["spec_dir","baseline","session","rounds_run","ledger_sessions","accepted","rejected","gate_gaps","outcome"])<=set(r)
 assert "fx-1" in r["accepted"] and r["outcome"]=="dry"
 EOP
   grep -q 'outcome=dry' "$FXROOT/c1/out" && ok "AC-d2: human summary line printed" \

@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_37 services · 68 workloads · 38 Flux Kustomizations · 7 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_39 services · 70 workloads · 40 Flux Kustomizations · 8 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -45,6 +45,11 @@ _What must reconcile before what. An arrow A → B means A deploys before B._
 
 ```mermaid
 graph LR
+  k4urrac["atlas"]
+  kkuvy6m["ingress"]
+  kkuvy6m --> k4urrac
+  k19g0j44["cert-manager-config"]
+  k19g0j44 --> k4urrac
   kwoyrdm["backup-jobs"]
   k1unc8vb["external-secrets-config"]
   k1unc8vb --> kwoyrdm
@@ -57,7 +62,6 @@ graph LR
   kwdw79["calendar"]
   k1unc8vb --> kwdw79
   k1b1zvd7["cert-manager"]
-  k19g0j44["cert-manager-config"]
   k1b1zvd7 --> k19g0j44
   k1unc8vb --> k19g0j44
   k19brzrp["cloudflare-tunnel"]
@@ -66,7 +70,6 @@ graph LR
   k38fyg["external-secrets"]
   k38fyg --> k1unc8vb
   k9y7g1l["external-services"]
-  kkuvy6m["ingress"]
   kkuvy6m --> k9y7g1l
   k19g0j44 --> k9y7g1l
   k1xirz5w["family-board"]
@@ -76,6 +79,10 @@ graph LR
   kd9c6dn["flux-notifications"]
   k1unc8vb --> kd9c6dn
   ka3ayi4["flux-system"]
+  k6vrex["harness"]
+  k1unc8vb --> k6vrex
+  kkuvy6m --> k6vrex
+  k19g0j44 --> k6vrex
   k1uuov05["homepage"]
   kkuvy6m --> k1uuov05
   k19g0j44 --> k1uuov05
@@ -164,6 +171,10 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 
 _Images are listed **without tags** on purpose — this map is topology, and the deployed version is a property of the cluster, not of this repo. Read the live tag with `get_flux_status` / `describe_resource`. (Tags here made every bot image bump a map change, and image-automation pushes bypass the PR gate that regenerates it, so unrelated PRs inherited a red `drift`.)_
 
+### atlas  ·  Flux: `atlas` (after: `ingress`, `cert-manager-config`)
+- **Deployment/atlas** — `nginx`
+  - ingress: `atlas.lab.mtgibbs.dev`
+
 ### backup-jobs  ·  Flux: `backup-jobs` (after: `external-secrets-config`, `pihole`, `monitoring`, `uptime-kuma`)
 - **CronJob/git-mirror-backup** — `instrumentisto/rsync-ssh`
 - **CronJob/k3s-datastore-backup** — `instrumentisto/rsync-ssh`
@@ -207,6 +218,13 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - ingress: `board.lab.mtgibbs.dev`
 
 ### flux-notifications  ·  Flux: `flux-notifications` (after: `external-secrets-config`)
+
+### harness  ·  Flux: `harness` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
+- **Deployment/harness-coordinator** — `ghcr.io/mtgibbs/harness-coordinator` 🔒priv
+  - creds: `ghcr-pull-secret`, `harness-coordinator`  _(→ secrets-map.md)_
+  - storage: `harness-coordinator-state`
+  - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
+  - ingress: `harness.lab.mtgibbs.dev`
 
 ### homepage  ·  Flux: `homepage` (after: `ingress`, `cert-manager-config`)
 - **Deployment/homepage** — `busybox`, `ghcr.io/gethomepage/homepage`

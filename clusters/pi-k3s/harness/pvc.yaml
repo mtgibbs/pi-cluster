@@ -1,0 +1,14 @@
+# Small and local on purpose. What lives here is the run record the board reads back after a
+# restart; artifact BYTES are never snapshotted (they are the bulk, and the worker can resend
+# them), so this does not grow with fleet traffic the way a log volume would.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harness-coordinator-state
+  namespace: harness
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

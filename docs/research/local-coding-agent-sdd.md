@@ -425,3 +425,66 @@ SDD/ralph architecture was built to avoid for coding. It validates §15's conclu
 measurement: if we ever wire mcp-homelab into opencode (`mcp` key in opencode.json — NOT
 `mcpServers`, which is Claude's schema and throws `ConfigInvalidError` on 1.17.x) plus a
 lean ops section in AGENTS.md, rerun this exact prompt as the **after**.
+
+---
+
+## 17. Gate-strength dogfood — three runs on `specs/model-watch` (2026-08-11/13)
+
+Handed the same spec to the ralph loop three times, changing **one variable** each run, to
+answer "how good is the loop?". The answer turned out to be **"exactly as good as its
+gate"** — nothing else moved the number much.
+
+| Run | Gate | Facts in §6a | Result |
+|---|---|---|---|
+| 1 | monolithic, 2 verdicts | withheld | STOP on T1. Best attempt **17/19** |
+| 2 | staged (`pend`/`STRICT`) | pinned | **All 4 tasks passed, STRICT passed** — and shipped 6 real defects |
+| 3 | staged + **behavioural fixtures** | pinned | T1 no-op'd (harness bug), T2 failed 3× → STOP |
+
+**Run 2 is the alarming one.** It reported `VERIFY: PASS` while producing: `ssl.CERT_NONE`
++ `check_hostname = False` on every request *including the one carrying a LiteLLM API key*;
+ntfy `Authorization: Basic <raw password>` (no base64, no `NTFY_USER` — would 401 silently
+forever); an MoE parser where `'expert' in key` also matches `num_experts_per_tok`, so real
+Qwen3-Next config `512 total / 10 active` parsed as `10 / None`; a model-card fetcher that
+`json.loads()`'d markdown and therefore always returned `None` (dead code the LLM never
+saw); size-threshold buckets instead of spec semantics; and `license: "other"` → `skip`
+instead of `watch`. **Every one of those greps fine.** Shape checks certify shape.
+
+**Run 3 is the reassuring one** — same model, same spec, same facts, and the hardened gate
+refused it three times on exactly those defects.
+
+### Findings
+
+1. **Task lines anchor harder than the spec does.** Same spec, same model, same gate:
+   *"write model-watch.py — the sweep, the gate logic, DRY_RUN classification output per
+   the spec output contract"* → 17/19 first try. Collapsing it to *"implement the whole
+   model-watch feature"* → the model built something suggested by the **name** (a `while
+   True` filesystem poller watching `/models` for changed `.gguf` files, `import requests`,
+   pushing to public ntfy.sh) → 7/19. Now a §9 corollary in `specs/TEMPLATE.md`.
+2. **Task-model fit.** `model-watch` was ~30% pattern-stamping and ~70% *discovering
+   undocumented API behaviour*. qwen scored 17/19 on the former and zero on the latter —
+   exactly what §15/§16 predict. **The fair-comparison spec and the effective spec are
+   different documents**: withholding the API facts to keep the experiment clean is the
+   same thing as making the spec bad, since §6a exists precisely to pin literal facts.
+   Pinning them (run 2) took the loop from "stops for a human" to "completes all tasks".
+3. **Verify in both directions.** Testing the hardened gate against *known-good* code
+   caught a false negative in the gate itself (`grep -q 'ntfy'` is case-sensitive; the
+   script uses `NTFY_URL`) — and caught a genuine contract break in the human-written
+   reference implementation that review had missed. A gate that only ever fails is as
+   useless as one that only ever passes.
+4. **Two harness bugs.** opencode asked to `Read /specs/model-watch/spec.md` — absolute
+   from filesystem root — and was auto-rejected as an external directory, so that attempt
+   wrote nothing. It then **passed**, because an empty tree satisfies every `pend`. Fixed:
+   `ralph-qwen.sh` now treats a no-op attempt as a failure.
+
+### Artifacts — ⚠️ archival only, never merge
+
+- **`loop/model-watch-run2`** — qwen's run-2 output. **Contains the defective code above,
+  including disabled TLS verification.** Its commit messages read like ordinary work
+  (`ralph(qwen): T3 — Write the four manifests…`); it is evidence, not a candidate.
+- **`loop/model-watch-run3`** — the hardened fixture harness plus the T3 commit it inherited.
+- Per-attempt transcripts and diffs: `/home/agent/.harness/logs/qwen-*/` on the harness
+  container (ephemeral — the branches are the durable record).
+
+The shipped conclusions live in `specs/TEMPLATE.md` §11 (three-verdict contract,
+presence-gate-on-artifact, task-anchoring corollary) and `specs/model-watch/` (the fixture
+harness as the worked example).

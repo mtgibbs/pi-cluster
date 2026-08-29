@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_57 ExternalSecrets · 42 1Password items · 67 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_59 ExternalSecrets · 43 1Password items · 69 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -77,6 +77,8 @@ graph LR
   n1uid43c(["🔑 ghcr-read-token"])
   n1dgsmvl["ghcr-pull-secret<br/>(flux-system)"]
   n1uid43c --> n1dgsmvl
+  ntfx3mc["ghcr-pull-secret<br/>(harness)"]
+  n1uid43c --> ntfx3mc
   n1v7jq0b["ghcr-pull-secret<br/>(new-horizons)"]
   n1uid43c --> n1v7jq0b
   nada4m5["ghcr-pull-secret<br/>(private-exit-node)"]
@@ -174,14 +176,17 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
-- **ghcr-read-token** `safe` → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **ghcr-read-token** `safe` → 4 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
+    - `harness/ghcr-pull-secret`
     - `new-horizons/ghcr-pull-secret`
     - `private-exit-node/ghcr-pull-secret`
 - **github-mirror-token** → 1 ExternalSecret(s):
     - `backup-jobs/github-mirror-token`
 - **grafana** → 1 ExternalSecret(s):
     - `monitoring/grafana-secret`
+- **harness-coordinator** → 1 ExternalSecret(s):
+    - `harness/harness-coordinator`
 - **healthchecks** → 1 ExternalSecret(s):
     - `monitoring/alertmanager-healthchecks`
 - **immich** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
@@ -322,6 +327,12 @@ graph LR
 - **`flux-system/nfs-credentials`** ← `nas`
   produces Secret `nfs-credentials` in `flux-system`
     → _Flux Kustomizations (postBuild.substituteFrom NAS uid/gid, 4 refs in infrastructure.yaml)_ (curated: not a pod-spec ref)
+- **`harness/ghcr-pull-secret`** ← `ghcr-read-token`
+  produces Secret `ghcr-pull-secret` in `harness`
+    → `harness/harness-coordinator` (Deployment, imagePull)
+- **`harness/harness-coordinator`** ← `harness-coordinator`
+  produces Secret `harness-coordinator` in `harness`
+    → `harness/harness-coordinator` (Deployment, env)
 - **`homepage/homepage-ai-controlpanel`** ← `ai-controlpanel`
   produces Secret `homepage-ai-controlpanel` in `homepage`
     → `homepage/homepage` (Deployment, envFrom)

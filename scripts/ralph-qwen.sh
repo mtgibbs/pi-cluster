@@ -1,26 +1,60 @@
 #!/usr/bin/env bash
-# ralph-qwen.sh — a bounded SDD loop for the local coding model.
+# ralph-qwen.sh — THE bounded SDD build loop. One loop; the executor is a binding
+# (RALPH_EXEC_CMD), so this drives qwen, Codex, or anything else without being copied.
+# The filename still says qwen for now — renaming it ripples into seven specs' gates;
+# see specs/executor-binding §5.
 #
 # Philosophy (learned the hard way): qwen3-coder is a fast, faithful, literal STAMPER
 # with no stamina, taste, or self-checking. So we don't make it smarter — we build the
 # fixture around it. This loop is the conveyor belt + jig + inspector:
 #
 #   for each task in the spec:
-#     fresh opencode session (no context accumulation)   <- bound the context
+#     fresh executor session (no context accumulation)   <- bound the context
 #     give it ONE task + the spec as source               <- bound the scope
-#     timebox the run (oc's watchdog)                     <- a stall can't cost hours
+#     timebox the run (run_bounded, below)                <- a stall can't cost hours
 #     run verify.sh — the DETERMINISTIC gate, not the model's self-report
 #     pass -> commit ; fail -> retry with the failure fed back ; stuck -> stop for a human
 #
 # The model executes; the loop carries the rigor; the human reviews the PR at the end.
 #
 # Usage (run from inside a git worktree on a throwaway branch):
-#   scripts/ralph-qwen.sh specs/<feature>
+#   scripts/ralph-qwen.sh specs/<feature>              # default binding: qwen
+#   scripts/run-loop.sh build-codex specs/<feature>    # or pick a strategy
 # spec dir must contain: spec.md, verify.sh, tasks.txt (one task per line, e.g. "T1: arr widgets")
 set -uo pipefail
 
 SPEC_DIR="${1:?usage: ralph-qwen.sh <spec-dir>}"
 RETRIES="${RALPH_RETRIES:-2}"
+
+# The executor is a binding, exactly as JUDGE_CMD/EXECUTOR_CMD are for ralph-judge.sh. A
+# strategy in scripts/loops/ sets it; unset, the loop drives qwen and behaves as it always has.
+# The binding takes ONE argument (the prompt), reads ROOT from the environment, and writes the
+# transcript to stdout. It owns no tasks, no gate, no evidence — see specs/executor-binding §3.
+# Expanded UNQUOTED at the call site, exactly as ralph-judge.sh expands $EXECUTOR_CMD, so a
+# binding may carry arguments ("bash /path/x.sh", or a wrapper plus flags) rather than having to
+# be a single executable file.
+_SD="$(cd "$(dirname "$0")" && pwd)"
+RALPH_EXEC_CMD="${RALPH_EXEC_CMD:-$_SD/exec-qwen.sh}"
+EXEC_TIMEOUT="${RALPH_EXEC_TIMEOUT:-480}"
+
+# Portable watchdog, same shape as ralph-judge.sh's. It lives in the LOOP, not in the binding:
+# oc happens to carry its own timeout and codex did not, so the old codex copy hand-rolled one
+# and a third executor would have had to remember to. A bound every attempt gets is a property
+# of the loop. Not timeout(1) — stock macOS does not ship it.
+run_bounded() { # <seconds> <cmd...> -> 124 on timeout, else the command's exit code
+  local secs="$1"; shift
+  "$@" & local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$secs" ]; then
+      echo "  ! executor exceeded ${secs}s — killing (likely a stalled session)." >&2
+      kill -TERM "$pid" 2>/dev/null; sleep 1; kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null; return 124
+    fi
+    sleep 1; waited=$((waited+1))
+  done
+  wait "$pid"
+}
+
 SPEC="$SPEC_DIR/spec.md"; VERIFY="$SPEC_DIR/verify.sh"; TASKS="$SPEC_DIR/tasks.txt"
 for f in "$SPEC" "$VERIFY" "$TASKS"; do [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 ROOT="$(git rev-parse --show-toplevel)"
@@ -50,6 +84,12 @@ if [ -f "$(dirname "$0")/ralph-log.sh" ]; then
 else
   log_init() { :; }; log_path() { printf '/dev/null'; }; log_failure() { :; }; log_where() { :; }
 fi
+# Retry contract — track regressions across attempts. See scripts/ralph-retry.sh.
+if [ -f "$(dirname "$0")/ralph-retry.sh" ]; then
+  . "$(dirname "$0")/ralph-retry.sh"
+else
+  retry_init() { :; }; retry_record() { :; }; retry_regressions() { :; }
+fi
 
 # Navigation codesheet (repo map + shape-appropriate reference sheet), generated
 # ONCE for the whole loop: byte-stable across every task and retry, so after the
@@ -57,7 +97,7 @@ fi
 # regenerated after commits — stability beats freshness for caching, and each
 # task is bounded anyway. Measured: 20-56% less context at equal-or-better
 # accuracy (docs/research/codemap-serena-token-efficiency.md). RALPH_SHEET=off
-# disables. oc gets OC_SHEET=off below so the sheet isn't injected twice.
+# disables. The qwen binding sets OC_SHEET=off so the sheet isn't injected twice.
 SHEET=""
 SHEET_GEN="$(dirname "$0")/gen-codesheet.mjs"
 if [ "${RALPH_SHEET:-on}" = "on" ] && [ -f "$SHEET_GEN" ] && command -v node >/dev/null 2>&1; then
@@ -76,28 +116,33 @@ while IFS= read -r task || [ -n "$task" ]; do
   [ -z "${task// }" ] && continue
   echo "════════ TASK: $task ════════"
   HB_TASK="$task"; HB_TIDX=$((HB_TIDX + 1)); hb_write running
-  feedback=""; passed=0
+  feedback=""; passed=0; retry_init
   for attempt in $(seq 1 $((RETRIES + 1))); do
     HB_ATTEMPT="$attempt"; hb_write running
     prompt="${SHEET:+$SHEET
 
 }Read $SPEC. Implement ONLY this one task, nothing else: ${task}
-Follow the spec's section 10 reference and section 7 acceptance criteria EXACTLY.
+Follow the spec's section 10 acceptance criteria and section 7 norms EXACTLY.
+Do not run git add, git commit, or git stash — the loop owns the index.
 Do not touch anything outside this task's scope. Reuse existing patterns; never invent
 URLs/UIDs. When done, stop.${feedback}"
 
-    # Fresh session each attempt (no -c/--continue) = no context bloat. oc adds the
-    # 1Password key + a watchdog timeout so a stalled stream can't hang for hours.
-    # OC_SHEET=off: the sheet is already in the prompt (once, loop-stable) above.
+    # Fresh session each attempt (no continuation) = no context bloat. The executor is a
+    # BINDING, not a hardcoded command: whoever the loop drives, it is invoked the same way,
+    # bounded the same way, and its transcript kept the same way. That seam is why there is one
+    # build loop rather than one per executor — a duplicated loop is what a missing parameter
+    # looks like, and the copy this replaced cost three specs a rule apiece to keep in sync.
+    # See specs/executor-binding §1.
     # Keep the transcript. This used to go to /dev/null, which made every STOP undiagnosable.
-    OC_SHEET=off OC_RUN_TIMEOUT="${OC_RUN_TIMEOUT:-480}" oc run --dir "$ROOT" "$prompt" \
-      > "$(log_path "$HB_TIDX" "$attempt")" 2>&1; _rc=$?
+    # shellcheck disable=SC2086  # deliberate word-split: see below
+    run_bounded "$EXEC_TIMEOUT" $RALPH_EXEC_CMD "$prompt" \
+      > "$(log_path "$HB_TASK" "$attempt")" 2>&1; _rc=$?
     # An executor that never started is NOT a failed attempt — it is a broken container, and
     # letting it fall through to verify is how a no-op run reports success. Observed 2026-07-22:
-    # oc died in <1s with "current working directory was deleted" on every attempt, each log 247
-    # bytes, and the loop happily marked 3/3 done. A real attempt (even one the watchdog kills at
-    # OC_RUN_TIMEOUT) leaves a substantial transcript; a stillborn one leaves a stub.
-    _log="$(log_path "$HB_TIDX" "$attempt")"
+    # the executor died in <1s with "current working directory was deleted" on every attempt,
+    # each log 247 bytes, and the loop happily marked 3/3 done. A real attempt (even one the
+    # watchdog kills at EXEC_TIMEOUT) leaves a substantial transcript; a stillborn one a stub.
+    _log="$(log_path "$HB_TASK" "$attempt")"
     _sz=$(wc -c < "$_log" 2>/dev/null || echo 0)
     if [ "$_rc" != 0 ] && [ "$_sz" -lt 512 ]; then
       echo "✋ ABORT: the executor did not start (exit $_rc, ${_sz}B of output) — the container needs attention, not another retry." >&2
@@ -116,7 +161,7 @@ URLs/UIDs. When done, stop.${feedback}"
     # specs/model-watch: opencode asked to Read `/specs/model-watch/spec.md` (absolute,
     # from filesystem root), opencode auto-rejected it as an external directory, the model
     # produced no file, and the staged gate passed T1 with "nothing to commit".
-    if [ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+    if [ -z "$(git -C "$ROOT" status --porcelain -- . ':!.evidence' 2>/dev/null)" ]; then
       echo "  ✗ attempt $attempt changed nothing — a no-op is a failure, not a pass" >&2
       hb_write failed false
       feedback="
@@ -133,16 +178,53 @@ paths RELATIVE to the repo root (specs/... not /specs/...). Do the work this tim
       git -C "$ROOT" commit -q -m "ralph(qwen): ${task%%:*} — ${task#*: }" || true
       passed=1; hb_write passed true
       bus_say "✓ ${task%%:*} passed verify (attempt $attempt/$((RETRIES + 1))) — ${HB_TIDX}/${HB_TOTAL:-?}"
+      retry_record "$out"
+      # $(dirname $0), NOT a bare `scripts/…`: that path was relative to the TARGET
+      # worktree, and a project that correctly owns only specs and gates has no scripts/
+      # dir at all. notes-from-hearing#9 removed the harness from the product repo exactly
+      # as the convention asks, and every task of every run after it printed
+      # "scripts/loop-index.py: No such file or directory". The harness must reach its own
+      # tools by its own location.
+      "$(dirname "$0")/loop-index.py" --repo "$ROOT" --spec "$SPEC_DIR" 2>&1 \
+        || { echo "WARN: loop-index.py failed" >&2; }
+      # loop-metrics.sh had NO CALLERS. It was written to answer "how is the loop doing" —
+      # attempts per task, whether cost is falling, how much of the gate is real evidence —
+      # and nothing ever invoked it, so .evidence/metrics.jsonl went stale and the 2026-08-25
+      # run had no cost record of any kind. Wiring it here, beside the indexer, on the same
+      # best-effort contract: recording a run must never be able to fail the run.
+      SPEC_DIR="$SPEC_DIR" "$(dirname "$0")/loop-metrics.sh" \
+        "${HB_TASK%%:*}" "$ROOT" "${LOG_DIR:-}" \
+        >/dev/null 2>&1 || { echo "WARN: loop-metrics.sh failed" >&2; }
+      # "Did work happen" and "was evidence collected" are two questions. The guard above
+      # now excludes .evidence/ from the first one — which would silently hide a broken
+      # indexer, since loop-index.py is best-effort. So ask the second question directly:
+      # the row for this task must exist. Warn, never fail: recording the run must not be
+      # able to fail the run it is recording.
+      _idx="$ROOT/.evidence/index-$(basename "$SPEC_DIR").jsonl"
+      if [ ! -s "$_idx" ]; then
+        echo "WARN: no $(basename "$_idx") after ${HB_TASK%% *} — the record was not collected" >&2
+      elif ! grep -q "\"task\": *\"${HB_TASK%% *}\"" "$_idx" 2>/dev/null; then
+        echo "WARN: $(basename "$_idx") has no row for ${HB_TASK%% *} — indexing ran but did not record this task" >&2
+      fi
       break
     fi
     echo "  ✗ verify failed (attempt $attempt); retrying with feedback" >&2
     hb_write failed false
-    log_failure "$HB_TIDX" "$attempt" "$out"   # BEFORE the reset below erases the evidence
+    log_failure "$HB_TASK" "$attempt" "$out"   # BEFORE the reset below erases the evidence
+    retry_record "$out"
     # Feed the failing checks back into the next fresh attempt — targeted, not vibes.
+    _regression_block=""
+    if _rb="$(retry_regressions "$out")" && [ -n "$_rb" ]; then
+      _regression_block="
+REGRESSION — these checks PASSED in an earlier attempt of this same task and now do not:
+$_rb
+Keep them passing while you fix the failures above. Do not trade one check for another."
+    fi
     feedback="
 A previous attempt FAILED verification with:
 $(printf '%s' "$out" | grep -E 'FAIL|VERIFY' | head -20)
-Fix exactly those failures."
+Fix exactly those failures.${_regression_block}"
+    git -C "$ROOT" reset -q -- . 2>/dev/null || true   # reset index to HEAD so checkout -- can drop staged files
     git -C "$ROOT" checkout -- . 2>/dev/null || true   # reset tracked changes from the bad attempt
     git -C "$ROOT" clean -fd -- . 2>/dev/null || true  # ...and untracked files/dirs it created —
     # `checkout --` alone leaves these behind, letting an out-of-scope file from attempt N

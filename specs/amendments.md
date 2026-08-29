@@ -1,6 +1,6 @@
 # Amendments — ratified changes to the constitution
 
-> Version: 1.2.0 · rides with `constitution.md` as Tier-1 context.
+> Version: 1.3.0 · rides with `constitution.md` as Tier-1 context.
 >
 > The constitution is founding intent. **It does not morph.** Change arrives here:
 > proposed from the memory notes (`memory-amend propose`), ratified by a human via
@@ -42,3 +42,18 @@ doubt, write the doc.
 no PR review, and is invisible to sub-agents and humans reading the repo.
 Docs travel with the codebase. This principle already decided all six
 amendment declines before it was ratified itself.
+
+## PR to publish, always
+
+Status: Accepted · 2026-08-14 · Source: rethink-memory-and-visualization/feedback-pr-to-publish
+
+Anything that lands somewhere live — a protected branch, a deployed service, a
+published page, a wall display — arrives by PR. Generated artifacts included.
+Never push around a protected branch; move the commit to a branch, open the PR,
+let the gates run, merge. A human or a designed gatekeeper reviews every
+publish — the checkpoint is the point.
+
+**Rationale:** the checkpoint is where the machine checks itself. The day this
+was ratified, the drift gate blocked an atlas publish because a generated doc
+was stale — and printed the exact fix. A direct push would have skipped it.
+Branch protection is the decision, not an obstacle.

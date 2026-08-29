@@ -1,0 +1,8 @@
+=== verify output ===
+  FAIL  thing:has-header
+
+=== tracked changes (git diff) ===
+diff --git a/src/thing.swift b/src/thing.swift
++let x = 1
+
+=== untracked files created ===

@@ -60,7 +60,23 @@ spec:
             summary: "Beelink iGPU pinned >95% for 20m"
             description: "Sustained full GPU load — expected during long inference/ralph loops, but worth knowing if unexpected."
 
-        # --- System memory (only 32 GB after the 96 GB VRAM carveout) ---
+        # --- System memory (only ~30.5 GiB after the 96 GB VRAM carveout) ---
+        #
+        # Four rules, because a level gauge alone cannot see this box's failure mode.
+        # Measured 2026-08-18 at 72d uptime: 8 cumulative oom_kills, ~176 GiB paged
+        # out to swap, file cache squeezed to ~1.5 GiB — while MemAvailable sat at
+        # 81.7% used, i.e. comfortably *below* the 90% threshold the whole time.
+        # MemAvailable ignores swap, and an OOM kill frees memory, so a 10m-averaged
+        # level alert is structurally blind to both. Swap level + PSI stall + the
+        # oom_kill counter cover what it misses.
+        #
+        # Correction to the commit that introduced these rules (24b61a7): its message
+        # and PR body claimed a kill had landed "within the hour", i.e. that the 8
+        # kills were ongoing. That was wrong — it came from the increase() artifact
+        # described on BeelinkOOMKill below. Exact deltas show the counter flat over
+        # 90m, 24h and 7d, so all 8 kills predate 2026-08-11 and the box is tight but
+        # not actively killing. These rules are watchful instrumentation, not an
+        # active incident.
         - alert: BeelinkMemoryPressure
           expr: |
             (1 - node_memory_MemAvailable_bytes{instance="beelink"} / node_memory_MemTotal_bytes{instance="beelink"}) > 0.90
@@ -69,13 +85,97 @@ spec:
             severity: warning
           annotations:
             summary: "Beelink system memory over 90%"
-            description: "System RAM (32 GB) at {{ $value | humanizePercentage }} — Compose stack may be under pressure."
+            description: "System RAM (~30.5 GiB usable) at {{ $value | humanizePercentage }} — Compose stack may be under pressure. NOTE: this excludes swap; check BeelinkSwapHigh alongside it."
+
+        # The event this file previously could not see at all. /proc/vmstat oom_kill
+        # is kernel state — it survives node-exporter restarts and resets only on
+        # reboot. Fires for ~1h after a kill.
+        # Triage: `journalctl -k | grep -i "killed process"` on the Beelink to see
+        # WHAT died — an inference process, a harness container, or the Compose stack.
+        #
+        # DO NOT rewrite this as increase(...[1h]) > 0. That was the original form
+        # and it is wrong for this metric. `increase` extrapolates to the range
+        # edges, and on a flat low-cardinality integer counter it yields a phantom
+        # positive: observed 2026-08-18, increase(...[1h]) reported > 0.5 while the
+        # exact delta over 90m/24h/7d was 0 — i.e. it claimed a kill that never
+        # happened. (Suspected mechanism: a short-history series matching the
+        # selector, which `-` drops but `increase` extrapolates. Not fully isolated;
+        # the behaviour is reproducible regardless.)
+        #
+        # Offset subtraction is exact integer arithmetic — no extrapolation, no
+        # false positive. Known tradeoff: if the series did not exist 1h ago (fresh
+        # Prometheus or a re-registered target) this returns nothing and we are
+        # blind for one hour. That is the better failure: a false OOM-critical page
+        # costs more trust than an hour of silence.
+        - alert: BeelinkOOMKill
+          expr: |
+            (node_vmstat_oom_kill{instance="beelink"}
+               - node_vmstat_oom_kill{instance="beelink"} offset 1h) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Beelink OOM-killed a process in the last hour"
+            description: "The kernel killed {{ $value }} process(es) for memory. System RAM is only ~30.5 GiB after the 96 GB VRAM carveout. Find the victim with `journalctl -k | grep -i \"killed process\"` on the Beelink."
+
+        # Swap displacement — the pressure MemAvailable can't report. 8 GiB of swap
+        # exists; sustained heavy use means the working set no longer fits RAM and
+        # reads are paying disk latency.
+        #
+        # Threshold is 60%, NOT 50%, deliberately: measured 2026-08-18, swap sits at
+        # 49.99% used as the steady-state baseline. A 50% threshold would flap on
+        # the noise floor. 60% therefore means "deteriorating from an already-bad
+        # baseline" — the baseline itself is covered by BeelinkOOMKill/MemoryStalled.
+        # If the baseline is ever driven down (harness moved off-box, carve reduced),
+        # lower this to match.
+        - alert: BeelinkSwapHigh
+          expr: |
+            node_memory_SwapTotal_bytes{instance="beelink"} > 0
+              and
+            (1 - node_memory_SwapFree_bytes{instance="beelink"} / node_memory_SwapTotal_bytes{instance="beelink"}) > 0.60
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink swap over 60% used"
+            description: "Swap at {{ $value | humanizePercentage }} (baseline is ~50%) — the working set no longer fits in ~30.5 GiB of RAM. Model heat-ups slow as file cache gets squeezed out. Consider stopping idle harness containers or `aimode family`."
+
+        # PSI: the only metric here that measures what pressure actually COSTS
+        # (time stalled) rather than inferring it from a level. `waiting` = some
+        # tasks stalled; 5% of wall-clock is already a real tax on a box this size.
+        - alert: BeelinkMemoryStalled
+          expr: |
+            rate(node_pressure_memory_waiting_seconds_total{instance="beelink"}[5m]) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Beelink stalling on memory ({{ $value | humanizePercentage }} of wall time)"
+            description: "Tasks are blocking on memory reclaim for over 5% of wall-clock time, sustained 10m. This is real slowdown, not just a high gauge — inference and ralph loops are both paying for it."
 
         # --- CPU saturation (load per core) ---
+        #
+        # `scalar()` on the denominator is load-bearing, not cosmetic. Without it this
+        # rule silently evaluates to nothing and can never fire — verified against live
+        # Prometheus 2026-08-18: both halves returned values on their own (node_load5
+        # = 0.72, core count = 32) while the division returned an empty vector.
+        #
+        # Why: a binary operator between two instant vectors matches on the FULL label
+        # set. The numerator carries {instance="beelink", job="beelink-node"}; the
+        # aggregated denominator carries no labels at all, so there is no matching pair
+        # and the result is empty. `scalar()` converts it to a plain number, which is
+        # matched against every sample instead. `/ on() group_left()` works too; scalar
+        # is the smaller change and reads better here.
+        #
+        # This is the same class of fault as the increase() artifact on BeelinkOOMKill
+        # above, inverted: that one fired without an event, this one cannot fire at
+        # all. A rule showing health=ok and state=inactive in the Prometheus UI proves
+        # only that it parsed — not that it is capable of firing. Check new rules by
+        # evaluating the expression, not by reading the rules page.
         - alert: BeelinkCPUSaturated
           expr: |
             node_load5{instance="beelink"}
-              / count(count(node_cpu_seconds_total{instance="beelink"}) by (cpu)) > 2
+              / scalar(count(count(node_cpu_seconds_total{instance="beelink"}) by (cpu))) > 2
           for: 15m
           labels:
             severity: warning

@@ -81,7 +81,7 @@ harness attach qwen              # pop in and drive opencode/qwen live
 harness attach claude            # pop in to a real Claude Code session
 harness attach codex             # pop in to an OpenAI Codex CLI session
 harness run qwen "specs/foo"     # fire-and-forget ralph-qwen run; attach anytime to watch
-harness run codex "specs/foo"    # same, but ralph-codex — a separate billing lane
+harness run codex "specs/foo"    # same loop, Codex binding — a separate billing lane
 harness status                   # are the containers up?
 harness sync-ctx [claude|codex]  # ship a snapshot of the laptop's ctx index (default: claude)
 harness push-memory              # laptop main -> GitHub -> container fetch (no auto-merge)
@@ -102,19 +102,46 @@ calls so the sheet is never injected twice.
 - **Use:** `scripts/ralph-qwen.sh specs/<feature>` from a git worktree on a throwaway branch.
 - **Opt-out:** `RALPH_SHEET=off`.
 
-## `ralph-codex.sh` — the same loop, driven by the OpenAI Codex CLI
+## Executor bindings — one build loop, swappable executor
 
-Structurally identical to `ralph-qwen.sh` — same spec-dir contract, same fresh session per
-attempt, same deterministic `verify.sh` gate, same stop-for-a-human. Only the executor swaps
-(`codex exec` instead of `oc run`), and codex reads `AGENTS.md` natively so there's no second
-brief to keep in sync.
+`ralph-qwen.sh` drives whatever `RALPH_EXEC_CMD` points at. A binding is a few lines: take the
+prompt as `$1`, read `ROOT` from the environment, run the tool, let stdout be the transcript.
+The loop owns the tasks, the gate, the retries, the evidence and the watchdog.
 
-- **Use:** `scripts/ralph-codex.sh specs/<feature>` from a git worktree on a throwaway branch.
-- **Codesheet defaults OFF here** (`RALPH_SHEET=on` to enable) — the 20-56% win was measured
-  on a 30B with a small window and is unmeasured for codex.
-- **Sandbox:** defaults to `danger-full-access` because the *container* is the boundary.
-  On a laptop there is no outer sandbox — use `CODEX_SANDBOX=workspace-write`.
-- **Watchdog:** `CODEX_RUN_TIMEOUT` (default 900s), same background-kill pattern as `oc`.
+| binding | executor |
+|---|---|
+| `scripts/exec-qwen.sh` | `oc run` (the default when `RALPH_EXEC_CMD` is unset) |
+| `scripts/exec-codex.sh` | `codex exec` — sandbox via `CODEX_SANDBOX`, default `danger-full-access` because the container is the boundary |
+
+Pick one with a strategy: `scripts/run-loop.sh build-codex specs/<feature>`. Adding a third
+executor is a binding plus a `.env`, not a copy of the loop — this replaced a 204-line duplicate
+that three specs had to police for drift. See `specs/executor-binding`.
+
+- **Knobs:** `RALPH_EXEC_TIMEOUT` (default 480s, enforced by the loop for every binding),
+  `RALPH_SHEET` (codesheet; on by default, `build-codex.env` turns it off — the 20-56% win was
+  measured on a 30B and is unmeasured for Codex).
+- **`RALPH_AGENT` names the executor in the evidence.** A strategy must set it, or a Codex run
+  is filed as `qwen-<pid>`.
+
+## `supervise.sh` — restart a loop that never started
+
+    scripts/supervise.sh <strategy> <spec-dir>          # from the target worktree root
+    OC_RUN_TIMEOUT=2400 RALPH_RETRIES=3 scripts/supervise.sh build-then-judge specs/v1
+
+Wraps `run-loop.sh` and recovers the one fault the `oc` watchdog cannot: opencode logs a
+`stream` line, never receives a first token, and never returns. Four for four in one session —
+one run sat 53 minutes against a 2400 s budget — so detection has to live outside the timeout
+that failed to fire.
+
+- **Discriminator is size, not staleness.** ≤40 B *and* stale = stillborn; an 82 KB log idle
+  25 minutes is a healthy run buffering. Kills the process group, then sweeps by name.
+- **Snapshots before killing.** ralph writes its `.diff` only when *verify* fails, so a killed
+  attempt leaves no evidence unless someone takes it first: log dir, worktree diff, status and
+  untracked files land in `~/.harness/evidence/<repo>/killed-attempts/`.
+- **Stamps the epitaph.** Calls `hb_mark <status-file> killed`, so the orphaned heartbeat says
+  `killed` instead of freezing at `running` forever.
+- **Not a retry loop.** It never re-runs a task that failed *verification* — that is ralph's
+  job and it burns attempts deliberately. Any nonzero exit that is not a hang stops the run.
 
 ## `agent-bus` — Matrix chat CLI
 
@@ -166,6 +193,12 @@ JUDGE_CMD=scripts/ralph-judge-codex.sh EXECUTOR_CMD=scripts/ralph-judge-exec-qwe
 
 State + report land under the worktree's git-dir (`ralph-judge/ledger.jsonl`, `report.json`);
 exit 0 = completed (see report), 1 = aborted fail-closed, 2 = gate-unstable/needs a human.
+
+The **ledger is cumulative** across invocations; the report describes all of it. Read the two
+counts together: `rounds_run` is this invocation's rounds, `ledger_sessions` is how many
+invocations the `accepted`/`rejected`/`gate_gaps` lists span. Every record carries `session`
+and a `head` SHA, so a finding can be joined to the build it was found against — and a dry
+re-run that recorded nothing will correctly show its own `session` absent from the ledger.
 
 ## Running loops from a fresh worktree — the opencode.json gotcha
 
