@@ -11,6 +11,7 @@ resources:
   - dashboard-dns-bypass.yaml
   - dashboard-new-horizons.yaml
   - prometheusrule-beelink.yaml
+  - prometheusrule-litellm.yaml
   - prometheusrule-media-nfs.yaml
   - prometheusrule-external-secrets.yaml
   - ingress.yaml
