@@ -243,6 +243,16 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  harness-coordinator.json: |
+    {
+      "notification_name_list": ["discord"],
+      "type": "http",
+      "name": "Harness Fleet",
+      "url": "https://harness.lab.mtgibbs.dev/api/runs",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   romm.json: |
     {
       "notification_name_list": ["discord"],

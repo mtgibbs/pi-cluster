@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-coordinator
+  namespace: harness
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the state file is on a ReadWriteOnce volume, so a second pod
+  # cannot mount it while the first still holds it — a rolling update would wedge on the new pod
+  # waiting for a volume the old one will not release until the new one is ready.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: harness-coordinator
+  template:
+    metadata:
+      labels:
+        app: harness-coordinator
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: coordinator
+          image: ghcr.io/mtgibbs/harness-coordinator:0.1.0 # {"$imagepolicy": "flux-system:harness-coordinator"}
+          ports:
+            - name: http
+              containerPort: 8877
+          env:
+            - name: HARNESS_REPORT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: harness-coordinator
+                  key: token
+            - name: COORD_STATE_PATH
+              value: /var/lib/coordinator/state.json
+            # Bounds, stated here rather than left to the image's defaults so an operator can see
+            # what this will hold without reading Python.
+            - name: COORD_MAX_RUNS
+              value: "200"
+            - name: COORD_MAX_ARTIFACT_BYTES
+              value: "1048576"
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/coordinator
+          readinessProbe:
+            httpGet:
+              # /api/runs, not /: the board is a static page that renders even when the service
+              # holds nothing, so probing it would report ready while the API behind it was
+              # broken — the reading a probe must never give.
+              path: /api/runs
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/runs
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: harness-coordinator-state

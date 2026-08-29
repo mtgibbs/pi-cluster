@@ -1,0 +1,29 @@
+# Reachable only through Pi-hole's split-horizon DNS, like every other *.lab.mtgibbs.dev name —
+# so this is a LAN route, not a public one. That is what makes it compatible with ADR-001 D9,
+# which keeps the DISPATCH api cluster-internal with no ingress: the API creates compute and stays
+# unreachable; this service is read-mostly and is the thing a person opens.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: harness-coordinator
+  namespace: harness
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - harness.lab.mtgibbs.dev
+      secretName: harness-coordinator-tls
+  rules:
+    - host: harness.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: harness-coordinator
+                port:
+                  number: 8877
