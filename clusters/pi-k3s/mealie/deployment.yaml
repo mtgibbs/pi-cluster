@@ -28,7 +28,7 @@ spec:
                       - pi5-worker-2
       containers:
         - name: mealie
-          image: ghcr.io/mealie-recipes/mealie:v3.20.1
+          image: ghcr.io/mealie-recipes/mealie:v3.24.0
           ports:
             - name: http
               containerPort: 9000
