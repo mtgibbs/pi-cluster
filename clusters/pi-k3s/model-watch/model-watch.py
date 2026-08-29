@@ -221,7 +221,7 @@ worth testing, say so plainly in one line rather than padding. No preamble, no s
 def call_llm(prompt):
     base = os.environ["LITELLM_BASE_URL"].rstrip("/")
     body = json.dumps({
-        "model": os.environ.get("LITELLM_MODEL", "qwen3-30b-instruct"),
+        "model": os.environ.get("LITELLM_MODEL", "hot-reasoner"),
         "messages": [{"role": "system", "content": SYSTEM},
                      {"role": "user", "content": prompt}],
         "temperature": 0.3, "max_tokens": 700,

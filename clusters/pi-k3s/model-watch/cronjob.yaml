@@ -32,8 +32,12 @@ spec:
               env:
                 - name: LITELLM_BASE_URL
                   value: "https://ai.lab.mtgibbs.dev/v1"
+                # The LiteLLM ALIAS, not a concrete model. hot-reasoner currently
+                # resolves to ollama_chat/qwen3.5:35b; pinning the version instead
+                # would need a manifest edit AND a virtual-key re-mint on every
+                # model bump. The virtual key is scoped to this exact name.
                 - name: LITELLM_MODEL
-                  value: "qwen3-30b-instruct"
+                  value: "hot-reasoner"
                 - name: LITELLM_API_KEY
                   valueFrom:
                     secretKeyRef:
