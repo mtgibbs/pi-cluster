@@ -126,7 +126,11 @@ treat them as literal facts rather than starting points.
    to test the classifier offline against known answers. Hard-coding the hostname makes
    the feature untestable and will fail the gate.
 - **LiteLLM:** `https://ai.lab.mtgibbs.dev/v1`, OpenAI-compatible, `Authorization: Bearer
-  <key>`. Model `qwen3-30b-instruct`. Key from secret `model-watch-secret`, key
+  <key>`. Model `hot-reasoner` — the LiteLLM alias, not a pinned version, so a model
+  bump does not require re-minting the virtual key. (`qwen3-30b-instruct`, named in
+  the original draft, was `ollama rm`'d and deregistered from LiteLLM on 2026-06-06
+  after it wedged the GPU on Vulkan — see docs/beelink-ai-stack.md.) Key from secret
+  `model-watch-secret`, key
   `litellm-api-key`, backed by 1Password item `model-watch/litellm-key`.
 - **ntfy:** publish in-cluster to `http://ntfy.ntfy.svc.cluster.local/<topic>` with HTTP
   Basic auth, user `family`, password from secret `model-watch-secret` key

@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_58 ExternalSecrets · 42 1Password items · 68 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_59 ExternalSecrets · 43 1Password items · 69 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -121,6 +121,8 @@ graph LR
   n11ze3z4(["🔑 ntfy"])
   nojsaoj["vector-ntfy<br/>(log-aggregation)"]
   n11ze3z4 --> nojsaoj
+  n1uq0z0w["model-watch-secret<br/>(model-watch)"]
+  n11ze3z4 --> n1uq0z0w
   nldvrgo["ntfy-secret<br/>(ntfy)"]
   n11ze3z4 --> nldvrgo
   n1roymf4(["🔑 pihole"])
@@ -208,6 +210,8 @@ graph LR
     - `backup-jobs/mealie-db-password`
     - `mealie/mealie-ai-secret`
     - `mealie/mealie-secret`
+- **model-watch** → 1 ExternalSecret(s):
+    - `model-watch/model-watch-secret`
 - **mtgibbs-github** → 1 ExternalSecret(s):
     - `mtgibbs-site/mtgibbs-github`
 - **mtgibbs-spotify** → 1 ExternalSecret(s):
@@ -226,8 +230,9 @@ graph LR
     - `new-horizons/new-horizons-secrets`
 - **newshosting** → 1 ExternalSecret(s):
     - `media/newshosting-credentials`
-- **ntfy** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **ntfy** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `log-aggregation/vector-ntfy`
+    - `model-watch/model-watch-secret`
     - `ntfy/ntfy-secret`
 - **opensubtitles** → 1 ExternalSecret(s):
     - `media/opensubtitles-credentials`
@@ -400,6 +405,9 @@ graph LR
 - **`media/servarr-api-keys`** ← `radarr.lab.mtgibbs.dev`, `sonarr.lab.mtgibbs.dev`
   produces Secret `servarr-api-keys` in `media`
     → `media/import-resolver` (CronJob, env)
+- **`model-watch/model-watch-secret`** ← `model-watch`, `ntfy`
+  produces Secret `model-watch-secret` in `model-watch`
+    → `model-watch/model-watch` (CronJob, env)
 - **`monitoring/alertmanager-discord`** ← `alertmanager`
   produces Secret `alertmanager-discord` in `monitoring`
     → _kube-prometheus-stack HelmRelease (Alertmanager Discord receiver, valuesFrom)_ (curated: not a pod-spec ref)
