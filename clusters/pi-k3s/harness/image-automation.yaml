@@ -7,8 +7,13 @@ metadata:
 spec:
   image: ghcr.io/mtgibbs/harness-coordinator
   interval: 5m0s
+  # ghcr-pull-secret, not ghcr-credentials — the latter is not a secret that exists.
+  # clusters/pi-k3s/flux-system/ghcr-credentials.yaml is a FILE name; the ExternalSecret
+  # inside it targets `ghcr-pull-secret`. harness-coordinator is a private package, so the
+  # scan genuinely needs credentials and a dangling ref leaves it InProgress forever.
+  # private-exit-node — the only other private image with automation — already uses this.
   secretRef:
-    name: ghcr-credentials
+    name: ghcr-pull-secret
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
