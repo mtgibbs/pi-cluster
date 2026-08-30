@@ -1,0 +1,7 @@
+# The blast radius of the fleet. Deliberately NOT `harness`, which holds the coordinator: the
+# dispatcher's Role is namespaced (rbac.yaml), so the namespace boundary IS the containment, and a
+# worker that gets compromised should not land beside the thing it reports to.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: harness-fleet

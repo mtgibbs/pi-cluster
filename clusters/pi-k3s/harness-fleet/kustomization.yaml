@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No top-level `namespace:` here, matching the sibling clusters/pi-k3s/harness/kustomization.yaml.
+# That directory omits it because kustomize's namespace transformer rewrites EVERY namespaced
+# resource and would drag its image-automation.yaml out of flux-system; this directory ships no
+# image automation today, but keeping the same shape means adding one later is a one-line change
+# rather than a debugging session. Every file below declares its own `namespace: harness-fleet`.
+resources:
+  - namespace.yaml
+  - external-secret-ghcr.yaml
+  - serviceaccount-default.yaml
