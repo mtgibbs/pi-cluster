@@ -27,10 +27,13 @@ Every one of those omissions is answered by a file in this directory.
 **In `mtgibbs/harness`:**
 
 1. An image carrying `dispatcher.py`, `api.py` and `kubectl`.
-2. A pinned name for the clone credential. `run-task.sh` clones a plain https URL with no token in
-   it and relies on a credential helper written at container start, but no entrypoint writing
-   `~/.git-credentials` exists yet. `HARNESS_CLONE_TOKEN` in the worker secrets is this repo's
-   provisional guess and should be reconciled with whatever that entrypoint reads.
+2. ~~A pinned name for the clone credential.~~ **Named 2026-08-30** — `HARNESS_CLONE_PAT`,
+   pinned in that repo's `docs/executors.md` contract table by mtgibbs/harness#67 and adopted
+   here. It is *not* `HARNESS_GITHUB_PAT`, the name that appears once in `20260829a`'s prose:
+   that was written before `20260830a` split one PAT into a clone identity and an outcome
+   identity, and beside `HARNESS_OUTCOME_PAT` it reads as *the* GitHub credential. What is still
+   missing is the `entrypoint.sh` that reads it and writes `~/.git-credentials` — it has a name
+   now, not an implementation, and it lands with the image in (1).
 3. A `loop-executor-codex` image. `harness-worker-build-codex` exists here, but CI builds no image
    that carries the `codex` CLI, so the strategy has credentials and nowhere to run.
 
