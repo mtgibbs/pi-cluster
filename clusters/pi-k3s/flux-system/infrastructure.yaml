@@ -790,3 +790,29 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 36. harness-fleet - the namespace a dispatched fleet worker lands in. Deliberately empty of
+# workloads: it holds only what the harness's rendered Job does *not* carry — a `default`
+# ServiceAccount with the GHCR pull secret attached (the Job names no imagePullSecrets), a
+# LimitRange supplying the requests the ResourceQuota demands (the Job names no resources), the
+# quota itself, RBAC for a dispatcher that has no image yet, and the two per-strategy worker
+# secrets. Registering it creates a namespace nothing runs in — that is the expected state, and
+# `clusters/pi-k3s/harness-fleet/README.md` says what unblocks each half. The four
+# `harness-fleet/*` 1Password fields were minted 2026-08-30, so `wait: true` has what it needs:
+# from here it reports FAILED if an ExternalSecret stops resolving, which is the point.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: harness-fleet
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/harness-fleet
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
