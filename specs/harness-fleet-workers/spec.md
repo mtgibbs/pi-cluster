@@ -172,5 +172,13 @@ bash 3.2: no `mapfile`, no associative arrays. This gate is most likely to be ru
   person reads when provisioning it.
 - **OQ2 — which node carries `harness-fleet=true`?** `fleet-dispatch.md` says the heavy lifting is
   in the model on the Beelink anyway, so the Pi running the Job may be doing very little.
+
+  **RESOLVED 2026-08-30 (Matt): pi5-worker-2**, as `node-config/pi5-worker-2.yaml`. Chosen by
+  elimination rather than by load measurement — pi5-worker-1 carries the Pi-hole secondary, the
+  Tailscale exit node, Immich and the MCP servers, and a runaway build contending with the DNS
+  secondary presents as "the internet is broken" rather than "a build is slow"; pi3-worker-2 has
+  1GB against a quota that permits 4Gi. The label is additive, with no taint, so the node keeps
+  taking ordinary scheduler-driven work and the namespace ResourceQuota is what bounds the
+  fleet's share.
 - **OQ3 — one quota for the namespace, or per strategy?** Two strategies competing for one slot is
   a scheduling decision nobody has had to make yet.

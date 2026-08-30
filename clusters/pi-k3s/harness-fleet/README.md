@@ -60,10 +60,15 @@ Every one of those omissions is answered by a file in this directory.
    fields existed would have produced a Kustomization that failed on every reconcile and alerted
    about a namespace nobody was using. From here that failure mode inverts into a useful one —
    `wait: true` means the Kustomization goes red if an ExternalSecret ever stops resolving.
-6. **The node label.** The rendered Job's `nodeSelector` is `harness-fleet: "true"` and that label
-   exists nowhere in this repo. `node-config/` is where it would go. Which node carries it is open
-   (OQ2 in the spec) — `fleet-dispatch.md` notes the heavy lifting happens in the model on the
-   Beelink, so the Pi running the Job may be doing very little.
+6. ~~**The node label.**~~ **Decided 2026-08-30 — `pi5-worker-2`**, committed as
+   `node-config/pi5-worker-2.yaml`. The rendered Job's `nodeSelector` is `harness-fleet: "true"`,
+   so without the label a dispatched run sits Pending with no events worth reading.
+
+   **It is not live until someone applies it.** `node-config/` is rebuild persistence — nothing
+   consumes those files automatically, and the label lands on the next k3s restart. The live half
+   is `kubectl label node pi5-worker-2 harness-fleet=true --overwrite`, which this container
+   cannot run. Both halves are needed: the `kubectl` one works now and is lost on rebuild, the
+   file survives the rebuild and does nothing until a restart.
 7. **A Deployment for the dispatcher**, using the `harness-dispatcher` ServiceAccount from
    `rbac.yaml`, once (1) exists. Its environment is what binds strategy to image and secret:
    `HARNESS_WORKER_IMAGE_<STRATEGY>` and `HARNESS_WORKER_SECRET_<STRATEGY>`, upper-snake — so
