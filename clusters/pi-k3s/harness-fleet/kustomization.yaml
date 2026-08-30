@@ -9,3 +9,6 @@ resources:
   - namespace.yaml
   - external-secret-ghcr.yaml
   - serviceaccount-default.yaml
+  - rbac.yaml
+  - resourcequota.yaml
+  - limitrange.yaml

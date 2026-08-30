@@ -1,0 +1,44 @@
+# The dispatcher's identity and its bounds.
+#
+# A Role, never a ClusterRole. fleet-dispatch.md's phrase is "RBAC scoped to creating Jobs in one
+# namespace", and the reason is blunt: a dispatcher that can create Jobs cluster-wide is a
+# dispatcher that can create Jobs in kube-system. The namespace boundary is the containment, so
+# widening this to cluster scope removes the only thing standing between a bug in ~140 lines of
+# validate-map-launch and the rest of the cluster.
+#
+# It grants NO verb on secrets, deliberately. A component that launches workers does not need to
+# READ the credentials those workers receive — and the credentials in this namespace include a PAT
+# that can push code. pods and pods/log are read-only and are here for a human: a Job that failed
+# is unreadable without them, and `ttlSecondsAfterFinished: 3600` means the window is short.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness-dispatcher
+  namespace: harness-fleet
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harness-dispatcher
+  namespace: harness-fleet
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harness-dispatcher
+  namespace: harness-fleet
+subjects:
+  - kind: ServiceAccount
+    name: harness-dispatcher
+    namespace: harness-fleet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: harness-dispatcher

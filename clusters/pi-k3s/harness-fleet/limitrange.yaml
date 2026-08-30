@@ -1,0 +1,26 @@
+# Defaults, and the reason this file has to exist.
+#
+# The moment a ResourceQuota constrains requests.cpu or requests.memory, Kubernetes REJECTS any pod
+# in the namespace that does not set them. The Job the harness renders carries no `resources` at
+# all — the same deliberate minimalism that makes serviceaccount-default.yaml load-bearing — so
+# without a LimitRange supplying defaults, every dispatched run would be refused at admission by
+# the very quota meant to bound it, and the error would name the quota rather than the missing
+# field.
+#
+# So the namespace supplies what the Job body will never carry, exactly as it does for the pull
+# secret. The defaults are deliberately generous per worker and cheap in aggregate: the loop shells
+# out to a model on the Beelink and spends most of its life waiting on HTTP.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: harness-fleet-defaults
+  namespace: harness-fleet
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 2Gi
+      defaultRequest:
+        cpu: 200m
+        memory: 512Mi
