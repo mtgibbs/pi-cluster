@@ -36,10 +36,20 @@ Every one of those omissions is answered by a file in this directory.
 
 **In this repo:**
 
-4. **The 1Password fields.** ESO will report `SecretSyncErr` until the `pi-cluster` vault has
-   `harness-fleet/litellm-key`, `harness-fleet/codex-api-key`, `harness-fleet/clone-token` and
-   `harness-fleet/outcome-pat`. `harness-coordinator/token` and `ghcr-read-token/token` already
-   exist and are reused. Minting these needs `op` on the laptop — the container cannot.
+4. **The 1Password fields.** ESO will report `SecretSyncErr` until the `pi-cluster` vault has all
+   four fields on a `harness-fleet` item. `harness-coordinator/token` and `ghcr-read-token/token`
+   already exist and are reused. Minting these needs `op` on the laptop — the container cannot.
+
+   | field | what to create |
+   |---|---|
+   | `clone-token` | fine-grained PAT — **Contents: read**. Nothing else. It only ever clones |
+   | `outcome-pat` | fine-grained PAT — **Contents: RW, Pull requests: RW, Workflows: RW** (that last one is OQ1, decided below). Note this is the fine-grained *Workflows* permission, not classic `repo`+`workflow` — the classic pair also grants everything else in `repo`, which is the opposite of what a worker's credentials should be |
+   | `litellm-key` | a LiteLLM virtual key, scoped to the models `build-converge` may call. Per-consumer on purpose: cost attribution and independent revocation |
+   | `codex-api-key` | the OpenAI key `codex exec` reads |
+
+   Scope both PATs to the repos the fleet may actually land work in, not the whole account. The two
+   are separate identities for a reason — one PAT doing both means a worker that only ever needed
+   to read is holding the credential that can write.
 5. **The Flux Kustomization.** This directory is deliberately *not* yet registered in
    `clusters/pi-k3s/flux-system/infrastructure.yaml`: registering it before step 4 produces a
    Kustomization that fails on every reconcile and alerts about a namespace nobody is using. Add it
@@ -56,10 +66,22 @@ Every one of those omissions is answered by a file in this directory.
 The reason this namespace looks abandoned is that its two halves land in different repositories.
 Steps 1–3 are harness's; 4–7 are this repo's, and 4 gates 5.
 
+## Decided
+
+- **OQ1 — the outcome PAT carries workflow write.** Matt, 2026-08-30. A worker that cannot touch
+  `.github/workflows/` cannot land a whole class of the work it exists to do, and the alternative —
+  `gh api --method PUT` — leaves no commit in the branch's history, which breaks the property the
+  whole evidence corpus rests on: that what the loop did is readable as a diff.
+
+  **What this buys the attacker, stated plainly:** a compromised worker can open a PR that edits the
+  workflows which gate its own PRs. It cannot merge that PR. The containment is therefore branch
+  protection on the consumer repo plus a human (or `review-hub`) on the required review — not the
+  token's scope, which was never going to be the thing that stopped it. What the PAT still may not
+  do is create compute: that identity lives with the coordinator and is absent from every worker
+  secret here.
+
 ## Still open
 
-- **OQ1** — does the outcome PAT need `workflow` scope? Without it a worker cannot land a change
-  under `.github/workflows/`; with it, the widest-reaching identity gets wider.
 - **OQ3** — one quota for the namespace, or one per strategy? Two strategies competing for one slot
   is a scheduling decision nobody has had to make yet.
 

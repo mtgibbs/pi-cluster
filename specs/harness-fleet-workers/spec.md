@@ -167,6 +167,9 @@ bash 3.2: no `mapfile`, no associative arrays. This gate is most likely to be ru
 - **OQ1 — does the outcome PAT need `workflow` scope?** Without it a worker cannot land a change
   under `.github/workflows/`; with it, the widest-reaching identity in the table gets wider. The
   `gh api --method PUT` path works and needs no scope, but leaves no commit in the branch's history.
+  **RESOLVED 2026-08-30 (Matt): yes — fine-grained Workflows: write.** The reasoning and the
+  resulting threat model live in `clusters/pi-k3s/harness-fleet/README.md`, which is the doc a
+  person reads when provisioning it.
 - **OQ2 — which node carries `harness-fleet=true`?** `fleet-dispatch.md` says the heavy lifting is
   in the model on the Beelink anyway, so the Pi running the Job may be doing very little.
 - **OQ3 — one quota for the namespace, or per strategy?** Two strategies competing for one slot is
