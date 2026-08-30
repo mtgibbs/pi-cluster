@@ -1,0 +1,31 @@
+# k3s node config for pi5-worker-2.
+# DEPLOY TO: /etc/rancher/k3s/config.yaml  ON pi5-worker-2
+#
+# (No IP recorded: ARCHITECTURE.md gives addresses for pi-k3s .55, pi5-worker-1 .56 and
+# pi3-worker-2 .51, but never this node's. Left blank rather than guessed at — add it
+# here when someone reads it off the node.)
+#
+# ⚠️ MERGE, DO NOT CLOBBER. Unlike pi3-worker-2, this node may already have a
+# /etc/rancher/k3s/config.yaml from its install. `install -m 0644` over the top would
+# discard whatever is in it, and an agent that loses its server/token config does not
+# fail loudly — it fails at the next restart, which may be weeks later. Read the file
+# first; add the key if the file exists.
+#
+# Role: pi5-worker-2 carries the harness FLEET WORKERS — the ephemeral Jobs the
+# dispatcher creates in the `harness-fleet` namespace. The rendered Job's nodeSelector
+# is `harness-fleet: "true"`, so this label is what makes a dispatched run schedulable
+# at all; without it every Job sits Pending with no events worth reading.
+#
+# Why this node (OQ2 in specs/harness-fleet-workers/spec.md, decided 2026-08-30):
+# pi5-worker-1 carries the Pi-hole SECONDARY, the Tailscale exit node, Immich and the
+# MCP servers — a runaway build competing with the DNS secondary is the one contention
+# to avoid, because its symptom is "the internet is broken" rather than "a build is
+# slow". pi3-worker-2 has 1GB against a namespace quota that permits 4Gi. That leaves
+# pi5-worker-2, whose existing role is already "heavy workloads".
+#
+# This is additive: the label does not taint the node, so pi5-worker-2 keeps taking
+# ordinary scheduler-driven workloads. The ResourceQuota in clusters/pi-k3s/harness-fleet/
+# is what bounds the fleet's share (2 concurrent Jobs, 4 CPU / 4Gi in limits).
+
+node-label:
+  - "harness-fleet=true"
