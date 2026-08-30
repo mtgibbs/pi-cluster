@@ -12,3 +12,5 @@ resources:
   - rbac.yaml
   - resourcequota.yaml
   - limitrange.yaml
+  - external-secret-worker-build-converge.yaml
+  - external-secret-worker-build-codex.yaml
