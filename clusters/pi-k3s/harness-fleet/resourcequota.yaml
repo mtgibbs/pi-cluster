@@ -1,0 +1,24 @@
+# The cap on a runaway dispatcher.
+#
+# The concurrent-Job cap below is 2 because that is the number fleet-dispatch.md names — two runs
+# at once on one Pi, with the model work happening on the Beelink either way. The number is written
+# down with its reason because a bare "2" reads as arbitrary, and whoever raises it should know
+# what it was protecting: the rendered Job sets backoffLimit 0 so a Job does not retry, but nothing
+# in the dispatcher stops it creating a hundred of them, and a hundred pending pods is an outage of
+# everything else scheduled on that node.
+#
+# The compute limits are sized to exactly two workers at the LimitRange's defaults (limitrange.yaml)
+# — 2 x (2 CPU, 2Gi). They are a second, independent ceiling: raising the Job count alone will
+# start hitting these, which is the intended order of discovery.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: harness-fleet
+  namespace: harness-fleet
+spec:
+  hard:
+    count/jobs.batch: "2"
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi

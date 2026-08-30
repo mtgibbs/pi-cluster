@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_59 ExternalSecrets · 43 1Password items · 69 consumer edges · 15 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_62 ExternalSecrets · 44 1Password items · 69 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -77,12 +77,24 @@ graph LR
   n1uid43c(["🔑 ghcr-read-token"])
   n1dgsmvl["ghcr-pull-secret<br/>(flux-system)"]
   n1uid43c --> n1dgsmvl
+  ngm0cfn["ghcr-pull-secret<br/>(harness-fleet)"]
+  n1uid43c --> ngm0cfn
   ntfx3mc["ghcr-pull-secret<br/>(harness)"]
   n1uid43c --> ntfx3mc
   n1v7jq0b["ghcr-pull-secret<br/>(new-horizons)"]
   n1uid43c --> n1v7jq0b
   nada4m5["ghcr-pull-secret<br/>(private-exit-node)"]
   n1uid43c --> nada4m5
+  n8i3u24(["🔑 harness-coordinator"])
+  nq5a56a["harness-worker-build-codex<br/>(harness-fleet)"]
+  n8i3u24 --> nq5a56a
+  ngvl95k["harness-worker-build-converge<br/>(harness-fleet)"]
+  n8i3u24 --> ngvl95k
+  np8hd7e["harness-coordinator<br/>(harness)"]
+  n8i3u24 --> np8hd7e
+  n8ivklm(["🔑 harness-fleet"])
+  n8ivklm --> nq5a56a
+  n8ivklm --> ngvl95k
   n1ofxib0(["🔑 immich"])
   ny2dudm["immich-db-password<br/>(backup-jobs)"]
   n1ofxib0 --> ny2dudm
@@ -176,8 +188,9 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
-- **ghcr-read-token** `safe` → 4 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **ghcr-read-token** `safe` → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
+    - `harness-fleet/ghcr-pull-secret`
     - `harness/ghcr-pull-secret`
     - `new-horizons/ghcr-pull-secret`
     - `private-exit-node/ghcr-pull-secret`
@@ -185,8 +198,13 @@ graph LR
     - `backup-jobs/github-mirror-token`
 - **grafana** → 1 ExternalSecret(s):
     - `monitoring/grafana-secret`
-- **harness-coordinator** → 1 ExternalSecret(s):
+- **harness-coordinator** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `harness-fleet/harness-worker-build-codex`
+    - `harness-fleet/harness-worker-build-converge`
     - `harness/harness-coordinator`
+- **harness-fleet** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `harness-fleet/harness-worker-build-codex`
+    - `harness-fleet/harness-worker-build-converge`
 - **healthchecks** → 1 ExternalSecret(s):
     - `monitoring/alertmanager-healthchecks`
 - **immich** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
@@ -327,6 +345,15 @@ graph LR
 - **`flux-system/nfs-credentials`** ← `nas`
   produces Secret `nfs-credentials` in `flux-system`
     → _Flux Kustomizations (postBuild.substituteFrom NAS uid/gid, 4 refs in infrastructure.yaml)_ (curated: not a pod-spec ref)
+- **`harness-fleet/ghcr-pull-secret`** ← `ghcr-read-token`
+  produces Secret `ghcr-pull-secret` in `harness-fleet`
+    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
+- **`harness-fleet/harness-worker-build-codex`** ← `harness-coordinator`, `harness-fleet`
+  produces Secret `harness-worker-build-codex` in `harness-fleet`
+    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
+- **`harness-fleet/harness-worker-build-converge`** ← `harness-coordinator`, `harness-fleet`
+  produces Secret `harness-worker-build-converge` in `harness-fleet`
+    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
 - **`harness/ghcr-pull-secret`** ← `ghcr-read-token`
   produces Secret `ghcr-pull-secret` in `harness`
     → `harness/harness-coordinator` (Deployment, imagePull)
