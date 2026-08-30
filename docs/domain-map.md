@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_39 services · 70 workloads · 40 Flux Kustomizations · 8 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_40 services · 70 workloads · 40 Flux Kustomizations · 8 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -225,6 +225,9 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - storage: `harness-coordinator-state`
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `harness.lab.mtgibbs.dev`
+
+### harness-fleet
+  - calls: → `harness`
 
 ### homepage  ·  Flux: `homepage` (after: `ingress`, `cert-manager-config`)
 - **Deployment/homepage** — `busybox`, `ghcr.io/gethomepage/homepage`
