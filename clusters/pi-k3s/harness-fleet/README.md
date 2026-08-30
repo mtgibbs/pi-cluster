@@ -36,9 +36,10 @@ Every one of those omissions is answered by a file in this directory.
 
 **In this repo:**
 
-4. **The 1Password fields.** ESO will report `SecretSyncErr` until the `pi-cluster` vault has all
-   four fields on a `harness-fleet` item. `harness-coordinator/token` and `ghcr-read-token/token`
-   already exist and are reused. Minting these needs `op` on the laptop — the container cannot.
+4. ~~**The 1Password fields.**~~ **DONE 2026-08-30.** All four fields exist on a `harness-fleet`
+   item in the `pi-cluster` vault. `harness-coordinator/token` and `ghcr-read-token/token` were
+   reused, not re-minted. Kept below as the record of what each credential is and why it is scoped
+   the way it is — the next person to rotate one needs this table more than the person who made it.
 
    | field | what to create |
    |---|---|
@@ -50,10 +51,12 @@ Every one of those omissions is answered by a file in this directory.
    Scope both PATs to the repos the fleet may actually land work in, not the whole account. The two
    are separate identities for a reason — one PAT doing both means a worker that only ever needed
    to read is holding the credential that can write.
-5. **The Flux Kustomization.** This directory is deliberately *not* yet registered in
-   `clusters/pi-k3s/flux-system/infrastructure.yaml`: registering it before step 4 produces a
-   Kustomization that fails on every reconcile and alerts about a namespace nobody is using. Add it
-   the same way `harness` is registered, after the fields exist.
+5. ~~**The Flux Kustomization.**~~ **DONE 2026-08-30.** Registered as entry 36 in
+   `clusters/pi-k3s/flux-system/infrastructure.yaml`, `dependsOn: external-secrets-config`, the
+   same shape as `harness`. It was held back until step 4 on purpose: registering it before the
+   fields existed would have produced a Kustomization that failed on every reconcile and alerted
+   about a namespace nobody was using. From here that failure mode inverts into a useful one —
+   `wait: true` means the Kustomization goes red if an ExternalSecret ever stops resolving.
 6. **The node label.** The rendered Job's `nodeSelector` is `harness-fleet: "true"` and that label
    exists nowhere in this repo. `node-config/` is where it would go. Which node carries it is open
    (OQ2 in the spec) — `fleet-dispatch.md` notes the heavy lifting happens in the model on the
@@ -64,7 +67,9 @@ Every one of those omissions is answered by a file in this directory.
    `build-codex` reads `HARNESS_WORKER_IMAGE_BUILD_CODEX` / `HARNESS_WORKER_SECRET_BUILD_CODEX`.
 
 The reason this namespace looks abandoned is that its two halves land in different repositories.
-Steps 1–3 are harness's; 4–7 are this repo's, and 4 gates 5.
+Steps 1–3 are harness's; 4–7 are this repo's. 4 and 5 are done — what remains on this side is
+6 (a node label, still OQ2) and 7 (a dispatcher Deployment), and 7 cannot start until harness
+ships 1. So the critical path now runs entirely through the other repo.
 
 ## Decided
 
@@ -92,3 +97,8 @@ never touches a cluster. It cannot prove the pull secret works, that Flux reconc
 schedules. Those are LIVE-tier checks and a human's call after deploy — in order: the ExternalSecrets
 sync, then a throwaway pod with no `imagePullSecrets` pulls a private `ghcr.io/mtgibbs/*` image, then
 a Job actually schedules onto the labelled node.
+
+With step 5 merged, the first of those is answerable now: the `harness-fleet` Kustomization reaching
+Ready is exactly the assertion that all three ExternalSecrets resolved. The second still needs a
+throwaway pod — nothing here pulls an image, so a pull secret that is attached but wrong looks
+identical to one that works until something tries. The third waits on the node label and a Job.
