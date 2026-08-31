@@ -171,19 +171,38 @@ fi
 # AC-9 is an ABSENCE, so it is only meaningful once the files it scans exist — otherwise it passes
 # for free against an empty directory, which is the shape of a check that never fires.
 #
-# Scoped to ExternalSecret manifests, because the property is about what a WORKER RECEIVES: a
-# worker secret's ExternalSecret templating HARNESS_API_TOKEN is the escalation this check exists
-# to catch. The dispatcher's Deployment legitimately contains both strings — it names a worker
-# secret as the value of HARNESS_WORKER_SECRET_BUILD_CONVERGE and takes HARNESS_API_TOKEN from
-# its OWN secret via secretKeyRef — and the original bare filename filter read that as a worker
-# secret carrying the token (false-positived 2026-08-31, the day the Deployment landed).
+# It matches the GRANT, not the mention. Two things made the earlier text scan wrong in both
+# directions, and narrowing it to ExternalSecret files fixed neither:
+#
+#   - FALSE NEGATIVE (the one that matters): scoping to `kind: ExternalSecret` made every other
+#     grant path invisible. A Deployment named harness-worker-* taking HARNESS_API_TOKEN via
+#     secretKeyRef — wired into kustomization.yaml, so AC-11 is satisfied — passed the whole gate
+#     clean. That is precisely the §8 escalation, and an absence check that cannot see it is worse
+#     than no check, because the green tick reads as proof.
+#   - FALSE POSITIVE: a bare grep matches prose. A worker manifest whose COMMENT says it must
+#     never receive HARNESS_API_TOKEN failed the check that enforces exactly that — documenting
+#     the property broke the gate for it. (Same lesson as the 2026-08-02 leak's outbound guard:
+#     match assignments, not mentions of assignments.)
+#
+# So: strip comments first, then split by kind. An ExternalSecret may carry the key only if its
+# target is not a worker secret; anything else carrying it must be the dispatcher itself — whose
+# Deployment legitimately holds both strings, naming a worker secret as the value of
+# HARNESS_WORKER_SECRET_BUILD_CONVERGE while taking the token from its OWN secret.
 if [ -n "$wmiss" ]; then
   pend "AC-9: no worker secret carries the dispatch API token"
 elif _bad=""; for f in "$D"/*.yaml; do
        [ -f "$f" ] || continue
-       grep -q "^kind:[[:space:]]*ExternalSecret" "$f" || continue
-       grep -q 'harness-worker-' "$f" || continue
-       grep -q 'HARNESS_API_TOKEN' "$f" && _bad="$_bad $(basename "$f")"
+       _body=$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$f")
+       printf '%s\n' "$_body" | grep -q 'HARNESS_API_TOKEN' || continue
+       if printf '%s\n' "$_body" | grep -q '^kind:[[:space:]]*ExternalSecret'; then
+         # a worker's own ExternalSecret must not materialise the key
+         printf '%s\n' "$_body" | grep -qE '^[[:space:]]*name:[[:space:]]*harness-worker-' \
+           && _bad="$_bad $(basename "$f")"
+       else
+         # any other workload holding the key must be the dispatcher
+         printf '%s\n' "$_body" | grep -qE '^[[:space:]]*name:[[:space:]]*harness-dispatcher[[:space:]]*$' \
+           || _bad="$_bad $(basename "$f")"
+       fi
      done; [ -n "$_bad" ]; then
   no "AC-9: a worker secret carries the dispatch API token. The outcome PAT may push a branch and open a PR and may NEVER launch compute — a worker that can start more workers turns one compromise into a fleet (spec §8)"
 else

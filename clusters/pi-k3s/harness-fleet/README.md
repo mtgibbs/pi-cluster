@@ -55,8 +55,6 @@ directory.
    reused, not re-minted. Kept below as the record of what each credential is and why it is scoped
    the way it is — the next person to rotate one needs this table more than the person who made it.
 
-   | field | what to create |
-   |---|---|
    A **fifth field** joins them with the dispatcher Deployment:
 
    | field | what to create |
