@@ -2,6 +2,19 @@
 # so this is a LAN route, not a public one. That is what makes it compatible with ADR-001 D9,
 # which keeps the DISPATCH api cluster-internal with no ingress: the API creates compute and stays
 # unreachable; this service is read-mostly and is the thing a person opens.
+#
+# TWO hosts on purpose, for the harness → jig rename (mtgibbs/jig#89). `jig.` is the name going
+# forward; `harness.` stays until every worker's HARNESS_REPORT_URL has been re-rendered by
+# beelink-ansible. Serving both means the manifest change and the ansible change do not have to
+# land in the same window — which is the only reason this is safe to merge before jig exists.
+#
+# No DNS work is needed for the new name: pihole-custom-dns.yaml carries a dnsmasq WILDCARD
+# (`address=/lab.mtgibbs.dev/192.168.1.55`), so any *.lab name resolves to the ingress controller
+# the moment a rule exists here. Only the Beelink-hosted names (.70) get explicit overrides.
+#
+# Both hosts share ONE certificate (two SANs, same secretName) rather than two Certificates.
+# cert-manager reissues in place and keeps the existing secret serving until the new one is ready,
+# so adding the SAN does not interrupt the live `harness.` route.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -14,9 +27,21 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
+        - jig.lab.mtgibbs.dev
         - harness.lab.mtgibbs.dev
       secretName: harness-coordinator-tls
   rules:
+    - host: jig.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: harness-coordinator
+                port:
+                  number: 8877
+    # Deprecated, retire once no worker reports to this name. Removing it is a one-hunk revert.
     - host: harness.lab.mtgibbs.dev
       http:
         paths:
