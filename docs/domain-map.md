@@ -226,7 +226,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - creds: `ghcr-pull-secret`, `harness-coordinator`  _(→ secrets-map.md)_
   - storage: `harness-coordinator-state`
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
-  - ingress: `harness.lab.mtgibbs.dev`
+  - ingress: `harness.lab.mtgibbs.dev`, `jig.lab.mtgibbs.dev`
 
 ### harness-fleet  ·  Flux: `harness-fleet` (after: `external-secrets-config`)
   - calls: → `harness`
