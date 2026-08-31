@@ -1,39 +1,50 @@
 # harness-fleet — the namespace a dispatched worker lands in
 
-**These resources are INERT. Nothing runs here yet, and that is the expected state.**
+**The dispatcher runs here now.** `deployment.yaml` runs
+`ghcr.io/mtgibbs/harness-dispatcher` under the `harness-dispatcher` ServiceAccount — the one
+identity in the cluster that can create Jobs, bounded by `rbac.yaml` to this namespace. Its
+Service is ClusterIP only, on purpose: the endpoint whose POST creates compute stays unreachable
+from outside the cluster until the event transport is decided (see `service.yaml`'s header for
+the port-forward a human uses meanwhile).
 
-If you came looking for a workload and found an empty namespace: it is waiting, not broken.
+Two things remain deliberately inert, and finding them idle is expected, not broken:
 
-## Why it is inert
+- **`build-codex`** — its worker secret syncs, but harness CI builds no image carrying the
+  `codex` CLI, so the strategy is absent from the dispatcher's `HARNESS_STRATEGIES` allowlist:
+  credentials with nowhere to run are refused at dispatch time, not failed inside a pod.
+- **`HARNESS_OUTCOME_PAT`** — provisioned into the worker secrets, consumed by nothing yet; the
+  harness reserves the name for a code-egress spec that has not been written.
 
-The dispatcher does not exist as a deployable thing. In `mtgibbs/harness`:
+## Why this directory landed empty first
 
-- `scripts/dispatch/dispatcher.py` and `api.py` are **in no image** — `docker/coordinator.Dockerfile`
-  copies `coordinator.py` and `board.html` and nothing else, and that repo's CI builds exactly three
-  images: `harness-base`, `loop-executor-opencode`, `harness-coordinator`.
-- `launch()` shells out to `kubectl`, which none of those images carries.
+This directory shipped 2026-08-30 **ahead of** its consumer, deliberately, so the harness side had
+a target to build against instead of both halves waiting on each other. At the time
+`scripts/dispatch/dispatcher.py` and `api.py` were packaged in **no image** and `launch()` shelled
+out to `kubectl`, which no image carried — nothing to point the ServiceAccount at. That unblocked
+2026-08-31 when harness CI began publishing `harness-dispatcher` (multi-arch, `kubectl` pinned and
+checksum-verified in its Dockerfile).
 
-So there is nothing to point this namespace's ServiceAccount at. Building that image is a harness
-spec, not this one — and this directory lands **ahead of** its consumer deliberately, so the harness
-side has a target to build against instead of both halves waiting on each other.
+What was here from the start is everything the rendered Job will not carry. The harness renders a
+deliberately minimal Job — no `serviceAccountName`, no `imagePullSecrets`, no `resources` — because
+the dispatcher staying describable in a paragraph is a named cliff in its
+`docs/design/fleet-dispatch.md`. Every one of those omissions is answered by a file in this
+directory.
 
-What *is* here is everything the rendered Job will not carry. The harness renders a deliberately
-minimal Job — no `serviceAccountName`, no `imagePullSecrets`, no `resources` — because the
-dispatcher staying describable in a paragraph is a named cliff in its `docs/design/fleet-dispatch.md`.
-Every one of those omissions is answered by a file in this directory.
-
-## What unblocks it
+## What unblocked it — the record
 
 **In `mtgibbs/harness`:**
 
-1. An image carrying `dispatcher.py`, `api.py` and `kubectl`.
+1. ~~An image carrying `dispatcher.py`, `api.py` and `kubectl`.~~ **DONE 2026-08-31** —
+   `docker/dispatcher.Dockerfile`, published as `ghcr.io/mtgibbs/harness-dispatcher`
+   (linux/amd64 + arm64). It is FROM `python:3.12-slim`, not `harness-base`, so the component
+   permitted to create Jobs carries no loop, no node runtime and no harness scripts.
 2. ~~A pinned name for the clone credential.~~ **Named 2026-08-30** — `HARNESS_CLONE_PAT`,
    pinned in that repo's `docs/executors.md` contract table by mtgibbs/harness#67 and adopted
    here. It is *not* `HARNESS_GITHUB_PAT`, the name that appears once in `20260829a`'s prose:
    that was written before `20260830a` split one PAT into a clone identity and an outcome
-   identity, and beside `HARNESS_OUTCOME_PAT` it reads as *the* GitHub credential. What is still
-   missing is the `entrypoint.sh` that reads it and writes `~/.git-credentials` — it has a name
-   now, not an implementation, and it lands with the image in (1).
+   identity, and beside `HARNESS_OUTCOME_PAT` it reads as *the* GitHub credential. The
+   `entrypoint.sh` that reads it and writes `~/.git-credentials` **now exists** in that repo
+   (it unsets the variable after writing, so the token never sits in the loop's environment).
 3. A `loop-executor-codex` image. `harness-worker-build-codex` exists here, but CI builds no image
    that carries the `codex` CLI, so the strategy has credentials and nowhere to run.
 
@@ -43,6 +54,16 @@ Every one of those omissions is answered by a file in this directory.
    item in the `pi-cluster` vault. `harness-coordinator/token` and `ghcr-read-token/token` were
    reused, not re-minted. Kept below as the record of what each credential is and why it is scoped
    the way it is — the next person to rotate one needs this table more than the person who made it.
+
+   | field | what to create |
+   |---|---|
+   A **fifth field** joins them with the dispatcher Deployment:
+
+   | field | what to create |
+   |---|---|
+   | `dispatch-api-token` | any long-random value — `api.py` compares it verbatim as `Bearer <token>`. This is the one identity that can create compute, so it is NOT a reuse of `harness-coordinator/token`: every worker holds that one to report, and a token that leaks from a worker must not also launch Jobs (`external-secret-dispatcher.yaml` argues it in full). Until this field exists, ESO reports `SecretSyncErr` and the Kustomization holds not-ready |
+
+   The original four, kept as the rotation record:
 
    | field | what to create |
    |---|---|
@@ -69,15 +90,17 @@ Every one of those omissions is answered by a file in this directory.
    is `kubectl label node pi5-worker-2 harness-fleet=true --overwrite`, which this container
    cannot run. Both halves are needed: the `kubectl` one works now and is lost on rebuild, the
    file survives the rebuild and does nothing until a restart.
-7. **A Deployment for the dispatcher**, using the `harness-dispatcher` ServiceAccount from
-   `rbac.yaml`, once (1) exists. Its environment is what binds strategy to image and secret:
-   `HARNESS_WORKER_IMAGE_<STRATEGY>` and `HARNESS_WORKER_SECRET_<STRATEGY>`, upper-snake — so
-   `build-codex` reads `HARNESS_WORKER_IMAGE_BUILD_CODEX` / `HARNESS_WORKER_SECRET_BUILD_CODEX`.
+7. ~~**A Deployment for the dispatcher.**~~ **DONE 2026-08-31** — `deployment.yaml`, using the
+   `harness-dispatcher` ServiceAccount from `rbac.yaml`. Its environment is what binds strategy
+   to image and secret: `HARNESS_WORKER_IMAGE_<STRATEGY>` and `HARNESS_WORKER_SECRET_<STRATEGY>`,
+   upper-snake. Only `build-converge` is mapped and allowlisted; there is deliberately no bare
+   `HARNESS_WORKER_IMAGE` fallback, so an unmapped strategy resolves nothing instead of silently
+   riding a default image.
 
-The reason this namespace looks abandoned is that its two halves land in different repositories.
-Steps 1–3 are harness's; 4–7 are this repo's. 4 and 5 are done — what remains on this side is
-6 (a node label, still OQ2) and 7 (a dispatcher Deployment), and 7 cannot start until harness
-ships 1. So the critical path now runs entirely through the other repo.
+Of the seven, what still needs a human's hands: the `dispatch-api-token` field (step 4's fifth
+row — `op` on the laptop), the **live** half of the node label (step 6 — the committed file does
+nothing until a k3s restart or a `kubectl label`), and a `loop-executor-codex` image (step 3)
+whenever `build-codex` is wanted. The first two gate the first dispatched run.
 
 ## Decided
 

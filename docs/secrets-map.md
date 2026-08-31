@@ -68,7 +68,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_62 ExternalSecrets · 44 1Password items · 69 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_63 ExternalSecrets · 44 1Password items · 71 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -93,6 +93,8 @@ graph LR
   np8hd7e["harness-coordinator<br/>(harness)"]
   n8i3u24 --> np8hd7e
   n8ivklm(["🔑 harness-fleet"])
+  n1ykti58["harness-dispatcher<br/>(harness-fleet)"]
+  n8ivklm --> n1ykti58
   n8ivklm --> nq5a56a
   n8ivklm --> ngvl95k
   n1ofxib0(["🔑 immich"])
@@ -202,7 +204,8 @@ graph LR
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
     - `harness/harness-coordinator`
-- **harness-fleet** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **harness-fleet** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `harness-fleet/harness-dispatcher`
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
 - **healthchecks** → 1 ExternalSecret(s):
@@ -347,7 +350,10 @@ graph LR
     → _Flux Kustomizations (postBuild.substituteFrom NAS uid/gid, 4 refs in infrastructure.yaml)_ (curated: not a pod-spec ref)
 - **`harness-fleet/ghcr-pull-secret`** ← `ghcr-read-token`
   produces Secret `ghcr-pull-secret` in `harness-fleet`
-    → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_
+    → `harness-fleet/harness-dispatcher` (Deployment, imagePull)
+- **`harness-fleet/harness-dispatcher`** ← `harness-fleet`
+  produces Secret `harness-dispatcher` in `harness-fleet`
+    → `harness-fleet/harness-dispatcher` (Deployment, env)
 - **`harness-fleet/harness-worker-build-codex`** ← `harness-coordinator`, `harness-fleet`
   produces Secret `harness-worker-build-codex` in `harness-fleet`
     → ⚠️ _no consumer found in-repo — verify (app-config wired, or orphaned)_

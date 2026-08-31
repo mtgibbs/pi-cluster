@@ -170,10 +170,18 @@ fi
 
 # AC-9 is an ABSENCE, so it is only meaningful once the files it scans exist — otherwise it passes
 # for free against an empty directory, which is the shape of a check that never fires.
+#
+# Scoped to ExternalSecret manifests, because the property is about what a WORKER RECEIVES: a
+# worker secret's ExternalSecret templating HARNESS_API_TOKEN is the escalation this check exists
+# to catch. The dispatcher's Deployment legitimately contains both strings — it names a worker
+# secret as the value of HARNESS_WORKER_SECRET_BUILD_CONVERGE and takes HARNESS_API_TOKEN from
+# its OWN secret via secretKeyRef — and the original bare filename filter read that as a worker
+# secret carrying the token (false-positived 2026-08-31, the day the Deployment landed).
 if [ -n "$wmiss" ]; then
   pend "AC-9: no worker secret carries the dispatch API token"
 elif _bad=""; for f in "$D"/*.yaml; do
        [ -f "$f" ] || continue
+       grep -q "^kind:[[:space:]]*ExternalSecret" "$f" || continue
        grep -q 'harness-worker-' "$f" || continue
        grep -q 'HARNESS_API_TOKEN' "$f" && _bad="$_bad $(basename "$f")"
      done; [ -n "$_bad" ]; then

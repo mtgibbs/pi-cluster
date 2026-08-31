@@ -1,0 +1,23 @@
+# ClusterIP only — deliberately NO Ingress, unlike the coordinator's board.
+#
+# This is the one endpoint whose POST creates compute. It stays unreachable from outside the
+# cluster until the event transport is decided (agent-bus relay vs. a webhook receiver — open in
+# the harness's fleet-dispatch design, "chat mention, later webhook"). Whatever transport wins
+# becomes the thing exposed, and it talks to this Service in-cluster. Until then a human drives it
+# with a port-forward:
+#
+#     kubectl -n harness-fleet port-forward svc/harness-dispatcher 8878:8878
+#     curl -X POST localhost:8878/runs -H "Authorization: Bearer $TOKEN" \
+#       -d '{"repo": "...", "spec": "specs/...", "strategy": "build-converge", "idempotency_key": "..."}'
+apiVersion: v1
+kind: Service
+metadata:
+  name: harness-dispatcher
+  namespace: harness-fleet
+spec:
+  selector:
+    app: harness-dispatcher
+  ports:
+    - name: http
+      port: 8878
+      targetPort: 8878

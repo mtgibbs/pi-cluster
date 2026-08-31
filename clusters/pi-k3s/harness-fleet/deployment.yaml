@@ -1,0 +1,108 @@
+# The dispatcher — the half of fleet dispatch that creates compute, finally deployed.
+#
+# This pod is the ONLY thing in the cluster entitled to create Jobs in this namespace, and its
+# whole job is validate → map → launch → record (harness docs/design/fleet-dispatch.md; the
+# "describable in a paragraph" cliff). Everything that judges lives in the worker it launches.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness-dispatcher
+  namespace: harness-fleet
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the ledger/registry live on a ReadWriteOnce volume, so a second
+  # pod cannot mount it while the first still holds it — the same wedge harness-coordinator's
+  # deployment documents.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: harness-dispatcher
+  template:
+    metadata:
+      labels:
+        app: harness-dispatcher
+    spec:
+      # The identity rbac.yaml bounds: create/inspect Jobs HERE, read pods and logs, nothing on
+      # secrets, nothing anywhere else.
+      serviceAccountName: harness-dispatcher
+      # Named explicitly because the namespace's pull-secret trick does not apply to this pod:
+      # serviceaccount-default.yaml patches the credential onto the DEFAULT ServiceAccount for the
+      # sake of the rendered Job, and running as harness-dispatcher opts out of that patch.
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: dispatcher
+          image: ghcr.io/mtgibbs/harness-dispatcher:0.1.0
+          ports:
+            - name: http
+              containerPort: 8878
+          env:
+            # api.py refuses to serve without this — the image ships no default on purpose, so a
+            # missing secret is a pod that exits rather than a dispatcher accepting
+            # unauthenticated requests to create compute.
+            - name: HARNESS_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: harness-dispatcher
+                  key: token
+            - name: HARNESS_NAMESPACE
+              value: harness-fleet
+            # The strategy allowlist (whitespace-separated). build-codex stays OUT until an image
+            # carrying the codex CLI exists — its worker secret already syncs, but credentials
+            # with nowhere to run should be refused at dispatch time, not fail inside a pod.
+            - name: HARNESS_STRATEGIES
+              value: "build-converge"
+            # Per-strategy maps only — deliberately no bare HARNESS_WORKER_IMAGE /
+            # HARNESS_WORKER_SECRET fallback, so a strategy nobody mapped resolves nothing
+            # instead of silently riding the default image.
+            - name: HARNESS_WORKER_IMAGE_BUILD_CONVERGE
+              value: ghcr.io/mtgibbs/loop-executor-opencode:0.1.0
+            - name: HARNESS_WORKER_SECRET_BUILD_CONVERGE
+              value: harness-worker-build-converge
+            # Stated here rather than left to the image's ENV defaults (which are the same
+            # values) so an operator can see where the dedupe state lives without reading the
+            # Dockerfile — the coordinator states COORD_STATE_PATH for the same reason.
+            - name: HARNESS_LEDGER_PATH
+              value: /var/lib/dispatcher/ledger.jsonl
+            - name: HARNESS_REGISTRY_PATH
+              value: /var/lib/dispatcher/registry.jsonl
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/dispatcher
+          # tcpSocket, not httpGet: every HTTP path in api.py requires the bearer token, and a
+          # kubelet probe cannot present one — an httpGet here would read the 401 as down and
+          # restart a healthy dispatcher forever.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          # These numbers are load-bearing: resourcequota.yaml's limits are sized to exactly two
+          # workers PLUS this pod. Raising these limits without raising the quota makes the
+          # second worker unschedulable.
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: harness-dispatcher-state
