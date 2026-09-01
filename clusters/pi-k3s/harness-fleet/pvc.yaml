@@ -1,0 +1,20 @@
+# Small and local, same argument as harness-coordinator-state. What lives here is two append-only
+# JSONL files: the event ledger (what stops a redelivered webhook launching a second Job for work
+# already running) and the run registry. Neither grows with artifact bytes — those never pass
+# through the dispatcher at all.
+#
+# The ledger is the reason this volume must exist rather than defaulting into the image layer:
+# a ledger a restart forgets is a dispatcher that duplicates runs, and the symptom is a second
+# PR for the same spec rather than an error anyone would look for (dispatcher.Dockerfile says
+# the same at its VOLUME line).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harness-dispatcher-state
+  namespace: harness-fleet
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

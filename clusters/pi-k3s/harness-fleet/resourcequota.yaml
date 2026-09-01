@@ -8,8 +8,14 @@
 # everything else scheduled on that node.
 #
 # The compute limits are sized to exactly two workers at the LimitRange's defaults (limitrange.yaml)
-# — 2 x (2 CPU, 2Gi). They are a second, independent ceiling: raising the Job count alone will
+# PLUS the dispatcher's own pod — 2 x (2 CPU, 2Gi) workers + (250m, 256Mi) dispatcher
+# (deployment.yaml). They are a second, independent ceiling: raising the Job count alone will
 # start hitting these, which is the intended order of discovery.
+#
+# The dispatcher term exists because a quota counts EVERY pod in the namespace, its own launcher
+# included. At exactly 2 x worker defaults, the dispatcher's 250m of limit headroom would have made
+# the SECOND worker unschedulable — admission names the quota, not the pod that quietly ate the
+# margin, so the arithmetic is written down here instead of rediscovered from that error.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -20,5 +26,5 @@ spec:
     count/jobs.batch: "2"
     requests.cpu: "1"
     requests.memory: 2Gi
-    limits.cpu: "4"
-    limits.memory: 4Gi
+    limits.cpu: "4250m"
+    limits.memory: 4352Mi

@@ -14,3 +14,7 @@ resources:
   - limitrange.yaml
   - external-secret-worker-build-converge.yaml
   - external-secret-worker-build-codex.yaml
+  - external-secret-dispatcher.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
