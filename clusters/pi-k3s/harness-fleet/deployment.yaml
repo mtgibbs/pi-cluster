@@ -66,7 +66,7 @@ spec:
             # HARNESS_WORKER_SECRET fallback, so a strategy nobody mapped resolves nothing
             # instead of silently riding the default image.
             - name: HARNESS_WORKER_IMAGE_BUILD_CONVERGE
-              value: ghcr.io/mtgibbs/loop-executor-opencode:0.1.0
+              value: ghcr.io/mtgibbs/loop-executor-opencode:0.1.2
             - name: HARNESS_WORKER_SECRET_BUILD_CONVERGE
               value: harness-worker-build-converge
             # Stated here rather than left to the image's ENV defaults (which are the same
