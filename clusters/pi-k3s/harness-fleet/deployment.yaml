@@ -37,7 +37,12 @@ spec:
         fsGroup: 10001
       containers:
         - name: dispatcher
-          image: ghcr.io/mtgibbs/harness-dispatcher:0.1.1
+          # Bump this tag whenever the image content changes. There is no imagePullPolicy
+          # here, so it defaults to IfNotPresent for a non-`latest` tag: a rebuild pushed
+          # over the SAME tag never reaches a node that already pulled it. jig#124 corrected
+          # the kubectl pin without a VERSION bump and diverged registry from kubelet exactly
+          # that way; jig#126 is the bump this tag follows.
+          image: ghcr.io/mtgibbs/harness-dispatcher:0.1.2
           ports:
             - name: http
               containerPort: 8878
