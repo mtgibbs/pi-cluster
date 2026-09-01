@@ -71,9 +71,28 @@ spec:
               value: /var/lib/dispatcher/ledger.jsonl
             - name: HARNESS_REGISTRY_PATH
               value: /var/lib/dispatcher/registry.jsonl
+            # Set explicitly, not left to the runtime. dispatcher.Dockerfile does
+            # `useradd --create-home`, so /home/dispatcher exists and is owned by 10001 — but
+            # `USER 10001` is numeric, and a runtime that does not resolve it through /etc/passwd
+            # leaves HOME unset. client-go's homedir.HomeDir() then returns "" and its cache path
+            # collapses to a RELATIVE .kube/cache, resolved against WORKDIR /app. Naming HOME here
+            # removes that dependency entirely.
+            - name: HOME
+              value: /home/dispatcher
           volumeMounts:
             - name: state
               mountPath: /var/lib/dispatcher
+            # readOnlyRootFilesystem cancels the writable home the image provisioned, and
+            # kubectl wants one: `get job` and `delete job` write a discovery cache under
+            # $HOME/.kube/cache. Whether an unwritable cache dir is a warning or a hard error
+            # depends on kubectl's factory path, so this removes the question rather than betting
+            # on the answer. The ledger writes are NOT here — those go to the PVC above.
+            #
+            # /tmp is deliberately NOT mounted: dispatcher.py imports no tempfile and `launch()`
+            # feeds the Job to `kubectl apply -f -` on stdin, so nothing writes there. Add one if
+            # that stops being true.
+            - name: home
+              mountPath: /home/dispatcher
           # tcpSocket, not httpGet: every HTTP path in api.py requires the bearer token, and a
           # kubelet probe cannot present one — an httpGet here would read the 401 as down and
           # restart a healthy dispatcher forever.
@@ -103,6 +122,12 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
+        # Ephemeral on purpose: a discovery cache is derived from the API server and is free to
+        # rebuild on restart. sizeLimit because nothing else in this namespace bounds ephemeral
+        # storage — the ResourceQuota covers cpu/memory/jobs only.
+        - name: home
+          emptyDir:
+            sizeLimit: 32Mi
         - name: state
           persistentVolumeClaim:
             claimName: harness-dispatcher-state
