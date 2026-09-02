@@ -1,15 +1,18 @@
 # k3s node config for pi5-worker-2.
 # DEPLOY TO: /etc/rancher/k3s/config.yaml  ON pi5-worker-2
 #
-# (No IP recorded: ARCHITECTURE.md gives addresses for pi-k3s .55, pi5-worker-1 .56 and
-# pi3-worker-2 .51, but never this node's. Left blank rather than guessed at — add it
-# here when someone reads it off the node.)
+# NODE: 192.168.1.57. (This block used to say "no IP recorded"; ARCHITECTURE.md's hardware
+# diagram has carried .57 all along, and the node object agrees.)
 #
-# ⚠️ MERGE, DO NOT CLOBBER. Unlike pi3-worker-2, this node may already have a
-# /etc/rancher/k3s/config.yaml from its install. `install -m 0644` over the top would
-# discard whatever is in it, and an agent that loses its server/token config does not
-# fail loudly — it fails at the next restart, which may be weeks later. Read the file
-# first; add the key if the file exists.
+# CREATE, not merge — checked on the box 2026-09-01. /etc/rancher/ holds only node/; there
+# was no k3s/ directory and no config.yaml. The earlier "⚠️ MERGE, DO NOT CLOBBER" warning
+# pointed at the wrong file: this agent takes NO flags on ExecStart (`/usr/local/bin/k3s
+# agent` bare), and its server URL and token live in /etc/systemd/system/k3s-agent.service.env
+# (0600 root). Nothing this file can do will disturb the join config — they are different
+# files. Leave that .env alone and there is no silent-restart-failure risk here.
+#
+# The shape below is proven on this cluster: pi3-worker-2 carries the same file and its
+# node-label/node-taint are live on the node object.
 #
 # Role: pi5-worker-2 carries the harness FLEET WORKERS — the ephemeral Jobs the
 # dispatcher creates in the `harness-fleet` namespace. The rendered Job's nodeSelector
@@ -22,6 +25,25 @@
 # to avoid, because its symptom is "the internet is broken" rather than "a build is
 # slow". pi3-worker-2 has 1GB against a namespace quota that permits 4Gi. That leaves
 # pi5-worker-2, whose existing role is already "heavy workloads".
+#
+# ⚠️ HALF OF THAT SENTENCE IS WRONG — measured 2026-09-01, kept above as the record of
+# what was actually decided. Of the four workloads it cites as reasons to avoid
+# pi5-worker-1, two are on pi5-worker-2, the node it chose:
+#
+#   Pi-hole secondary + unbound-secondary   pi5-worker-1   ✓ as stated
+#   Immich (server + valkey)                pi5-worker-1   ✓ as stated
+#   Tailscale exit node + operator          pi5-worker-2   ✗ on the CHOSEN node
+#   local-llm-mcp, kiwix-mcp                pi5-worker-2   ✗ on the CHOSEN node
+#
+# The consequence is the argument's own: a runaway build now shares a node with the
+# Tailscale exit node, and the symptom of starving THAT is also "the internet is broken",
+# for anyone routing through it. The harness-fleet ResourceQuota bounds the blast radius
+# (2 concurrent Jobs, limits 4250m CPU / 4352Mi, requests 1 CPU / 2Gi), so this is a
+# known cost rather than an open hole.
+#
+# The OQ2 decision is NOT reopened here; only the facts under it are corrected, so that
+# whoever revisits placement starts from what is true. Verify with:
+#   kubectl get pods -A -o wide | grep -E 'tailscale|mcp|immich|pihole'
 #
 # This is additive: the label does not taint the node, so pi5-worker-2 keeps taking
 # ordinary scheduler-driven workloads. The ResourceQuota in clusters/pi-k3s/harness-fleet/
