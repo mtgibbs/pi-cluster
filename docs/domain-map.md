@@ -364,7 +364,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 - **Deployment/pihole-secondary** — `pihole/pihole`
 - **Deployment/unbound** — `madnuttah/unbound`
 - **Deployment/unbound-secondary** — `madnuttah/unbound`
-- **Job/pihole-brainrot-setup-adgroups-2** — `alpine`
+- **Job/pihole-brainrot-setup-adgroups-3** — `alpine`
   - creds: `pihole-secret`  _(→ secrets-map.md)_
   - storage: `pihole-dnsmasq`, `pihole-dnsmasq-secondary`, `pihole-etc`, `pihole-etc-secondary`
   - ingress: `pihole.lab.mtgibbs.dev`

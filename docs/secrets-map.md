@@ -481,7 +481,7 @@ graph LR
   produces Secret `pihole-secret` in `pihole`
     → `pihole/pihole-brainrot-allow` (CronJob, env)
     → `pihole/pihole-brainrot-block` (CronJob, env)
-    → `pihole/pihole-brainrot-setup-adgroups-2` (Job, env)
+    → `pihole/pihole-brainrot-setup-adgroups-3` (Job, env)
     → `pihole/pihole-exporter-secondary` (Deployment, env)
     → `pihole/pihole-exporter` (Deployment, env)
     → `pihole/pihole-secondary` (Deployment, env)
