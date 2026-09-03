@@ -12,22 +12,27 @@ data:
   # GitOps source of truth: edit here, never the Pi-hole UI.
   # ---------------------------------------------------------------------------
   allowlist.txt: |
-    # --- Reserved adult computers (IP-matched, .80-.85) ---
+    # --- Reserved adult computers (IP-matched, .80-.87) ---
     192.168.1.80   # Matt Home PC (DESKTOP-SRGOERO)
     192.168.1.81   # Matt-PC
     192.168.1.82   # Matt Macbook M2
     192.168.1.83   # Matt Work Macbook Pro M1
     192.168.1.84   # Julia Macbook M2 (Julias-MBP)
     192.168.1.85   # Julia Work Dock + Macbook Pro M5
+    192.168.1.86   # Matt Work Macbook Pro 2 (Wi-Fi, en0)
+    192.168.1.87   # Matt Work Dock + Macbook Pro 2 (Ethernet, en7)
 
     # --- Adult Macs (MAC-matched) — REQUIRED for IPv6 exemption (Phase 3, 2026-06-30) ---
     # Over IPv6 a Mac reaches Pi-hole as a LINK-LOCAL (the UDM now advertises Pi-hole's
     # fe80:: as the v6 resolver), so Pi-hole matches it by MAC, NOT by its .8x IPv4. The
-    # .80-.85 IP lines above still cover the IPv4 path.
+    # .80-.87 IP lines above still cover the IPv4 path.
     ee:76:7f:7a:df:24   # Matt Macbook M2 (.82)
     ae:cd:9a:cc:da:c9   # Matt Work Macbook Pro M1 (.83)
     58:ef:68:7b:fc:04   # Julia Macbook M2 (.84)
     64:4b:f0:60:6b:51   # Julia Work Dock + Macbook Pro M5 (.85)
+    4e:dc:45:62:fa:03   # Matt Work Macbook Pro 2 — Wi-Fi (.86). RANDOMIZED MAC: this line is
+                        # only durable while macOS keeps Private Wi-Fi Address = Fixed.
+    64:4b:f0:10:14:31   # Matt Work Dock + Macbook Pro 2 — Ethernet (.87), real hardware MAC
 
     # --- Adult iPhones ONLY (MAC-matched) — kids intentionally EXCLUDED ---
     # Over IPv6 an iPhone reaches Pi-hole as a LINK-LOCAL, so it's matched by MAC
