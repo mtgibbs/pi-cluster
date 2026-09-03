@@ -6,7 +6,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pihole-brainrot-setup-adgroups-2
+  name: pihole-brainrot-setup-adgroups-3
   namespace: pihole
   labels:
     app: pihole-brainrot
