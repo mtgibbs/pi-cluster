@@ -101,19 +101,46 @@ Enumerate every resolver path and confirm each is exempt or routed through an al
 | Object | id | detail |
 | :--- | :--- | :--- |
 | group `fw-dns-ports` | `6a42d22fe2d626152d14ed86` | port-group `53, 853` |
-| group `fw-dns-infra` | `6a42d234e2d626152d14edda` | address-group `192.168.1.48/28` |
+| group `fw-dns-infra` | `6a42d234e2d626152d14edda` | address-group `192.168.1.48/28` **+ `192.168.1.70`** (beelink) |
 | `LAN_IN` **20000** accept | `6a42d290e2d626152d14f4ad` | src `fw-dns-infra` → dst `fw-dns-ports` (exemption) |
 | `LAN_IN` **20001** drop+log | `6a42d2a6e2d626152d14f5ed` | any → dst `fw-dns-ports` (block v4 client DNS) |
 | `LANv6_IN` **25000** drop+log | `6a42d3a1e2d626152d15027d` | any → dst `fw-dns-ports` (block v6 client DNS) |
+| group `fw-doh-endpoints` | `6a9ad5304632f4e5fe7a6f22` | address-group, 17 well-known DoH resolver IPs |
+| group `fw-doh-ports` | `6a9ad52f4632f4e5fe7a6f1c` | port-group `443` |
+| `LAN_IN` **20002** accept | `6a9ad53b4632f4e5fe7a6f3c` | src `fw-dns-infra` → dst `fw-doh-*` (exemption) |
+| `LAN_IN` **20003** drop+log | `6a9ad53f4632f4e5fe7a6f61` | any → dst `fw-doh-endpoints`+`fw-doh-ports` (block DoH) |
 
-- **Index-band gotchas:** `LAN_IN` user rules = **20000+**, `LANv6_IN` = **25000+**. Other values
-  (`2000`, `20002`, `22000`, `40000`) → `api.err.FirewallRuleIndexOutOfRange`.
+- **Index-band gotchas:** `LAN_IN` user rules = **20000+**, `LANv6_IN` = **25000+**. Values *outside*
+  the band (`2000`, `22000`, `40000`) → `api.err.FirewallRuleIndexOutOfRange`.
+  > This list previously named `20002` as rejected. That is **wrong** — `20002` and `20003` were both
+  > accepted on 2026-09-04 (firmware 5.1.31.34074) when the DoH rules were created. Consecutive indexes
+  > inside the band are fine. Verify a trap before quoting it; this table has been wrong in both directions.
 - The accept rule MUST rank **below** (lower index than) the drop, and exist first, or you sever
   Unbound recursion + pi-k3s bootstrap + CoreDNS upstream.
-- **Residual gap:** DoH over `:443` to a hardcoded resolver IP is NOT blocked (would need a DoH-endpoint
-  IP blocklist). Plain `:53` + DoT `:853` + the Firefox canary (in pihole doh-block) are covered.
+- **DoH gap — CLOSED 2026-09-04.** DoH over `:443` to a hardcoded resolver IP used to walk straight
+  past the lockdown; `https://1.1.1.1/dns-query` returned live records from a non-exempt client. The
+  `fw-doh-*` pair above closes it for every default browser configuration. **It cannot be closed
+  completely** — DoH can run on any host on any port, so an IP list only stops the well-known
+  providers. That is the right threat model for a kid's phone, not for a determined adult.
+- The DoH *hostnames* are separately blackholed to `0.0.0.0` by the pihole `doh-block` regex set, and
+  the Firefox canary `use-application-dns.net` correctly returns **NXDOMAIN** (Pi-hole special-cases
+  it). A corporate-managed browser with DoH forced to “max protection” ignores the canary — the IP
+  block is what actually stops those.
 
 ### Verify the REAL paths — not a proxy
+
+> **TRAP — check your own route before believing any bypass test.** If the testing machine has the
+> Tailscale **exit node** (`pi-cluster-exit`, on pi5-worker-2) enabled, *every* packet leaves through
+> `utun` and is SNAT'd to `192.168.1.57` — which is inside `fw-dns-infra`, so it matches the ACCEPT
+> rule and **every bypass appears wide open**. This produced a false "the entire DNS lockdown is not
+> enforcing" conclusion on 2026-09-04. Confirm first:
+> ```sh
+> route -n get 1.1.1.1 | grep interface   # must be en0/the LAN NIC, NOT utunN
+> traceroute -n -m 2 1.1.1.1              # hop 1 must be 192.168.1.1, not a 100.x address
+> ```
+> Same trap applies to a corporate VPN on a work laptop. `dig` also prints "connection timed out" on
+> **stdout**, so `[ -n "$(dig +short ...)" ]` reads a timeout as an answer — match on the text, not emptiness.
+
 - ✅ **Client bypass blocked:** from a client, `dig +time=3 +tries=1 @8.8.8.8 google.com` AND
   `@2606:4700:4700::1111 google.com` → must **TIME OUT**.
 - ✅ **Normal DNS works:** `dig @192.168.1.55 <domain>` resolves.
@@ -136,7 +163,10 @@ curl -sk -X PUT "$BASE/rest/firewallgroup/6a42d234e2d626152d14edda" -H "X-API-KE
 # OR delete a rule entirely:
 curl -sk -X DELETE "$BASE/rest/firewallrule/6a42d2a6e2d626152d14f5ed" -H "X-API-KEY: $KEY"   # v4 drop
 curl -sk -X DELETE "$BASE/rest/firewallrule/6a42d3a1e2d626152d15027d" -H "X-API-KEY: $KEY"   # v6 drop
+curl -sk -X DELETE "$BASE/rest/firewallrule/6a9ad53f4632f4e5fe7a6f61" -H "X-API-KEY: $KEY"   # DoH :443 drop
 ```
+The DoH drop is the safest of the three to remove — it only blocks `:443` to resolver IPs, so
+deleting it restores DoH bypass without touching plain DNS.
 
 ### API-key curl pattern (MCP-down fallback — the go-unifi-mcp stdio server crashes)
 - Auth: header `X-API-KEY: $(op read op://pi-cluster/unifi/api-key)`; base
