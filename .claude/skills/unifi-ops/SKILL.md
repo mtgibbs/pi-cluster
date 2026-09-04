@@ -127,6 +127,48 @@ Enumerate every resolver path and confirm each is exempt or routed through an al
   it). A corporate-managed browser with DoH forced to “max protection” ignores the canary — the IP
   block is what actually stops those.
 
+### IPv6 RA / RDNSS — what the UDM advertises as the v6 resolvers
+
+Configured **on the UDM**, so this is its only record. Network `Default`
+(`59c6ba27e4b04e1acfd40185`), `ipv6_interface_type: pd`, `ipv6_client_address_assignment: slaac`,
+`dhcpdv6_dns_auto: false`.
+
+| Field | Value | Box |
+| :--- | :--- | :--- |
+| `dhcpdv6_dns_1` | `fe80::cef4:1f47:81cf:14d7` | pi-k3s (.55) |
+| `dhcpdv6_dns_2` | `fe80::61bf:9c92:249a:8cc1` | pi5-worker-1 (.56) |
+| `dhcpd_dns_1` / `_2` | `192.168.1.55` / `192.168.1.56` | the v4 pair |
+
+**THE RULE: never advertise a PD-derived global address as RDNSS.** Until 2026-09-04
+`dhcpdv6_dns_2` was `2600:1700:3d10:3a8e:766d:220a:f8c5:5193` — a SLAAC global built from the
+**ISP-delegated** prefix. Two defects came out of that, and both are worth recognising again:
+
+1. **It goes stale.** When the ISP re-delegates, Pi-hole gets a new address while the UDM keeps
+   advertising the dead one — and clients hold it for `ipv6_ra_valid_lifetime`, **86400s / 24h**. The
+   dead address is then off-prefix, so the query routes to the gateway and hits `LAN_IN`/`LANv6_IN`
+   where it is **DROPped, not rejected** — the client waits out a full timeout instead of failing
+   over. Multi-second page loads, phones worst hit (they cache RAs across sleep/wake).
+2. **It hid that there was no redundancy at all.** That global *and* `dhcpdv6_dns_1` both resolved to
+   MAC `88:a2:9e:2a:af:f0` — **pi-k3s, twice**. The v4 pair had real .55/.56 redundancy; the v6 pair
+   was one box wearing two hats, so a single Pi-hole pod restart on the busiest node left every
+   IPv6-preferring client (i.e. every phone) with no working resolver.
+
+Link-locals are immune to prefix rotation, which is why both entries are now `fe80::`.
+
+> **Caveat to verify, not assume:** both are RFC 7217 *stable-privacy* addresses (no `ff:fe`, so not
+> EUI-64). They are stable only while each Pi persists its `stable_secret` across reboots. `fe80::cef4:…`
+> has held since 2026-06-30, which is good evidence but not proof. If a node ever comes back with a new
+> link-local, this is the first thing to re-check — and the failure looks exactly like defect 1 above.
+
+Verify (from a LAN client, **Tailscale exit node off** — see the trap below):
+```sh
+scutil --dns | grep 'nameserver\['            # macOS: expect both fe80:: entries, then .55/.56
+ping6 -c2 -I en0 ff02::1                       # populate the neighbour cache
+ndp -an | grep -iE 'cef4:1f47|61bf:9c92'       # must map to TWO DIFFERENT MACs
+dig @'fe80::cef4:1f47:81cf:14d7%en0' google.com +short   # both must answer
+dig @'fe80::61bf:9c92:249a:8cc1%en0' google.com +short
+```
+
 ### Verify the REAL paths — not a proxy
 
 > **TRAP — check your own route before believing any bypass test.** If the testing machine has the
