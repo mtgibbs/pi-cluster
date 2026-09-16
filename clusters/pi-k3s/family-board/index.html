@@ -447,9 +447,10 @@
   <script>
   "use strict";
   /* ===========================================================================
-     THE FAMILY PULSE — design preview (prototype).
-     Reads the same /api/feed contract. Acks are stubbed in localStorage so the
-     interaction feels real; the backend write-path is BACKEND-ASKS.md #1.
+     THE FAMILY PULSE — the deployed renderer.
+     Reads /api/feed; writes through /api/ack and /api/menu (nginx injects the token
+     server-side). Acks are persisted server-side and echoed back on the feed — the
+     old localStorage stub is gone. Outstanding backend work: BACKEND-ASKS.md #2/#3.
      =========================================================================== */
 
   const FEED_URL   = "/api/feed";
@@ -457,6 +458,10 @@
   const EDGE_ZONE = 32;            // px from the right edge where a pointerdown begins a drag-open
   const COMMIT_THRESHOLD = 0.3;    // fraction of DRAWER_WIDTH that commits open (else snaps back)
   const REFRESH_MS = 3 * 60 * 1000;
+  // A reachable feed is not a *fed* feed: the sources can die upstream while /api/feed
+  // keeps serving the last snapshot with a cheerful 200. Past this many hours with no
+  // newer row, say so instead of showing a frozen board as if it were live.
+  const STALE_AFTER_H = 48;
   const TZ         = "America/New_York";
   const IDLE_MS    = 90 * 1000;     // go to "art mode" after 90s untouched
 
@@ -925,6 +930,21 @@
     document.getElementById("beat").classList.toggle("stale", !!stale);
   }
 
+  // Hours since the newest row landed, or null if nothing carries a usable date.
+  function feedAgeHours(items) {
+    let newest = 0;
+    for (const it of items) {
+      const t = Date.parse(it && it.received_at);
+      if (Number.isFinite(t) && t > newest) newest = t;
+    }
+    return newest ? (Date.now() - newest) / 3600000 : null;
+  }
+  function ageLabel(h) {
+    if (h < 48) return Math.round(h) + " hours";
+    const d = Math.round(h / 24);
+    return d < 14 ? d + " days" : Math.round(d / 7) + " weeks";
+  }
+
   async function load() {
     setStatus("refreshing…", false);
     try {
@@ -935,7 +955,13 @@
       hydrateAcks(lastItems);                          // acks come from the feed now
       render();
       const t = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date());
-      setStatus("updated " + t + " · " + lastItems.length + " items", false);
+      const base = "updated " + t + " · " + lastItems.length + " items";
+      const ageH = feedAgeHours(lastItems);
+      if (ageH !== null && ageH > STALE_AFTER_H) {
+        setStatus(base + " · nothing new in " + ageLabel(ageH) + " — a source may be down", true);
+      } else {
+        setStatus(base, false);
+      }
     } catch (err) {
       setStatus("offline — showing last known", true);
       if (lastItems.length) render();
