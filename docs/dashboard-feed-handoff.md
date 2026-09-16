@@ -53,7 +53,11 @@ Each array element:
 | `confidence` | float 0–1 or null | extraction confidence — optionally de-emphasize low values |
 | `source_subject` | string | subject of the email it came from (provenance) |
 | `source_from` | string | who forwarded/sent it (provenance) |
-| `source_channel` | string | the intake address (e.g. `intake@mtgibbs.dev`) |
+| `source_channel` | string | the intake address (e.g. `intake@mtgibbs.dev`) or poller (`canvas:fultonschools`) |
+| `received_at` | ISO-8601 string | when the row landed in intake. **Stable — added to the contract 2026-09-16.** Powers the undated-lane card date (when `due_at` is null) and the board's feed-freshness check. Not the same as `due_at`: forwarded email carries old content with a fresh `received_at` |
+| `original_from` | string or null | the *original* sender parsed out of forwarded mail, when detectable. Null when unparseable — **never fall back to `source_from`**, that's the forwarder |
+| `body_text` | string or null | plain-text email body, capped at 10,000 chars. Null for rows ingested before 2026-05-28 |
+| `acks` | array of string | who has marked this seen, e.g. `["matt","ronin"]`. Echoed on the feed so a fresh load needs no second call |
 
 ### `type` values and suggested treatment
 - **`event`** — something happening on `due_at` (PTA meeting, term start). → calendar/agenda.
@@ -82,9 +86,13 @@ Each array element:
 
 ## Constraints / what NOT to assume
 
-- **Read-only for now.** There is **no write-back** endpoint yet (no "mark done", no create).
-  Don't design flows that require writing — or flag it and we'll add `POST` endpoints.
-- **No auth yet.** It's open on the LAN. Don't ship the board anywhere public against it as-is.
+- **~~Read-only for now.~~ Two write surfaces shipped 2026-05-27** (this bullet was stale):
+  `POST /api/ack` (toggle "person has seen item") and `POST /api/menu` (the dinners list —
+  action-dispatched: `list` / `add` / `edit` / `eat` / `delete`). Both go through the same
+  nginx token-injection as `/api/feed`, so the client never holds the token. Anything
+  beyond those two is still a backend ask — see `BACKEND-ASKS.md`.
+- **No client auth.** It's open on the LAN (the *upstream* is token-gated; the board itself
+  is not). Don't ship the board anywhere public against it as-is.
 - **The feed returns UPCOMING + undated items** (past dates filtered server-side, in progress).
   So you generally don't need to filter out old dates client-side — but be defensive.
 - **No dedup guarantees historically** (being fixed). Be tolerant of an occasional repeat;

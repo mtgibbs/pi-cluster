@@ -87,6 +87,12 @@
   with iOS Auto-Lock = Never).
 - **Honest states:** `student: unknown`, `due_at: null`, low `confidence`, and an empty
   feed must all look intentional, never broken.
+- **A reachable feed is not a fed feed.** The heartbeat originally only went red when the
+  *fetch* failed — so when the Canvas and email sources died upstream, `/api/feed` kept
+  returning `200` with a frozen snapshot and the board looked perfectly alive for months.
+  The masthead now also checks the newest `received_at`: past `STALE_AFTER_H` (48h) the
+  heartbeat goes red and the statusline says how long it's been. Green must be able to
+  mean something, which means it must be able to go red.
 
 ## Out of scope for the client (→ backend, see BACKEND-ASKS.md)
 Ack persistence/sync, the dinners store + writes, the people roster, per-person color

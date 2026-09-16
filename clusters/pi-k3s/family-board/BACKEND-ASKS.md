@@ -7,9 +7,28 @@
 
 Status legend: 🔵 designed-against (stubbed in client) · 🟡 needs decision · 🟢 shipped
 
+## Status at a glance
+
+> Last reconciled against the deployed `index.html` + live endpoints on **2026-09-16**.
+> Four of these had drifted — #1, #4 and #5 had shipped months earlier while still
+> reading as open. **If you change an ask's state, change it here too.**
+
+| # | Ask | Status |
+| :-- | :--- | :--- |
+| 1 | Acknowledgement write-back | 🟢 built 2026-05-27 — `POST /api/ack`, acks echoed on the feed |
+| 1b | `received_at` in the documented contract | 🟢 documented 2026-09-16 in `dashboard-feed-handoff.md` |
+| 2 | Family roster as first-class people | 🟡 **open** — still hardcoded in client JS |
+| 3 | Per-person color preference service | 🟡 **open** — still hardcoded CSS variables |
+| 4 | Dinners menu — a meal TODO | 🟢 built 2026-05-27 — `POST /api/menu`, `board_menu` table |
+| 5 | Extract `original_from` from forwarded email | 🟢 built 2026-05-28 |
+| 6 | Store full email `body_text` for drill-in | 🟢 built 2026-05-28 |
+
+**Only #2 and #3 remain**, and they are one ask wearing two hats — a roster row carrying a
+colour column answers both. Neither blocks anything on the wall today.
+
 ---
 
-## 1. Acknowledgement write-back  🔵
+## 1. Acknowledgement write-back  🟢 BUILT 2026-05-27
 **What:** Each item can be marked "seen" by each family member. Four people:
 `julia`, `matt`, `ronin`, `rory`. An ack is just **"I've seen this"** — the shallowest
 possible signal. No status beyond seen/unseen. Purpose: frictionless self-reporting —
@@ -29,17 +48,23 @@ fold). For that to feel right across the iPad and the wall panel, acks **must pe
 server-side and be echoed on the feed** — otherwise my fold resets every reload and
 differs per device.
 
-**Client stub today:** acks live in `localStorage` so the flip-pop + fold are real in
-the prototype. This resets per-device and is throwaway — replace with the real write path.
+**As built (`a84af06`):** `POST /api/ack` → nginx injects `X-Feed-Token` → n8n
+`/webhook/ack`. Acks are echoed back on the feed as `acks: [...]` per item and the client
+rehydrates from them (`hydrateAcks()`), so a fresh load shows current state with no second
+call. The `localStorage` stub is gone.
 
 ---
 
-## 1b. `received_at` as a documented, stable field  🟡
+## 1b. `received_at` as a documented, stable field  🟢 DOCUMENTED 2026-09-16
 **What:** Every card now shows a date — `due_at` when present, else **`received_at`** —
 so the undated lanes (Good to Know, Read Later) sort newest-first and fold sensibly.
-`received_at` is present in the live sample but is **not in the documented data contract**
-table (`docs/dashboard-feed-handoff.md`). Please confirm it's stable and add it to the
-contract so the renderer can rely on it.
+`received_at` is present in the live sample but was **not in the documented data contract**
+table (`docs/dashboard-feed-handoff.md`).
+
+**Resolved 2026-09-16:** confirmed stable (present on every row of the live feed) and added
+to the contract table. Two consumers now depend on it: the undated-lane card dates, and the
+masthead **feed-freshness check** — the board compares the newest `received_at` against
+`STALE_AFTER_H` and flags the heartbeat when nothing new has landed.
 
 ---
 
@@ -74,7 +99,7 @@ with the roster (#2).
 
 ---
 
-## 4. Dinners menu — a meal TODO  🔵
+## 4. Dinners menu — a meal TODO  🟢 BUILT 2026-05-27
 **What:** A **"On the Menu" side widget** — a simple checklist of dinners (no dates). The
 family lists the meals they plan to make and **checks off what they've eaten** (a progress
 count: "2 of 5 eaten"). Each meal can carry an optional **recipe link**. *Not* a
@@ -93,12 +118,15 @@ meal shows on the art-mode screen ("Up next for dinner").
   integration needed for v1. *(One-tap into the Paprika app would be a separate ask once we
   confirm Paprika's per-recipe URL scheme.)*
 
-**Client stub today:** the menu lives in `localStorage`, seeded with demo meals; the
-checklist + add-input + edit sheet write there. Throwaway — replace with the real store.
+**As built (`a84af06`, `62cba6c`):** `POST /api/menu` → n8n `/webhook/menu`, backed by the
+`board_menu` table. One endpoint, action-dispatched: `{action: "list"|"add"|"edit"|"eat"|
+"delete", …}` rather than the REST shape sketched in Appendix A. `apiMenu()` tolerates an
+empty n8n response body (deleting the last row returns `""`, and `JSON.parse("")` would
+stall the UI). The `localStorage` stub is gone.
 
 ---
 
-## 5. Extract the *original* sender from forwarded emails  🟡
+## 5. Extract the *original* sender from forwarded emails  🟢 BUILT 2026-05-28
 **What:** `intake_items.source_from` today is the `From:` header of whatever email landed
 in the intake — which, for forwarded family mail, is the **forwarder** (Matt/Julia), not
 the original school/community sender. The board's drill-in had a "Sent by" row that
@@ -118,7 +146,15 @@ absent, the row is omitted (don't lie with the forwarder address).
 the PTA, a teacher, the district office, etc. — which is half the context behind a
 "Technical Support Contact"-type info item.
 
-**Client stub today:** none — the row is just hidden. No fallback fakery.
+**As built (`8e4cb58`, spec `specs/family-board-original-from-extraction/`):**
+`intake_items.original_from TEXT` (nullable), populated during intake and carried on the
+feed. The drill-in renders an **"Originally from"** row only when it's present
+(`index.html` ~L691) — absent stays absent, no fallback fakery.
+
+> ⚠️ **Gotcha (`17ab27e`, `de114e7`):** the extracting LLM sometimes returns the *literal
+> strings* `"null"` / `"None"` rather than a JSON null. Those coerce to truthy and printed
+> "Originally from: null" on the wall. The client coalesces them via `nonNullStr()`. Any
+> new LLM-derived field needs the same guard.
 
 ---
 
