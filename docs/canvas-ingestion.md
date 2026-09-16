@@ -8,7 +8,9 @@
 - **Architecture context:** [`docs/data-architecture.md`](./data-architecture.md)
 - **Spec:** [`specs/modular-ingestion/spec.md`](../specs/modular-ingestion/spec.md)
 - **Workflow:** `bronze: canvas-poller` (n8n id `NJV9pSpi4gerKqqx`)
-- **Status:** live 2026-05-29 (Ronin only — see "Roster" below)
+- **Status:** live 2026-05-29; both kids flowing since fall enrollment 2026-09-16 (Ronin
+  `200257` + Rory `472552`). Token migrated to mobile-OAuth capture 2026-09-16 (see
+  "Credentials" — manual PATs were disabled by the district).
 
 ---
 
@@ -30,17 +32,68 @@ student slot (`ronin` / `rory` / `unknown`):
 
 ## Credentials & secrets
 
-- **1Password:** `op://pi-cluster/canvas` — `api-url` (text), `api-token` (concealed).
-  The token is an **observer (parent) personal access token** — it belongs to **Julia**
-  (Canvas user id `240637`).
+- **1Password:** `op://pi-cluster/canvas` — `api-url` (text), `api-token` (concealed),
+  `ronin-canvas-id`, `rory-canvas-id`. The token authenticates as **Julia**, the
+  **observer (parent)** account (Canvas user id `240637`).
 - **n8n credential:** `canvas-api` (httpHeaderAuth, id `1avasNB9qofVhAG0`) — header
   `Authorization: Bearer <token>`, **domain-scoped** to `fultonschools.instructure.com`.
 - Host: `fultonschools.instructure.com`. Summer FV courses live on
   `fultonvirtual.instructure.com` but proxy transparently via the `273100000000…` shard
   prefix — no separate cred needed.
 
-To rotate the token: update `op://pi-cluster/canvas/api-token`, then update the value in
-the n8n `canvas-api` credential (the credential is not yet ExternalSecret-synced).
+> ⚠️ **The token is a Canvas-for-iOS OAuth token, not a manual PAT** (as of 2026-09-16).
+> Fulton County **disabled manual access-token creation in the web UI** — the *only* way
+> to mint a token now is through the mobile app's OAuth login. So rotation is no longer a
+> point-and-click; it's the capture procedure below. The upside: the resulting token
+> reports **Expires: never** in Canvas (Account → Settings → Approved Integrations →
+> "Canvas for iOS"), so it lasts until the app is logged out or the integration is
+> revoked there.
+
+### Rotating the token (mobile OAuth capture)
+
+Manual PATs are gone, so a new token is sniped from the iOS app's own OAuth login. This
+is a legitimate capture of **our own account's** token — but it does hand a MITM proxy a
+window onto the phone's traffic, so undo the phone changes afterward.
+
+1. **Proxy up (laptop):** `brew install mitmproxy` once, then run the capture with the
+   token-grabber addon (kept at `scripts/canvas/grab_token.py`, mirrored below):
+   ```bash
+   mitmdump --listen-host 0.0.0.0 --listen-port 8080 -s scripts/canvas/grab_token.py
+   ```
+2. **Phone onto the proxy:** Settings → Wi-Fi → (network) → Configure Proxy → Manual →
+   `<laptop-LAN-IP>:8080`. Safari → `http://mitm.it` → install the **iOS** cert, then
+   **Settings → General → About → Certificate Trust Settings** → full-trust it. *(Two
+   separate steps — skip the trust toggle and you get TLS errors, no traffic.)*
+3. **Log in as Julia:** Canvas web → **Account → QR for Mobile Login**, scan it *with the
+   Canvas Parent app*. (The QR itself only drives a web-session login — it can't be
+   exchanged for an API token without the app's embedded client secret, which we don't
+   have. So the app must do the OAuth; the proxy captures the Bearer it receives.)
+4. **The addon writes** the OAuth exchange's `access_token` to **`api_token.txt`** (and the
+   full response to `oauth_response.json`) in `$CANVAS_CAPTURE_DIR` (default
+   `<tempdir>/canvas-capture`, deliberately outside the repo). Use `api_token.txt` — the
+   plain `Authorization: Bearer` header captured off later requests can be a different,
+   sso-scoped JWT that 401s against the API. The real API token is ~70 chars; the addon
+   already prefers the OAuth token and won't let a stray Bearer clobber it.
+5. **Verify before trusting** (structure, not by eyeballing the value):
+   ```bash
+   TOK=$(op read op://pi-cluster/canvas/api-token)   # or the captured file
+   curl -sS -H "Authorization: Bearer $TOK" \
+     -H "Accept: application/json+canvas-string-ids" \
+     https://fultonschools.instructure.com/api/v1/users/self/observees | jq '[.[].name]'
+   ```
+   A `200` listing the kids = good. `401 Invalid access token` = wrong token (see step 4).
+6. **Store & wire:** `op item edit canvas --vault pi-cluster "api-token=$(cat token_file)"`,
+   then update the value in the n8n `canvas-api` credential **in the UI** — the n8n public
+   API cannot set a credential's value (create/delete only), and all five Canvas nodes
+   reference the credential by id, so one in-place edit fixes them all.
+7. **Tear down the phone:** remove the manual proxy and **delete the mitmproxy cert**
+   (Settings → General → VPN & Device Management). Don't leave a MITM cert trusted.
+8. **Shred** any local token files once they're in 1Password + n8n.
+
+> The `X-Feed-Token` gate on the manual `/webhook/canvas-poll` trigger is unrelated to
+> this token — it uses the n8n "Feed Token" credential (`op://pi-cluster/n8n-automation/
+> feed-token`). A cold `op read` that returns empty will make that webhook 403 with
+> "Authorization data is wrong!" — re-read the token, it's not a credential drift.
 
 ---
 
@@ -62,8 +115,21 @@ Get Observees ──▶ Shape Observees ──▶ Get Observee Courses (per-obse
 - **Per-observee fan-out:** observee IDs come from `/users/self/observees`; courses are
   fetched **per observee** (`/users/<id>/courses`) because that's the only reliable way to
   know which kid a course belongs to (see gotcha #4).
-- **Current-term filter:** `Build Calendar URLs` keeps only courses whose term contains
-  `2025/2026` (drops the 14 archived 2024-25 courses).
+- **Current-term filter:** `Build Calendar URLs` keeps only courses whose term matches the
+  **current academic year, computed at runtime** (drops archived prior-year courses).
+  Fulton names terms `YYYY/YYYY+1 - S1…` (e.g. `2026/2027 - S1`); the node derives the
+  year and flips it each July:
+  ```js
+  const startYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  const ay = `${startYear}/${startYear + 1}`;           // e.g. "2026/2027"
+  const cur = courses.filter(c => (c.term||'').includes(ay));
+  ```
+  > ⚠️ **This was hardcoded to `2025/2026` until 2026-09-16 and it silently rotted at the
+  > school-year rollover:** every fall-2026 course fell outside the filter, so
+  > `calendar_event_count` went to **0** — no dated assignments reached the board — while
+  > announcements and missing-submissions (not term-filtered) kept flowing, so the failure
+  > looked partial, not total. A green-ish poll that had quietly stopped delivering the main
+  > signal. Reuse the existing `const now` in this node — don't redeclare it.
 - **Calendar window:** −2 days (grace) → +120 days. Forward-looking on purpose — a wide
   back-window pulls already-done assignments as clutter (`missing_submissions` covers
   "past + not done").
@@ -133,11 +199,13 @@ These cost ~9 iterations to find. Every one is non-obvious.
 
 ## Roster / enrollment reality
 
-- **Only Ronin appears today.** `/users/self/observees` returns one observee (Ronin,
-  `200257`). Rory is paired at the account level but has **no current-term enrollment**, so
-  Canvas surfaces no observation link for him. This is expected, not a bug.
-- **When Rory enrolls (fall 2026), he appears automatically** — the per-observee fan-out
-  maps him by first-name substring in `Shape Observees`; no code change needed.
+- **Both kids appear as of fall 2026** (2026-09-16): `/users/self/observees` returns
+  **Ronin `200257`** and **Rory `472552`**. Rory surfaced automatically the moment his
+  fall enrollment opened — the per-observee fan-out maps him by first-name substring in
+  `Shape Observees`, no code change needed, exactly as predicted.
+- Through summer 2026 only Ronin appeared: Rory was paired at the account level but had no
+  current-term enrollment, so Canvas surfaced no observation link. That single-observee
+  window was expected, not a bug — worth remembering the next time a kid is between terms.
 - Both kids are boys (he/him).
 
 ---
