@@ -30,9 +30,9 @@ A normal `kubectl delete pod` triggers graceful termination which overwrites the
 
 ## Newznab Provider Config (CRITICAL — non-obvious)
 
-### NZBgeek and nzb.su Do Not Support `t=book`
+### NZBgeek and nzb.life Do Not Support `t=book`
 
-Neither NZBgeek nor nzb.su (via Prowlarr) support the `t=book` search type. Their caps XML does not include it (`book-search available="no"`). LazyLibrarian must use generic category search instead.
+Neither NZBgeek nor nzb.life (via Prowlarr) support the `t=book` search type. Their caps XML does not include it (`book-search available="no"`). LazyLibrarian must use generic category search instead.
 
 **Required `config.ini` settings for each Newznab provider (`[Newznab_0]`, `[Newznab_1]`, etc.):**
 
@@ -45,16 +45,23 @@ manual = True          # prevents caps auto-detection from overwriting these set
 
 `dltypes` controls which download types the provider is used for. Values: `A` = audiobook, `E` = ebook, `M` = magazine. If `E` is absent, the provider is not queried for ebook searches despite being enabled.
 
-### Working Provider Setup (as of 2026-02-05)
+### Working Provider Setup (as of 2026-09-18)
 
 | Index | Provider | Access | Status |
 |---|---|---|---|
 | `[Newznab_0]` | NZBgeek | Direct at `https://api.nzbgeek.info` | Enabled |
-| `[Newznab_1]` | nzb.su | Via Prowlarr at `http://prowlarr.media.svc.cluster.local:9696/7/api` | Enabled |
+| `[Newznab_1]` | nzb.life | Via Prowlarr at `http://prowlarr.media.svc.cluster.local:9696/7/api` | Enabled |
 
-Prowlarr indexer IDs: 1-5 torrent (all DISABLED — need VPN), 6 NZBgeek, 7 nzb.su.
+Prowlarr indexer IDs: 1-5 torrent (all DISABLED — need VPN), 6 NZBgeek, 7 nzb.life.
 
-nzb.su tends to find books NZBgeek cannot (e.g., 2001, Harry Potter).
+nzb.life tends to find books NZBgeek cannot (e.g., 2001, Harry Potter).
+
+> **Domain change 2026-09-18: `nzb.su` → `nzb.life`.** The indexer notified us after
+> 161 API requests stopped at their domain-change notice instead of returning data.
+> `api.nzb.su` no longer serves API/RSS; the API key is unchanged. Prowlarr indexer 7's
+> `baseUrl` is now `https://api.nzb.life`. LazyLibrarian needs no edit — it reaches the
+> indexer through Prowlarr, so the fix landed upstream of `config.ini`. Old domain sunsets
+> April 2027. See `.claude/skills/servarr-ops/SKILL.md` for the indexer-URL change recipe.
 
 Note: NZBgeek often returns audiobooks for book searches — check download category before queuing.
 
