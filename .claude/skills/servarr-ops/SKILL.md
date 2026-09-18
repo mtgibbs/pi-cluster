@@ -407,6 +407,49 @@ curl -H "X-Emby-Token: $JF_KEY" \
 
 Same query for series with `IncludeItemTypes=Episode`.
 
+## Recipe: an indexer changed its domain
+
+Indexers move (`nzb.su` → `nzb.life`, 2026-09-18). The URL lives in **every app that
+configured it directly**, so find them all before editing one:
+
+```sh
+source .claude/skills/servarr-ops/api-key-helper.sh
+servarr_call prowlarr GET /api/v1/indexer | jq -r '.[] | "\(.id) \(.name) \(.fields[]?|select(.name=="baseUrl")|.value)"'
+for s in radarr sonarr; do
+  servarr_call $s GET /api/v3/indexer | jq -r ".[] | \"$s \(.id) \(.name) \(.fields[]?|select(.name==\"baseUrl\")|.value)\""
+done
+```
+
+GET → patch `baseUrl` → PUT with `?forceSave=true` (Prowlarr rejects the save otherwise
+when the old host is unreachable):
+
+```sh
+servarr_call prowlarr GET /api/v1/indexer/7 > /tmp/idx.json
+jq '(.fields[]|select(.name=="baseUrl")|.value) = "https://api.nzb.life"
+    | .indexerUrls = ["https://api.nzb.life"]' /tmp/idx.json > /tmp/idx.new.json
+servarr_call prowlarr PUT '/api/v1/indexer/7?forceSave=true' -d @/tmp/idx.new.json
+```
+
+### Gotchas
+
+1. **The masked `apiKey` round-trips safely.** GET returns `"value": "********"` for any
+   `privacy: apiKey` field. PUTting that back preserves the stored key — the UI does the
+   same round trip. Prove it with `POST /api/v3/indexer/testall` (`isValid: true`), and keep
+   the real key at `op://pi-cluster/<indexer>/api-key` as the fallback.
+2. **Saving a Prowlarr indexer triggers an app sync, which can *create* duplicates.** All four
+   apps here are `syncLevel: fullSync`. If an app also has a *hand-made direct* entry for the
+   same indexer, the save pushes a second `<name> (Prowlarr)` entry alongside it — the app
+   now queries that indexer twice per search, burning double against the indexer's daily API
+   limit. Check `GET /api/v1/applications | jq '.[].syncLevel'` and re-list the app's indexers
+   after any Prowlarr save.
+3. **Deleting the synced `(Prowlarr)` entry does not stick** under `fullSync` — the next sync
+   recreates it. To de-duplicate, delete the *direct* entry instead and let Prowlarr own the
+   indexer. Re-creating a direct entry later needs the API key from 1Password, since the
+   backup JSON only holds the mask.
+4. **Apps reaching the indexer through Prowlarr need no edit at all** — LazyLibrarian points at
+   `http://prowlarr...:9696/7/api`, so the domain fix lands upstream of its `config.ini` (which
+   is a good thing: that file gets overwritten on graceful shutdown — see `docs/lazylibrarian.md`).
+
 ## Quality-profile rejection cheat sheet
 
 Common rejection reasons seen in `/api/v3/release` output and what they mean:
