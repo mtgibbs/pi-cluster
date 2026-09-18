@@ -442,10 +442,28 @@ servarr_call prowlarr PUT '/api/v1/indexer/7?forceSave=true' -d @/tmp/idx.new.js
    now queries that indexer twice per search, burning double against the indexer's daily API
    limit. Check `GET /api/v1/applications | jq '.[].syncLevel'` and re-list the app's indexers
    after any Prowlarr save.
-3. **Deleting the synced `(Prowlarr)` entry does not stick** under `fullSync` — the next sync
-   recreates it. To de-duplicate, delete the *direct* entry instead and let Prowlarr own the
-   indexer. Re-creating a direct entry later needs the API key from 1Password, since the
-   backup JSON only holds the mask.
+3. **De-duplicate by disabling the direct entry, not by deleting anything.** Deleting the
+   synced `(Prowlarr)` entry doesn't stick — the next `fullSync` recreates it. Deleting the
+   *direct* entry works but is a poor undo: the backup JSON holds only the masked key, so
+   restoring means re-creating the indexer and re-reading `op://pi-cluster/<indexer>/api-key`.
+   Instead `PUT` the direct entry with `enableRss`/`enableAutomaticSearch`/
+   `enableInteractiveSearch` all `false` — Prowlarr's sync won't touch an entry it doesn't
+   manage, and re-enabling is three booleans with the key still in place.
+
+   **Measure it in both directions.** The apps dedupe releases by GUID, so a duplicate
+   indexer never showed up as duplicate *results* — the direct entry contributed 0 of 351
+   releases, losing to the Prowlarr copy on priority (25 vs 10). The cost was invisible in
+   the release list and visible only in the fan-out. Two independent signals settle it:
+
+   ```sh
+   # 1. release counts must be UNCHANGED (nothing was lost)
+   servarr_call radarr GET '/api/v3/release?movieId=9' \
+     | jq -r 'group_by(.indexerId)[] | "\(.[0].indexer): \(length)"'
+   # 2. the log's active-indexer count must DROP (the extra query really stopped)
+   servarr_call radarr GET '/api/v3/log?pageSize=60&sortKey=time&sortDirection=descending' \
+     | jq -r '.records[] | select(.message|test("active indexers")) | .message'
+   # → "… 3 active indexers" before, "… 2 active indexers" after
+   ```
 4. **Apps reaching the indexer through Prowlarr need no edit at all** — LazyLibrarian points at
    `http://prowlarr...:9696/7/api`, so the domain fix lands upstream of its `config.ini` (which
    is a good thing: that file gets overwritten on graceful shutdown — see `docs/lazylibrarian.md`).
