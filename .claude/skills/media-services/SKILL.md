@@ -512,7 +512,45 @@ Poll `GET /api/v1/settings/jobs` for `running:false`, then re-check `GET /api/v1
 
 - **Galavant S01E02-E08**: Corrupt MKV files (EBML header parsing errors, 0x00 as first byte)
 - **PLUR1BUS**: Read-only filesystem errors saving `.nfo` to NFS — cosmetic only. The media mount is `readOnly: true`; metadata is stored in the DB, not on disk.
-- **Apple TV Jellyfin app**: No subtitle offset control. PGS direct play works fine. If stuck with a misaligned external SRT and no embedded track, there is no in-player workaround for Apple TV.
+- **Apple TV Jellyfin app**: No subtitle offset control, and it **does not render PGS** — it lists the embedded
+  bitmap track (`English - PGSSUB`) in the menu but draws nothing when selected (long-standing tvOS limitation,
+  `docs/recaps/2026-05-06-bazarr-subtitle-pipeline.md` §8). If stuck with a misaligned external SRT and no
+  embedded track, there is no in-player workaround for Apple TV.
+
+## Infuse is load-bearing — do NOT propose swapping the client back
+
+Recurring bad advice, both from generic Jellyfin guidance and from Claude: *"the Apple TV drops mid-movie and
+Infuse is the one constant — switch to the native Jellyfin tvOS app to A/B the client."* That test is not
+available here. Infuse is not a preference; it is the fix for **three** independent tvOS-app defects, and every
+fallback path routes through a transcode the Pi 5 cannot perform (BCM2712 has HEVC **decode** only — no hardware
+encoder at all, so any burn-in falls back to software x264/x265 on the ARM cores).
+
+| # | tvOS Jellyfin app defect | Infuse's answer | Cost of reverting |
+| :-- | :--- | :--- | :--- |
+| 1 | Cannot render embedded **PGS** bitmap subs (Blu-ray / foreign cinema) | native PGS direct-play renderer | server-side burn-in transcode, explicitly rejected 2026-05-06 |
+| 2 | **ASS/SSA** softsubs on anime — styled/positioned tracks the app handles badly | renders ASS natively | burn-in transcode again, on a large library |
+| 3 | No **subtitle offset** control; clumsy multi-track audio/sub selection (jpn/eng dual-audio anime) | per-track audio + subtitle selection with offset | no in-player workaround at all |
+
+Row 2 is **user-reported** (the anime subtitle-sync complaints), captured here 2026-09-22 because it lived only in
+Matt's head and kept getting re-litigated. The *mechanism* (ASS → burn-in) is the likely-but-unverified
+explanation; rows 1 and 3 are documented in the 2026-05-06 recap. Verified either way, the conclusion holds: the
+native app is not a usable fallback.
+
+**Consequences for the open streaming-crash investigation**
+(`docs/incidents/2026-06-22-streaming-crash-handoff.md` — residual drop at 75-110 min, always `Infuse-Direct`,
+zero server-side trace):
+
+- **The client A/B is off the table.** You cannot remove the prime suspect to test it. Evidence has to come from
+  *inside* Infuse (the on-screen error text at the drop — still the never-obtained keystone) or from its settings.
+- **Infuse's streaming cache is a knob, not a law.** The ~12 GB front-load-then-coast-30-min read pattern measured
+  in `docs/recaps/2026-06-18-jellyfin-nfs-streaming-drops-rootcause-instrumentation.md` is an Infuse *setting*.
+  Shrinking it turns "huge burst → long coast → cold-disk refill hang" into a steadier read — which is precisely
+  the mechanism the NFS spin-up theory blames. Free, reversible, **not yet tried.**
+- **What hardware transcode would actually buy.** An Intel Quick Sync box (N100/N305) does **not** address these
+  crashes — they are direct-play, no transcode involved. What it buys is *client freedom*: with a real encoder,
+  burn-in becomes a non-event and the tvOS app becomes a usable fallback, which re-enables the A/B above. Judge
+  the purchase on that, not on the crashes. Note the cluster is all-arm64: an amd64 node is a mixed-arch change,
+  so a standalone box may be simpler than a first x86 k3s node.
 
 ## Radarr SQLite Lock Recovery
 

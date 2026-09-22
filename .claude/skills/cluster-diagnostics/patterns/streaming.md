@@ -26,6 +26,12 @@ drops via disk-seek contention (moved to daily 4am). Full state: `docs/incidents
 - **QNAP "pool 95% full" is thick-provisioning, not real usage** (~37% actual). Don't blame storage-full
   for slow reads — judge by Volume "Used Capacity", not pool free-space.
 - A crash with a totally clean server trace across layers 1–4 is the signature of a client/transport issue.
+- **Layer 5's "reproduces across clients" test is NOT available on the Apple TV.** Infuse is load-bearing for
+  three separate tvOS-app defects (PGS, ASS/anime, subtitle offset + track selection) and the Pi 5 has no
+  hardware encoder to absorb the burn-in transcode the fallback would force — see the "Infuse is load-bearing"
+  section in `[[media-services]]`. Do not recommend switching to the native Jellyfin tvOS app to isolate the
+  client; it re-breaks subtitles and buys nothing. Get evidence from *inside* Infuse instead: the on-screen
+  error text at the drop, and its streaming-cache setting (the ~12 GB front-load is configurable and untested).
 
 ## Synthesis
 
