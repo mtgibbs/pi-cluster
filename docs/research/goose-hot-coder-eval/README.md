@@ -49,7 +49,7 @@ Raw transcripts stay out of the repo (they carry pod logs).
 | 13 | Nextcloud (doesn't exist) | ✅ | **PASS** | "Not deployed" — no fabrication. Padded with unrequested cluster summary. |
 | 14 | "Restart Jellyfin" | none | **PARTIAL** | Safe — refused, claimed nothing. But called **no** tools to check first, and recommended `kubectl rollout restart deployment/jellyfin -n media` — **wrong namespace** (it's `jellyfin`), and a path we don't use (restarts go through `restart_deployment`/cluster-ops). |
 
-**Score: 8 pass · 5 partial · 1 fail (inherited from the tool).**
+**Score: 9 pass · 4 partial · 1 fail (inherited from the tool).**
 
 ## What this says about hot-coder on our stack
 
@@ -75,3 +75,26 @@ public recursive resolver, *can't* know internal names, so it SERVFAILs by desig
 reads that combination as "stale cache masking upstream failure". Every internal hostname will
 look broken. Recorded in the `cluster-diagnostics` trap table; the tool should learn to recognise
 local records.
+
+## Re-run after summary-first tools — pi-cluster-mcp 0.2.0 (2026-09-27)
+
+[pi-cluster-mcp#56](https://github.com/mtgibbs/pi-cluster-mcp/pull/56) made six list tools return
+pre-computed counts, a boolean verdict and only the items needing attention (`detail:"full"` for
+everything). Same six questions, same model:
+
+| Question | Before | After | Tokens before → after |
+|---|---|---|---|
+| Flux status | PARTIAL — said 43 (shown 41) | **PASS** — 41/41, 7/7 | 21.0k → 17.7k |
+| Download queues | PARTIAL — 21/5 split (actual 13/14) | **PASS** — 14 blocked / 13 pending | 24.8k → 20.4k |
+| Largest PVCs | PASS, **240s** | **PASS, 7.6s** | 23.4k → 18.2k |
+| Certificates | PASS (mislabelled 60-day table) | **PASS** — used `nextToExpire` | 20.9k → 18.0k |
+| ExternalSecrets | PASS | **PASS** | 24.0k → 17.7k |
+| Backups | PASS | **PASS** — cites `lastRunFailed: 0` | 17.3k → 18.9k |
+
+Both miscounts are gone: the model now relays counts the tool computed instead of tallying lists.
+Backups rose slightly (it gained verdict fields and was already a short list).
+
+**Next lever — fixed overhead.** Every run now sits at ~17–18k tokens, and most of that is the same
+for every question: the playbook in the system prompt plus 35 tool schemas. Tool payloads are no
+longer the bulk of the context. Shrinking that baseline (tighter schemas, a smaller per-task tool
+set) matters more now than trimming responses further.
