@@ -30,9 +30,9 @@ A normal `kubectl delete pod` triggers graceful termination which overwrites the
 
 ## Newznab Provider Config (CRITICAL — non-obvious)
 
-### NZBgeek and nzb.su Do Not Support `t=book`
+### NZBgeek and nzb.life Do Not Support `t=book`
 
-Neither NZBgeek nor nzb.su (via Prowlarr) support the `t=book` search type. Their caps XML does not include it (`book-search available="no"`). LazyLibrarian must use generic category search instead.
+Neither NZBgeek nor nzb.life (via Prowlarr) support the `t=book` search type. Their caps XML does not include it (`book-search available="no"`). LazyLibrarian must use generic category search instead.
 
 **Required `config.ini` settings for each Newznab provider (`[Newznab_0]`, `[Newznab_1]`, etc.):**
 
@@ -50,11 +50,11 @@ manual = True          # prevents caps auto-detection from overwriting these set
 | Index | Provider | Access | Status |
 |---|---|---|---|
 | `[Newznab_0]` | NZBgeek | Direct at `https://api.nzbgeek.info` | Enabled |
-| `[Newznab_1]` | nzb.su | Via Prowlarr at `http://prowlarr.media.svc.cluster.local:9696/7/api` | Enabled |
+| `[Newznab_1]` | nzb.life (formerly nzb.su) | Via Prowlarr at `http://prowlarr.media.svc.cluster.local:9696/7/api` | Enabled |
 
-Prowlarr indexer IDs: 1-5 torrent (all DISABLED — need VPN), 6 NZBgeek, 7 nzb.su.
+Prowlarr indexer IDs: 1-5 torrent (all DISABLED — need VPN), 6 NZBgeek, 7 nzb.life (formerly nzb.su; domain moved permanently in 2026 — Prowlarr base URL is `https://api.nzb.life`).
 
-nzb.su tends to find books NZBgeek cannot (e.g., 2001, Harry Potter).
+nzb.life tends to find books NZBgeek cannot (e.g., 2001, Harry Potter).
 
 Note: NZBgeek often returns audiobooks for book searches — check download category before queuing.
 
