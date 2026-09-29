@@ -345,7 +345,7 @@ Our setup: Pi-hole → Unbound → Root servers (recursive resolution)
 │  │  • Unifi Controller  - https://unifi.lab.mtgibbs.dev             │  │
 │  │    → UDM Pro Max built-in controller (192.168.1.1)              │  │
 │  │  • Synology NAS      - https://nas.lab.mtgibbs.dev               │  │
-│  │    → 192.168.1.60:5000 (retained; status: repurpose TBD)        │  │
+│  │    → 192.168.1.60:5000 (misc-files NAS; restored 2026-09-29)    │  │
 │  │  • QNAP NAS          - https://qnap.lab.mtgibbs.dev              │  │
 │  │    → 192.168.1.61:8080 (admin UI via ingress)                   │  │
 │  │                                                                   │  │
@@ -2418,7 +2418,7 @@ LAN Clients (Dual-Stack)
 | Immich Metrics (microservices) | 8082 | TCP | ClusterIP (Prometheus scrapes) |
 | Immich PostgreSQL | 5432 | TCP | ClusterIP (internal only, backup job access) |
 | Unifi Controller | 443 | HTTPS | UDM Pro Max built-in (192.168.1.1) → Ingress (unifi.lab.mtgibbs.dev) |
-| Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) — retained, status TBD |
+| Synology NAS | 5000 | HTTP | External (192.168.1.60) → Ingress (nas.lab.mtgibbs.dev) — back in service as a miscellaneous-files NAS via the DSM web UI (restored 2026-09-29) |
 | QNAP NAS | 8080 | HTTP | External (192.168.1.61) → Ingress (qnap.lab.mtgibbs.dev) |
 | mtgibbs.xyz Site | 3000 | TCP | Ingress (site.lab.mtgibbs.dev) |
 | Flux ImageRepository | N/A | N/A | Scans GHCR every 5 minutes |

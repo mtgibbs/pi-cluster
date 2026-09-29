@@ -212,7 +212,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 ### external-secrets-config  ·  Flux: `external-secrets-config` (after: `external-secrets`)
 
 ### external-services  ·  Flux: `external-services` (after: `ingress`, `cert-manager-config`)
-  - ingress: `qnap.lab.mtgibbs.dev`, `unifi.lab.mtgibbs.dev`
+  - ingress: `nas.lab.mtgibbs.dev`, `qnap.lab.mtgibbs.dev`, `unifi.lab.mtgibbs.dev`
 
 ### family-board  ·  Flux: `family-board` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
 - **Deployment/family-board** — `nginx`
