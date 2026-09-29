@@ -5,3 +5,4 @@ resources:
   - namespace.yaml
   - unifi.yaml
   - qnap.yaml
+  - synology.yaml
