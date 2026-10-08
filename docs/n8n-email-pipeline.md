@@ -148,8 +148,28 @@ whitelist (hence the annotation-bump restarts above).
 
 ### Swap the extraction model
 Edit the `model` field in `workflows/src/build-request.js` → reimport the workflow via the
-API. Must be an **`-instruct`** model (default `qwen3-30b-instruct`). A/B candidates:
-`qwen3-4b-instruct` (fast) ↔ `qwen2.5-72b` (quality).
+API. Must be **non-thinking**: either a dedicated `-instruct` checkpoint, or a hybrid with
+`think: false` in the request body (passes through LiteLLM `drop_params`; `/no_think` does
+not). Default is `qwen3.6-35b` + `think: false` — the model `aimode family` keeps warm, so a
+call costs no new VRAM. Never name a model that isn't in LiteLLM `/v1/models`: the previous
+default (`qwen3-30b-instruct`) was retired 2026-06-06 and both workflows 400'd silently for
+four months (`docs/incidents/2026-08-19-beelink-host-oom-and-stale-model.md`, Fault B).
+
+### LLM calls run in `family` mode only
+The Beelink is sole-tenant in `aimode work` (llama-server holds ~86 of 96 GiB VRAM), and
+Ollama pins whatever it loads (`KEEP_ALIVE=-1`). So every workflow that calls LiteLLM first
+reads `GET https://controlpanel.lab.mtgibbs.dev/aimode` and only proceeds on `family`; a
+failed lookup counts as *not* family.
+- **Digest Builder** — skips; the next hourly tick in family mode rebuilds it.
+- **Inbound Mail** — parks the webhook body in `pending_inbound_mail` (nothing is lost).
+- **Drain** (`inbound-mail-drain.json`) — `aimode family` POSTs
+  `https://n8n.lab.mtgibbs.dev/webhook/ai-family-ready` (event, not a poll); it replays each
+  parked body into the inbound-mail webhook and deletes the row. LAN-only on purpose: the
+  public tunnel only passes `^/webhook/inbound-mail.*`, so **never rename it to start with
+  `inbound-mail`**. No auth — it is idempotent, mode-gated, and returns nothing.
+
+Consequence: if the box stays in `work` mode, no digest and no extraction happen until the
+next flip. Check the backlog with `SELECT count(*) FROM pending_inbound_mail;`.
 
 ### Test without re-forwarding
 Replay a captured execution's body to the production webhook:

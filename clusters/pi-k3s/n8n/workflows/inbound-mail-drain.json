@@ -1,0 +1,211 @@
+{
+  "name": "Inbound Mail — Drain Pending (ai-family-ready)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-family-ready",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "84716091-5fa3-4c61-a16b-49584aa37eb0",
+      "name": "AI Family Ready",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "59c371d0-d995-4dd8-9870-69608d9643af"
+    },
+    {
+      "parameters": {
+        "url": "https://controlpanel.lab.mtgibbs.dev/aimode",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 5000
+        }
+      },
+      "id": "acb93503-041a-414d-ba83-832e8db037ac",
+      "name": "AI Mode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "912c74f9-49c6-4c52-8257-ad709fe54c11",
+              "leftValue": "={{ String($('AI Mode').first().json.mode || '') }}",
+              "rightValue": "family",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3e109540-1c8f-4711-ad09-7e37617de367",
+      "name": "Family Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS pending_inbound_mail (id BIGSERIAL PRIMARY KEY, queued_at TIMESTAMPTZ NOT NULL DEFAULT now(), body JSONB NOT NULL); SELECT id, body FROM pending_inbound_mail ORDER BY id LIMIT 200;",
+        "options": {}
+      },
+      "id": "bd7fca39-0693-4d1e-a913-07ab85e5c22d",
+      "name": "Select Pending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-webhook.n8n.svc.cluster.local:5678/webhook/inbound-mail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 15000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          }
+        }
+      },
+      "id": "ee1473d0-592f-467c-9d75-04894ce24a51",
+      "name": "Replay Inbound",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "5oAV58zdOBeUJXO8",
+          "name": "inbound-mail-token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pending_inbound_mail WHERE id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Select Pending').item.json.id }}"
+        }
+      },
+      "id": "51d80530-b458-46fe-8220-e1951cc46ae7",
+      "name": "Unqueue",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "AI Family Ready": {
+      "main": [
+        [
+          {
+            "node": "AI Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Mode": {
+      "main": [
+        [
+          {
+            "node": "Family Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Family Mode?": {
+      "main": [
+        [
+          {
+            "node": "Select Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Pending": {
+      "main": [
+        [
+          {
+            "node": "Replay Inbound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replay Inbound": {
+      "main": [
+        [
+          {
+            "node": "Unqueue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

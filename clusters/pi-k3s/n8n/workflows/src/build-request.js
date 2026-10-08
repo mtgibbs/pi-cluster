@@ -9,4 +9,4 @@ const sys = `You are an extraction service that pulls actionable items from an i
 const bodyText = String(b.text || '').slice(0, 5000);
 let user = `EMAIL DATE: ${b.date || ''}\nFROM: ${b.from || ''}\nSUBJECT: ${b.subject || ''}\nTO: ${b.envelopeTo || ''}\n\nBODY:\n${bodyText}`;
 if (attText.trim()) user += `\n\n--- ATTACHED PDF (${fn}) ---\n${attText}`;
-return [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];
+return [{ json: { model: 'qwen3.6-35b', think: false, temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];
