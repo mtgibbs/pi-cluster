@@ -1,0 +1,347 @@
+{
+  "name": "Digest Builder (board_summaries)",
+  "nodes": [
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d001",
+      "name": "Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        -200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d002",
+      "name": "Rebuild Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        60
+      ],
+      "webhookId": "8f4cd1c0-0e9d-4a67-b6db-9bd0e2a9d1aa",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "digest-rebuild",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dgqc6ZiNll2avwOb",
+          "name": "Feed Token"
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d010",
+      "name": "Ensure Table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS board_summaries (id BIGSERIAL PRIMARY KEY, as_of TIMESTAMPTZ NOT NULL DEFAULT NOW(), body TEXT NOT NULL, item_count INT NOT NULL DEFAULT 0, time_window TEXT NOT NULL DEFAULT '', model TEXT, prompt_version TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE INDEX IF NOT EXISTS board_summaries_as_of_idx ON board_summaries (as_of DESC); ALTER TABLE board_summaries ADD COLUMN IF NOT EXISTS lead TEXT; ALTER TABLE board_summaries ADD COLUMN IF NOT EXISTS highlights JSONB; DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='board_summaries' AND column_name='window') THEN ALTER TABLE board_summaries RENAME COLUMN \"window\" TO time_window; END IF; END $$;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d020",
+      "name": "Select Window",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        560,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH window_items AS (SELECT id, received_at, type, title, due_at, student, action_required, amount, teacher, course, source_hint, confidence, source_from, source_subject, action_url, action_target FROM intake_items WHERE received_at >= NOW() - INTERVAL '24 hours' OR (due_at IS NOT NULL AND due_at >= NOW() - INTERVAL '6 hours' AND due_at <= NOW() + INTERVAL '7 days') ORDER BY COALESCE(due_at, received_at)) SELECT COALESCE(json_agg(row_to_json(window_items)), '[]'::json) AS items, COUNT(*)::int AS item_count FROM window_items;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d030",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const row = $('Select Window').first().json || {};\nconst items = Array.isArray(row.items) ? row.items : [];\nconst itemCount = Number(row.item_count != null ? row.item_count : items.length);\nconst nowIso = new Date().toISOString();\n\n// Attribution allow-list: a kid can be named SOLO only if at least one item is exclusively theirs.\nconst allowedSolo = [];\nif (items.some(it => (it.student || '').toLowerCase() === 'ronin')) allowedSolo.push('Ronin');\nif (items.some(it => (it.student || '').toLowerCase() === 'rory'))  allowedSolo.push('Rory');\nconst anyBoth = items.some(it => (it.student || '').toLowerCase() === 'both');\nconst jointAllowed = anyBoth || allowedSolo.length === 2;\n\nconst sys = `You write ONLY the \"lead\" of a daily kitchen-board summary — the warm tone-setting opener. 2-3 short sentences as plain markdown. Dates, deadlines, and times are shown by the renderer in a separate structured panel BELOW your text. Your job is the MOOD, not the calendar.\n\nABSOLUTE OUTPUT RULES — any violation discards the output:\n- NO dates of any form. No \"May 29\", no \"2026-06-01\", no \"5/29\", no \"the 5th of August\".\n- NO day-of-week names: Monday Tuesday Wednesday Thursday Friday Saturday Sunday (and abbreviations Mon/Tue/Wed/Thu/Fri/Sat/Sun).\n- NO month names: January…December (or Jan…Dec).\n- NO \"today\", \"tomorrow\", \"yesterday\".\n- NO clock times: no \"7 AM\", no \"3:30 pm\".\n- NO gendered pronouns: he, him, his, himself, she, her, hers, herself are FORBIDDEN. Use names or singular they/their/them.\n- NO invented facts, amounts, or fees.\n\nATTRIBUTION RULE (anti-drift): you may mention a kid by NAME only as allowed:\n- \"NAMES YOU MAY MENTION SOLO\" below lists names that may appear alone (e.g. \"Ronin is …\").\n- \"JOINT MENTION ALLOWED\" controls whether you may write \"Ronin and Rory\" / \"both kids\".\n- If a name is NOT in the solo list AND joint mention is the only option, refer to that kid only as part of \"both kids\" / \"the family\" / \"Ronin and Rory together\" — NEVER single them out.\n- If neither solo nor joint mention is allowed, do NOT use any kid's name; refer to \"the family\" or \"the household\".\n- NEVER attribute a school/system event (principal news, the school community, holidays, system updates) to a specific kid unless an item has that kid as its exclusive student.\n\nAllowed mood words: \"soon\", \"upcoming\", \"this week\", \"recently\", \"incoming\", \"the rhythm\", \"right now\".`;\n\nconst userMsg = `Current time: ${nowIso}\nItems in window: ${itemCount}\n\nNAMES YOU MAY MENTION SOLO: ${allowedSolo.length ? allowedSolo.join(', ') : '(none)'}\nJOINT MENTION ALLOWED: ${jointAllowed ? 'yes — you may say \"both kids\" or \"Ronin and Rory\"' : 'no'}\n\nITEMS (JSON — for tone, not transcription):\n${JSON.stringify(items, null, 2)}\n\nWrite ONLY the lead (2-3 sentences). The renderer shows dated highlights separately — do NOT include any date, time, day-of-week, month, or clock value in your output.`;\n\nreturn [{ json: {\n  model: 'qwen3.6-35b', temperature: 0.2, max_tokens: 220,\n  messages: [\n    { role: 'system', content: sys },\n    { role: 'user', content: userMsg }\n  ],\n  _meta: {\n    item_count: itemCount,\n    window: 'last 24h received + upcoming 7d due',\n    as_of: nowIso,\n    allowed_solo: allowedSolo,\n    joint_allowed: jointAllowed\n  }\n}}];\n"
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d040",
+      "name": "LiteLLM Digest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://ai.lab.mtgibbs.dev/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, messages: $json.messages, temperature: $json.temperature, max_tokens: $json.max_tokens, think: false }) }}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "u8zjKkG1zwZt9Vr3",
+          "name": "litellm-intake"
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d050",
+      "name": "Parse + Store Prep",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const lead = (($('Validate Digest').first().json) || {}).content || '';\nconst items = ($('Select Window').first().json || {}).items || [];\nconst meta = (($('Build Prompt').first().json) || {})._meta || {};\n\nfunction fmtWhen(iso) {\n  if (!iso) return null;\n  const d = new Date(iso);\n  if (isNaN(d)) return null;\n  const utcMid = d.getUTCHours()===0 && d.getUTCMinutes()===0 && d.getUTCSeconds()===0;\n  const tz = utcMid ? 'UTC' : 'America/New_York';\n  const dow = new Intl.DateTimeFormat('en-US', {timeZone:tz, weekday:'long'}).format(d);\n  const mon = new Intl.DateTimeFormat('en-US', {timeZone:tz, month:'long'}).format(d);\n  const day = Number(new Intl.DateTimeFormat('en-CA', {timeZone:tz, day:'2-digit'}).format(d));\n  if (utcMid) return `${dow}, ${mon} ${day}`;\n  const time = new Intl.DateTimeFormat('en-US', {timeZone:tz, hour:'numeric', minute:'2-digit'}).format(d);\n  return `${dow}, ${mon} ${day} at ${time}`;\n}\n\nconst now = new Date();\nconst horizon = new Date(now.getTime() + 7*24*60*60*1000);\nconst pastFloor = new Date(now.getTime() - 24*60*60*1000);\nconst highlights = items\n  .filter(it => it.due_at)\n  .map(it => ({\n    item_id: it.id,\n    title: it.title,\n    type: it.type,\n    due_at: it.due_at,\n    when_human: fmtWhen(it.due_at),\n    student: it.student || 'unknown',\n    action_required: !!it.action_required,\n    amount: it.amount || null,\n    teacher: it.teacher || null,\n    course: it.course || null,\n    action_url: it.action_url || null,\n    action_target: it.action_target || null\n  }))\n  .filter(h => {\n    const d = new Date(h.due_at);\n    return d >= pastFloor && d <= horizon;\n  })\n  .sort((a,b) => new Date(a.due_at) - new Date(b.due_at))\n  .slice(0, 8);\n\n// Build a legacy `body` for clients still consuming markdown: lead + bullet list of highlights.\nlet bodyLegacy = lead || 'No summary.';\nif (highlights.length) {\n  const lines = highlights.slice(0,5).map(h => `- **${h.when_human}** — ${h.title}${h.action_required ? ' (action needed)' : ''}`);\n  bodyLegacy += '\\n\\n' + lines.join('\\n');\n}\n\nreturn [{ json: {\n  as_of: meta.as_of,\n  lead: lead || 'Nothing pressing today.',\n  highlights: highlights,\n  body: bodyLegacy,\n  item_count: Number(meta.item_count || 0),\n  time_window: meta.window || 'last 24h received + upcoming 7d due',\n  model: 'qwen3.6-35b',\n  prompt_version: 'v7-action-fields'\n}}];\n"
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d060",
+      "name": "Insert Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1520,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO board_summaries (as_of, body, item_count, time_window, model, prompt_version, lead, highlights) VALUES (($1::json->>'as_of')::timestamptz, $1::json->>'body', ($1::json->>'item_count')::int, $1::json->>'time_window', $1::json->>'model', $1::json->>'prompt_version', $1::json->>'lead', ($1::json->'highlights')::jsonb) RETURNING id, as_of;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "9e1b8a48-9d11-4d9a-9c92-0fa1b3c0d055",
+      "name": "Validate Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const llm = $('LiteLLM Digest').first().json || {};\nconst choice = (llm.choices && llm.choices[0]) || {};\nconst content = String((choice.message && choice.message.content) || '').trim();\nconst meta = (($('Build Prompt').first().json) || {})._meta || {};\nconst allowedSolo = new Set(meta.allowed_solo || []);\nconst jointAllowed = !!meta.joint_allowed;\n\nconst banned = [];\n\n// dates/times/days\nconst datePatterns = [\n  { name:'month-day', re:/\\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\\s+\\d{1,2})?\\b/gi },\n  { name:'day-of-week', re:/\\b(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Tues|Wed|Thu|Thurs|Fri|Sat)\\b/g },\n  { name:'iso-date', re:/\\b\\d{4}-\\d{2}-\\d{2}\\b/g },\n  { name:'us-date',  re:/\\b\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?\\b/g },\n  { name:'clock',    re:/\\b\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM|am|pm|a\\.m\\.|p\\.m\\.)\\b/g },\n  { name:'today-tomorrow', re:/\\b(?:today|tomorrow|yesterday)\\b/gi }\n];\nfor (const { name, re } of datePatterns) {\n  const hits = [...content.matchAll(re)].map(m => m[0]);\n  if (hits.length) banned.push(`${name}: ${JSON.stringify([...new Set(hits)])}`);\n}\n\n// gendered pronouns\nconst pronouns = [...content.matchAll(/\\b(?:he|him|his|himself|she|her|hers|herself)\\b/gi)].map(m => m[0]);\nif (pronouns.length) banned.push(`pronouns: ${JSON.stringify([...new Set(pronouns)])}`);\n\n// attribution: detect SOLO mentions by neutralizing joint phrases first\nlet normalized = content\n  .replace(/\\bRonin and Rory\\b/gi, 'BOTH_KIDS')\n  .replace(/\\bRory and Ronin\\b/gi, 'BOTH_KIDS')\n  .replace(/\\bboth kids\\b/gi, 'BOTH_KIDS')\n  .replace(/\\bboth of them\\b/gi, 'BOTH_KIDS');\nconst soloRonin = /\\bRonin\\b/.test(normalized);\nconst soloRory  = /\\bRory\\b/.test(normalized);\n\nconst nameIssues = [];\nif (soloRonin && !allowedSolo.has('Ronin')) nameIssues.push('Ronin (no ronin-specific item)');\nif (soloRory  && !allowedSolo.has('Rory'))  nameIssues.push('Rory (no rory-specific item)');\nconst wroteJoint = /BOTH_KIDS/.test(normalized);\nif (wroteJoint && !jointAllowed) nameIssues.push('joint mention used but not allowed');\nif (nameIssues.length) banned.push(`attribution: ${JSON.stringify(nameIssues)}`);\n\nif (banned.length) {\n  throw new Error(`Lead validation failed — ${banned.join(' | ')}. Body preview: ${content.slice(0, 240)}`);\n}\n\nreturn [{ json: { content, validation: 'ok' } }];\n"
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://controlpanel.lab.mtgibbs.dev/aimode",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 5000
+        }
+      },
+      "id": "1bcb5e3f-bb66-4185-8186-6561909dc13a",
+      "name": "AI Mode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -20,
+        -80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4dccfa77-f603-4d1b-b283-06aa7b3f49ba",
+              "leftValue": "={{ String($('AI Mode').first().json.mode || '') }}",
+              "rightValue": "family",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "df4ec743-15c2-4ae3-bf49-e7e52a94c198",
+      "name": "Family Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        -80
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly": {
+      "main": [
+        [
+          {
+            "node": "AI Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Table": {
+      "main": [
+        [
+          {
+            "node": "Select Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Window": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "LiteLLM Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LiteLLM Digest": {
+      "main": [
+        [
+          {
+            "node": "Validate Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse + Store Prep": {
+      "main": [
+        [
+          {
+            "node": "Insert Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Digest": {
+      "main": [
+        [
+          {
+            "node": "Parse + Store Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Mode": {
+      "main": [
+        [
+          {
+            "node": "Family Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Family Mode?": {
+      "main": [
+        [
+          {
+            "node": "Ensure Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

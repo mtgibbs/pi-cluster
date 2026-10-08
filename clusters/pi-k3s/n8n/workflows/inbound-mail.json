@@ -1,8 +1,5 @@
 {
   "name": "Inbound Mail — Intake",
-  "settings": {
-    "executionOrder": "v1"
-  },
   "nodes": [
     {
       "id": "90FEAC56-2ED2-4F6B-BE34-F850CE4E38EC",
@@ -40,7 +37,7 @@
       "alwaysOutputData": true,
       "parameters": {
         "operation": "executeQuery",
-        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), source_msg_id TEXT, type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS source_msg_id TEXT; CREATE INDEX IF NOT EXISTS intake_items_msgid_idx ON intake_items(source_msg_id); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS item_key TEXT; ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS original_from TEXT; ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS body_text TEXT; CREATE UNIQUE INDEX IF NOT EXISTS intake_items_itemkey_uq ON intake_items(item_key);",
+        "query": "CREATE TABLE IF NOT EXISTS intake_items (id BIGSERIAL PRIMARY KEY, received_at TIMESTAMPTZ NOT NULL DEFAULT now(), source_msg_id TEXT, type TEXT, title TEXT, due_at TIMESTAMPTZ, student TEXT, action_required BOOLEAN, amount TEXT, teacher TEXT, course TEXT, source_hint TEXT, confidence REAL, source_channel TEXT, source_subject TEXT, source_from TEXT); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS source_msg_id TEXT; CREATE INDEX IF NOT EXISTS intake_items_msgid_idx ON intake_items(source_msg_id); ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS item_key TEXT; ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS original_from TEXT; ALTER TABLE intake_items ADD COLUMN IF NOT EXISTS body_text TEXT; CREATE UNIQUE INDEX IF NOT EXISTS intake_items_itemkey_uq ON intake_items(item_key); CREATE TABLE IF NOT EXISTS pending_inbound_mail (id BIGSERIAL PRIMARY KEY, queued_at TIMESTAMPTZ NOT NULL DEFAULT now(), body JSONB NOT NULL);",
         "options": {}
       },
       "credentials": {
@@ -56,7 +53,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        840,
         0
       ],
       "parameters": {
@@ -69,7 +66,7 @@
       "type": "n8n-nodes-base.s3",
       "typeVersion": 1,
       "position": [
-        660,
+        1000,
         0
       ],
       "onError": "continueRegularOutput",
@@ -92,7 +89,7 @@
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
       "position": [
-        820,
+        1160,
         0
       ],
       "onError": "continueRegularOutput",
@@ -108,11 +105,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        980,
+        1320,
         0
       ],
       "parameters": {
-        "jsCode": "const b = ($('Inbound Mail Webhook').first().json.body) || {};\n// attachment text comes from \"Extract from File\" (runs with continueOnError; empty if no PDF)\nlet attText = '';\ntry { const e = $('Extract from File').first().json || {}; attText = String(e.text || e.data || e.extractedText || ''); } catch (err) {}\nattText = attText.slice(0, 6000);\nlet fn = '';\ntry { fn = (($('Pick Attachment').first().json) || {}).att_filename || ''; } catch (err) {}\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info, and may include an attached PDF. Output ONLY a JSON array (no markdown). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1,\"originalFrom\":string|null}. Resolve relative dates against the email date. If the body shows the email was forwarded (e.g. a \"From:\" header inside a quoted block), set originalFrom to that sender's email address; otherwise null. If nothing actionable, return [].`;\nconst bodyText = String(b.text || '').slice(0, 5000);\nlet user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${bodyText}`;\nif (attText.trim()) user += `\\n\\n--- ATTACHED PDF (${fn}) ---\\n${attText}`;\nreturn [{ json: { model: 'qwen3-30b-instruct', temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
+        "jsCode": "const b = ($('Inbound Mail Webhook').first().json.body) || {};\n// attachment text comes from \"Extract from File\" (runs with continueOnError; empty if no PDF)\nlet attText = '';\ntry { const e = $('Extract from File').first().json || {}; attText = String(e.text || e.data || e.extractedText || ''); } catch (err) {}\nattText = attText.slice(0, 6000);\nlet fn = '';\ntry { fn = (($('Pick Attachment').first().json) || {}).att_filename || ''; } catch (err) {}\nconst sys = `You are an extraction service that pulls actionable items from an inbound message for the Gibbs family (kids: ronin, rory). The message may be a school notice, community flyer, bill, event, or general info, and may include an attached PDF. Output ONLY a JSON array (no markdown). Each item: {\"type\":\"date|dues|assignment|event|site-pointer|info\",\"title\":string,\"dueAt\":ISO-8601 date or datetime or null,\"student\":\"ronin|rory|both|unknown\",\"actionRequired\":boolean,\"amount\":string|null,\"teacher\":string|null,\"class\":string|null,\"source_hint\":short verbatim quote,\"confidence\":0..1,\"originalFrom\":string|null}. Resolve relative dates against the email date. If the body shows the email was forwarded (e.g. a \"From:\" header inside a quoted block), set originalFrom to that sender's email address; otherwise null. If nothing actionable, return [].`;\nconst bodyText = String(b.text || '').slice(0, 5000);\nlet user = `EMAIL DATE: ${b.date || ''}\\nFROM: ${b.from || ''}\\nSUBJECT: ${b.subject || ''}\\nTO: ${b.envelopeTo || ''}\\n\\nBODY:\\n${bodyText}`;\nif (attText.trim()) user += `\\n\\n--- ATTACHED PDF (${fn}) ---\\n${attText}`;\nreturn [{ json: { model: 'qwen3.6-35b', think: false, temperature: 0.1, max_tokens: 1500, messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ] } }];\n"
       }
     },
     {
@@ -121,7 +118,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1140,
+        1480,
         0
       ],
       "parameters": {
@@ -150,7 +147,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1300,
+        1640,
         0
       ],
       "parameters": {
@@ -163,7 +160,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1460,
+        1800,
         0
       ],
       "parameters": {
@@ -186,7 +183,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1620,
+        1960,
         0
       ],
       "alwaysOutputData": true,
@@ -200,7 +197,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        1780,
+        2120,
         0
       ],
       "alwaysOutputData": true,
@@ -211,6 +208,80 @@
           "queryReplacement": "={{ $json.source_msg_id }},={{ $json.item_keys }}"
         }
       },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://controlpanel.lab.mtgibbs.dev/aimode",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "timeout": 5000
+        }
+      },
+      "id": "56c45f91-0dbf-4cbb-849f-83d6ded1dd66",
+      "name": "AI Mode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1d62158f-2336-4d8c-b82d-06166e75b1a3",
+              "leftValue": "={{ String($('AI Mode').first().json.mode || '') }}",
+              "rightValue": "family",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "af9037d0-7bb8-4709-a16b-1e34c300ba74",
+      "name": "Family Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pending_inbound_mail (body) VALUES ($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('Inbound Mail Webhook').first().json.body || {}) }}"
+        }
+      },
+      "id": "15bfb412-92a2-4f36-94a3-83ca93f439f3",
+      "name": "Queue Until Family",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        680,
+        200
+      ],
       "credentials": {
         "postgres": {
           "id": "5bzmWi2TWDCyypLQ",
@@ -235,7 +306,7 @@
       "main": [
         [
           {
-            "node": "Pick Attachment",
+            "node": "AI Mode",
             "type": "main",
             "index": 0
           }
@@ -329,6 +400,38 @@
           }
         ]
       ]
+    },
+    "AI Mode": {
+      "main": [
+        [
+          {
+            "node": "Family Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Family Mode?": {
+      "main": [
+        [
+          {
+            "node": "Pick Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Until Family",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
+  },
+  "settings": {
+    "executionOrder": "v1"
   }
 }
