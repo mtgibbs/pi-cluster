@@ -168,6 +168,11 @@ anyone touches a knob.
 
 ### Phase 1 — Fault B: repoint the two n8n workflows
 
+> **RESOLVED 2026-10-08** — 1.0 decided as *gate on mode*: both workflows read `/aimode` and
+> only call LiteLLM in `family`; inbound mail queues in `work` and drains on the flip.
+> Model is `qwen3.6-35b` + `think: false` (warm in family mode — no new load). Details in
+> `docs/n8n-email-pipeline.md` → "LLM calls run in `family` mode only".
+
 **Confidence: high on the diagnosis. Risk on deploy: REAL — see 1.0.** The *diff* is a repo change
 with no Beelink mutation; the *consequence* of that diff is a new model load on a box with 10.1 GiB
 of VRAM headroom.
