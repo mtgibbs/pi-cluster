@@ -4,22 +4,17 @@
       "type": "http",
       "url": "https://mcp.lab.mtgibbs.dev/mcp",
       "headers": {
-        "X-API-Key": "${MCP_HOMELAB_API_KEY}"
-      }
-    },
-    "kiwix": {
-      "type": "http",
-      "url": "https://kiwix-mcp.lab.mtgibbs.dev/mcp",
-      "headers": {
-        "X-API-Key": "${KIWIX_MCP_KEY}"
-      }
+        "X-API-Key": "${MCP_HOMELAB_API_KEY:-}"
+      },
+      "headersHelper": "scripts/mcp-auth-headers.sh"
     },
     "local-llm": {
       "type": "http",
       "url": "https://local-llm-mcp.lab.mtgibbs.dev/mcp",
       "headers": {
-        "X-API-Key": "${LOCAL_LLM_MCP_KEY}"
-      }
+        "X-API-Key": "${LOCAL_LLM_MCP_KEY:-}"
+      },
+      "headersHelper": "scripts/mcp-auth-headers.sh"
     }
   }
 }
