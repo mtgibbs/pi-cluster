@@ -1,0 +1,20 @@
+# Bootstrap token for the `onepassword-homelab-agent` store, delivered by the `pi-cluster`
+# store so only the original `onepassword-service-account` token is ever created by hand.
+# Item: SA `homelab-agent-eso` (read-only, vault `homelab-agent`).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: onepassword-homelab-agent-service-account
+  namespace: external-secrets
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    name: onepassword
+    kind: ClusterSecretStore
+  target:
+    name: onepassword-homelab-agent-service-account
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: homelab-agent-eso/credential

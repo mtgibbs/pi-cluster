@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - cluster-secret-store.yaml
   - nfs-credentials.yaml
+  - homelab-agent-store-token.yaml
