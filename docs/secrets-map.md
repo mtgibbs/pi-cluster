@@ -29,7 +29,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 | Vault | Holds | Readers | ESO store (bootstrap Secret in `external-secrets`) |
 |---|---|---|---|
 | `pi-cluster` (`4gyjexiqw5fzm4ucpcryl6k4wi`) | Everything not Tier 1 — incl. **all** Tier 2/3 | cluster ESO SA; Matt via 1Password app (**Touch ID**) | `onepassword` ← `onepassword-service-account` |
-| `homelab-agent` (`kiabi5jm2l2p6w6wnnowmwoxxm`) | **Tier 1 only** — read-only, agent-safe creds (today: `local-llm-mcp`) | cluster ESO SA for this vault; laptop SA **`homelab-agent-laptop`** (read-only, this vault only) — **no prompt** | `onepassword-homelab-agent` ← `onepassword-homelab-agent-service-account` (synced by ESO from `pi-cluster` item `homelab-agent-eso/credential` — not hand-made) |
+| `homelab-agent` (`kiabi5jm2l2p6w6wnnowmwoxxm`) | **Tier 1 only** — read-only, agent-safe creds (today: `local-llm-mcp`, `mcp-homelab-readonly`) | cluster ESO SA for this vault; laptop SA **`homelab-agent-laptop`** (read-only, this vault only) — **no prompt** | `onepassword-homelab-agent` ← `onepassword-homelab-agent-service-account` (synced by ESO from `pi-cluster` item `homelab-agent-eso/credential` — not hand-made) |
 
 - **Laptop agent path:** `homelab-agent-laptop`'s token lives in macOS Keychain, generic password,
   service **`homelab-agent-op-token`**. `scripts/mcp-auth-headers.sh` (the `.mcp.json` `headersHelper`)
@@ -37,8 +37,10 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
   1Password app / Touch ID instead.
 - **The rule:** **Tier 2 (cluster-acting) and Tier 3 (crown jewel) never go in `homelab-agent`.** That
   vault is readable without a human in the loop; putting a cluster-acting cred there silently removes
-  the Touch ID gate. When in doubt, it stays in `pi-cluster`. (That's why `mcp-homelab` — which also
-  holds `nas-private-key` — stays put; the homelab MCP key rides the Touch ID path.)
+  the Touch ID gate. When in doubt, it stays in `pi-cluster`. (That's why `mcp-homelab` — the full MCP
+  key plus `nas-private-key` — stays put. The homelab MCP got a separate **read-only** key instead,
+  `mcp-homelab-readonly`, which the server scopes to `readOnly: true` tools: `.mcp.json` server
+  `homelab` uses it with no prompt; `homelab-admin` uses the full key via Touch ID, disabled by default.)
 - **Moving an item into `homelab-agent`:** repoint its ExternalSecret's `secretStoreRef.name` to
   `onepassword-homelab-agent` in the same PR, or it stops syncing (the old store can't see the item).
 - Service-account vault grants are fixed at creation, so each vault/reader pair has its own SA token.
@@ -91,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_64 ExternalSecrets · 45 1Password items · 71 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_65 ExternalSecrets · 46 1Password items · 72 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -252,6 +254,8 @@ graph LR
     - `homepage/homepage-servarr`
     - `mcp-homelab/mcp-homelab-secrets`
     - `mealie/mealie-ai-secret`
+- **mcp-homelab-readonly** → 1 ExternalSecret(s):
+    - `mcp-homelab/mcp-homelab-readonly`
 - **mealie** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/mealie-db-password`
     - `mealie/mealie-ai-secret`
@@ -434,6 +438,9 @@ graph LR
   produces Secret `matrix-secret` in `matrix`
     → `matrix/matrix-postgresql` (Deployment, env)
     → `matrix/synapse` (Deployment, volume)
+- **`mcp-homelab/mcp-homelab-readonly`** ← `mcp-homelab-readonly`
+  produces Secret `mcp-homelab-readonly` in `mcp-homelab`
+    → `mcp-homelab/mcp-homelab` (Deployment, env)
 - **`mcp-homelab/mcp-homelab-secrets`** ← `mcp-homelab`, `pihole`
   produces Secret `mcp-homelab-secrets` in `mcp-homelab`
     → `mcp-homelab/mcp-homelab` (Deployment, env)

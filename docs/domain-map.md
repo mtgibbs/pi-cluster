@@ -288,7 +288,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 ### mcp-homelab  ·  Flux: `mcp-homelab` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
 - **DaemonSet/mcp-debug-agent** — `nicolaka/netshoot`
 - **Deployment/mcp-homelab** — `ghcr.io/mtgibbs/pi-cluster-mcp` 🔒priv
-  - creds: `mcp-homelab-secrets`  _(→ secrets-map.md)_
+  - creds: `mcp-homelab-readonly`, `mcp-homelab-secrets`  _(→ secrets-map.md)_
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `mcp.lab.mtgibbs.dev`
 
