@@ -16,10 +16,33 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## How secrets work here
 
-- Source of truth: **1Password**, vault `pi-cluster`. Nothing secret is committed — only `op://` paths.
-- Delivery: **External Secrets Operator** → `ClusterSecretStore` named `onepassword`. Each service has
-  an `ExternalSecret` mapping `remoteRef.key: <item>/<field>` → a k8s Secret in its namespace.
-- Path shape: `op://pi-cluster/<item>/<field>` ⇄ `remoteRef: { key: <item>/<field> }`.
+- Source of truth: **1Password**, vaults `pi-cluster` (default) and `homelab-agent` (Tier 1 only — see
+  [Vaults](#vaults)). Nothing secret is committed — only `op://` paths.
+- Delivery: **External Secrets Operator** → one `ClusterSecretStore` per vault: `onepassword`
+  (`pi-cluster`) and `onepassword-homelab-agent` (`homelab-agent`). Each service has an `ExternalSecret`
+  mapping `remoteRef.key: <item>/<field>` → a k8s Secret in its namespace; its `secretStoreRef` must
+  name the store for the vault the item lives in.
+- Path shape: `op://<vault>/<item>/<field>` ⇄ `remoteRef: { key: <item>/<field> }`.
+
+## Vaults
+
+| Vault | Holds | Readers | ESO store (bootstrap Secret in `external-secrets`) |
+|---|---|---|---|
+| `pi-cluster` (`4gyjexiqw5fzm4ucpcryl6k4wi`) | Everything not Tier 1 — incl. **all** Tier 2/3 | cluster ESO SA; Matt via 1Password app (**Touch ID**) | `onepassword` ← `onepassword-service-account` |
+| `homelab-agent` (`kiabi5jm2l2p6w6wnnowmwoxxm`) | **Tier 1 only** — read-only, agent-safe creds (today: `local-llm-mcp`) | cluster ESO SA for this vault; laptop SA **`homelab-agent-laptop`** (read-only, this vault only) — **no prompt** | `onepassword-homelab-agent` ← `onepassword-homelab-agent-service-account` |
+
+- **Laptop agent path:** `homelab-agent-laptop`'s token lives in macOS Keychain, generic password,
+  service **`homelab-agent-op-token`**. `scripts/mcp-auth-headers.sh` (the `.mcp.json` `headersHelper`)
+  reads it and calls `op read` against `homelab-agent`; anything in `pi-cluster` goes through the
+  1Password app / Touch ID instead.
+- **The rule:** **Tier 2 (cluster-acting) and Tier 3 (crown jewel) never go in `homelab-agent`.** That
+  vault is readable without a human in the loop; putting a cluster-acting cred there silently removes
+  the Touch ID gate. When in doubt, it stays in `pi-cluster`. (That's why `mcp-homelab` — which also
+  holds `nas-private-key` — stays put; the homelab MCP key rides the Touch ID path.)
+- **Moving an item into `homelab-agent`:** repoint its ExternalSecret's `secretStoreRef.name` to
+  `onepassword-homelab-agent` in the same PR, or it stops syncing (the old store can't see the item).
+- Service-account vault grants are fixed at creation, so each vault/reader pair has its own SA token.
+  Use item/vault **IDs** in `op://` refs from scripts so renames don't break them.
 
 ## Shared identities — REUSE, do not mint a parallel one
 
