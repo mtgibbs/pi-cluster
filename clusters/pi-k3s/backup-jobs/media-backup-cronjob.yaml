@@ -3,6 +3,9 @@ kind: CronJob
 metadata:
   name: media-backup
   namespace: backup-jobs
+  labels:
+    # Opt-in: lets the homelab MCP trigger_backup tool (/backup-now) run this job on demand.
+    homelab.mcp/triggerable: "true"
 spec:
   schedule: "0 3 * * 0"  # Every Sunday at 3:00 AM (after main backup)
   concurrencyPolicy: Forbid

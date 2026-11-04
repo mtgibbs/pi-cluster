@@ -3,6 +3,9 @@ kind: CronJob
 metadata:
   name: k3s-datastore-backup
   namespace: backup-jobs
+  labels:
+    # Opt-in: lets the homelab MCP trigger_backup tool (/backup-now) run this job on demand.
+    homelab.mcp/triggerable: "true"
 spec:
   # Sunday 2:15 AM — inside the weekly backup window, after pvc-backup (2:00)
   # has started. Each job mkdir -p's its own dated dir, so ordering is not a

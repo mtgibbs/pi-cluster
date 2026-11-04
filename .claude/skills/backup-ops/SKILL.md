@@ -117,6 +117,7 @@ trigger_backup(namespace="backup-jobs", cronjob="postgres-backup")
 trigger_backup(namespace="backup-jobs", cronjob="git-mirror-backup")
 trigger_backup(namespace="backup-jobs", cronjob="mariadb-backup")
 ```
+`trigger_backup` only runs CronJobs labelled `homelab.mcp/triggerable: "true"` (refuses others with `NOT_TRIGGERABLE`). A new backup CronJob needs that label to be triggerable.
 
 **kubectl fallback (cluster-ops):**
 ```bash

@@ -3,6 +3,9 @@ kind: CronJob
 metadata:
   name: git-mirror-backup
   namespace: backup-jobs
+  labels:
+    # Opt-in: lets the homelab MCP trigger_backup tool (/backup-now) run this job on demand.
+    homelab.mcp/triggerable: "true"
 spec:
   schedule: "30 3 * * 0"  # Every Sunday at 3:30 AM (after PVC backup at 2:00 AM)
   concurrencyPolicy: Forbid
