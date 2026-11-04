@@ -46,7 +46,7 @@ def build_prompt(changes):
 
 def parse(text):
     if BEGIN not in text or END not in text:
-        return {"verdict": "error", "gate": "-", "findings": ["no verdict markers"]}
+        return {"verdict": "error", "gate": "-", "findings": [tj.no_markers_reason(text)]}
     body = text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
     try:
         data = json.loads(body)
@@ -75,8 +75,12 @@ def aggregate(runs):
         verdict = "pass"
     gate = next((r["gate"] for r in runs if r["verdict"] in ("fail", "flag")
                  and r["gate"] != "-"), "-")
-    findings = ([f for r in runs if r["verdict"] in ("fail", "flag")
-                 for f in r.get("findings", [])][:5] if verdict != "pass" else [])
+    # Real findings first, then why any vote errored: an errored vote counts toward blocking,
+    # so its reason must reach the report or the check blocks with nothing to act on.
+    findings = (([f for r in runs if r["verdict"] in ("fail", "flag") for f in r.get("findings", [])]
+                 + [f"vote errored: {f}" for r in runs if r["verdict"] == "error"
+                    for f in r.get("findings", [])])[:5]
+                if verdict != "pass" else [])
     return {"verdict": verdict, "gate": gate, "runs": verdicts,
             "escalating": len(escalating), "stable": len(set(verdicts)) == 1,
             "findings": findings}

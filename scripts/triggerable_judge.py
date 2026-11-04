@@ -174,12 +174,29 @@ def run_litellm(prompt, timeout, raw_path, model, base_url=None, key_env=LITELLM
             payload = json.loads(resp.read())
         text = payload["choices"][0]["message"]["content"]
         rc = 0
+        if payload["choices"][0].get("finish_reason") == "length":
+            text += f"\n{TRUNCATED_NOTE}"
     except urllib.error.HTTPError as e:
         text, rc = f"HTTP {e.code}: {e.read().decode(errors='replace')[:500]}", e.code
     except Exception as e:  # noqa: BLE001 — surface any transport failure as a finding
         text, rc = f"ERROR: {type(e).__name__}: {e}", 1
     Path(raw_path).write_text(text)
     return text, rc
+
+
+# Appended to a reply the backend cut off at max_tokens, so a missing verdict can say why.
+TRUNCATED_NOTE = "[review-hub: reply cut off at max_tokens]"
+
+
+def no_markers_reason(text):
+    """Why a vote produced no verdict. Without this every failure reads "no verdict markers",
+    and a timeout, an HTTP error and a model that rambled past max_tokens look the same."""
+    text = text or ""
+    if text.startswith(("ERROR:", "HTTP ")):
+        return f"no verdict — {text[:200]}"
+    if TRUNCATED_NOTE in text:
+        return f"no verdict — reply hit max_tokens ({MAX_TOKENS}) before the verdict block"
+    return f"no verdict markers in a {len(text)}-char reply"
 
 
 def run_model(prompt, timeout, raw_path, backend, model):
@@ -192,7 +209,7 @@ def parse_verdict(text):
     """Extract the JSON verdict between the markers. Returns a result dict."""
     if BEGIN not in text or END not in text:
         return {"verdict": "error", "criteria": [],
-                "findings": ["no verdict markers in output"], "ok": False}
+                "findings": [no_markers_reason(text)], "ok": False}
     # last marker pair wins (model may echo the instructions)
     body = text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
     try:

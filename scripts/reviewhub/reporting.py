@@ -52,6 +52,7 @@ def summarize(name, concern, results, any_block, body):
         "votes": votes,
         "n_total": len(votes),
         "n_escalating": sum(1 for v in votes if v != "pass"),
+        "n_errored": sum(1 for v in votes if v == "error"),
         "findings": findings[:6],
     }
 
@@ -65,7 +66,12 @@ def _result_text(s):
     if s["state"] == "pass":
         return "passed" + (f" · {s['n_total']}/{s['n_total']} clear" if s["n_total"] else "")
     if s["state"] == "block":
-        tally = f" · {s['n_escalating']}/{s['n_total']} flagged" if s["n_total"] else ""
+        # An errored vote (timeout, cut-off reply) blocks like a flag but is not a finding: say so.
+        flagged, errored = s["n_escalating"] - s.get("n_errored", 0), s.get("n_errored", 0)
+        tally = ""
+        if s["n_total"]:
+            tally = f" · {flagged}/{s['n_total']} flagged" if flagged else ""
+            tally += f"{',' if flagged else ' ·'} {errored}/{s['n_total']} errored" if errored else ""
         return f"**needs review**{tally}"
     if s["state"] == "neutral":
         return "n/a — no matching change"
