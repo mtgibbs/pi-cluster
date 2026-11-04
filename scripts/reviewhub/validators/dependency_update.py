@@ -43,7 +43,7 @@ def build_prompt(changes, changelog):
 
 def parse(text):
     if BEGIN not in text or END not in text:
-        return {"verdict": "error", "findings": ["no verdict markers"]}
+        return {"verdict": "error", "findings": [tj.no_markers_reason(text)]}
     body = text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
     try:
         data = json.loads(body)
