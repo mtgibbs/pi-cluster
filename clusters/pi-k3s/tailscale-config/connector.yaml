@@ -13,8 +13,10 @@ spec:
   # tailnet (incl. while using this Connector as a full-tunnel exit node — without
   # a /32 here, traffic to the IP blackholes at the exit node). NOT the full /24
   # (brittle, broader than needed); one /32 per host we actually need off-LAN.
-  # .70/32 falls inside the existing 192.168.1.0/24 autoApprover for
-  # tag:k8s-operator, so it auto-approves with no admin-console step.
+  # Each /32 is auto-approved by a per-/32 `routes` autoApprover for
+  # tag:k8s-operator in tailscale/policy.hujson (no admin-console step). A new
+  # route here must ALSO be added to that autoApprover and to the /32 grant
+  # there, or it stays unapproved / denied.
   subnetRouter:
     advertiseRoutes:
       - 192.168.1.55/32   # Pi-hole primary (pi-k3s) — remote DNS
