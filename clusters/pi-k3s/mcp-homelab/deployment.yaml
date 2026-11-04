@@ -44,6 +44,13 @@ spec:
                 secretKeyRef:
                   name: mcp-homelab-secrets
                   key: api-key
+            # Read-only scope (pi-cluster-mcp >= the release with #57); older images ignore it.
+            - name: MCP_READONLY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-homelab-readonly
+                  key: api-key
+                  optional: true
             - name: JELLYFIN_API_KEY
               valueFrom:
                 secretKeyRef:

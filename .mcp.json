@@ -15,6 +15,14 @@
         "X-API-Key": "${LOCAL_LLM_MCP_KEY:-}"
       },
       "headersHelper": "scripts/mcp-auth-headers.sh"
+    },
+    "homelab-admin": {
+      "type": "http",
+      "url": "https://mcp.lab.mtgibbs.dev/mcp",
+      "headers": {
+        "X-API-Key": "${MCP_HOMELAB_API_KEY:-}"
+      },
+      "headersHelper": "scripts/mcp-auth-headers.sh"
     }
   }
 }

@@ -29,8 +29,11 @@ server="${CLAUDE_CODE_MCP_SERVER_NAME:-}"
 [ -n "$server" ] || die "CLAUDE_CODE_MCP_SERVER_NAME is not set"
 
 case "$server" in
-  local-llm) vault="$VAULT_HOMELAB_AGENT"; ref="op://$VAULT_HOMELAB_AGENT/gdqku6lz7ohyuhlh4khr67howq/password" ;;
-  homelab)   vault="$VAULT_PI_CLUSTER";    ref="op://$VAULT_PI_CLUSTER/mkxiuzs5i3pvsvecgbdcfu65m4/api-key" ;;
+  local-llm)     vault="$VAULT_HOMELAB_AGENT"; ref="op://$VAULT_HOMELAB_AGENT/gdqku6lz7ohyuhlh4khr67howq/password" ;;
+  # Read-only key: read tools only, so Tier 1 — no prompt.
+  homelab)       vault="$VAULT_HOMELAB_AGENT"; ref="op://$VAULT_HOMELAB_AGENT/kbqwiw4v6xvxjideartivub6pq/password" ;;
+  # Full key: restart/reconcile/backup tools — Tier 2, Touch ID. Connect only when making changes.
+  homelab-admin) vault="$VAULT_PI_CLUSTER";    ref="op://$VAULT_PI_CLUSTER/mkxiuzs5i3pvsvecgbdcfu65m4/api-key" ;;
   *) die "no credential mapping for MCP server '$server'" ;;
 esac
 
@@ -45,6 +48,8 @@ op_read() { perl -e 'alarm shift; exec @ARGV' "$OP_TIMEOUT_SECS" op read --no-ne
 if [ "$vault" = "$VAULT_HOMELAB_AGENT" ]; then
   token="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -w 2>/dev/null)" \
     || die "Keychain item '$KEYCHAIN_SERVICE' not found (see docs/secrets-map.md)"
+  # An empty token makes op silently fall back to the 1Password app (Touch ID) — refuse instead.
+  case "$token" in ops_*) ;; *) die "Keychain item '$KEYCHAIN_SERVICE' is empty or not a service-account token" ;; esac
   value="$(OP_SERVICE_ACCOUNT_TOKEN="$token" op_read "$ref")" \
     || die "op read failed for '$server' (service-account path)"
   unset token
