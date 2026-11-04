@@ -44,17 +44,20 @@ The Operator requires an OAuth client with **minimal scopes**. Extra scopes caus
 | **Other Scopes** | NONE |
 
 ### ACL Policy (JSON)
-You must grant access to the advertised routes in the Tailscale admin console.
+Source of truth is `tailscale/policy.hujson` (applied on merge by `.github/workflows/tailscale-acl.yml`
+— never edit in the admin console). Abridged shape:
 
 ```json
 {
     "tagOwners": {
-        "tag:k8s-operator": ["autogroup:admin", "autogroup:member"]
+        "tag:k8s-operator": ["autogroup:admin"]
     },
     "autoApprovers": {
         "exitNode": ["tag:k8s-operator"],
         "routes": {
-            "192.168.1.0/24": ["tag:k8s-operator"]
+            "192.168.1.55/32": ["tag:k8s-operator"],
+            "192.168.1.56/32": ["tag:k8s-operator"],
+            "192.168.1.70/32": ["tag:k8s-operator"]
         }
     },
     "grants": [
@@ -62,13 +65,13 @@ You must grant access to the advertised routes in the Tailscale admin console.
         {"src": ["tag:k8s-operator"], "dst": ["autogroup:member"], "ip": ["*"]},
         {"src": ["autogroup:member"], "dst": ["tag:k8s-operator"], "ip": ["*"]},
         {"src": ["autogroup:member"], "dst": ["autogroup:internet"], "ip": ["*"]},
-        {"src": ["autogroup:member"], "dst": ["192.168.1.0/24"], "ip": ["*"]}
+        {"src": ["autogroup:member"], "dst": ["192.168.1.55/32", "192.168.1.56/32", "192.168.1.70/32"], "ip": ["*"]}
     ]
 }
 ```
 **Why grants are needed:**
 1.  `autogroup:internet`: Allows traffic through the Exit Node.
-2.  `192.168.1.0/24`: Allows access to the advertised Subnet Routes (Pi-hole IPs).
+2.  The three `/32`s: Allow access to the advertised Subnet Routes (Pi-hole `.55/.56`, Beelink `.70`). Each also needs a matching `routes` autoApprover entry.
 
 ## Setup & Maintenance
 
@@ -138,4 +141,10 @@ kubectl describe connector pi-cluster-exit -n tailscale
 ### Common Issues
 *   **"Requested tags are invalid"**: You added extra scopes to the OAuth client. Recreate it with ONLY Devices Core + Auth Keys.
 *   **Exit node not in app**: Missing `autogroup:internet` grant in ACL.
-*   **DNS not resolving**: Missing `192.168.1.0/24` grant in ACL or routes not approved in Admin Console.
+*   **DNS not resolving**: Missing `/32` grant in ACL or routes not approved in Admin Console.
+    *   **Symptom: on the exit node, *nothing* resolves (internal or public).** Tailscale DNS points at
+        `192.168.1.55/.56`, so if those routes aren't approved the device has no DNS at all. Check the
+        `.55/.56` routes are approved on `pi-cluster-exit` in the admin console **Machines** page. The
+        per-/32 `routes` autoApprover in `tailscale/policy.hujson` should cover this — if a route shows
+        unapproved, verify its /32 is listed there (a new advertised route needs an entry in the
+        autoApprover AND the grant), then approve once or restart the connector pod to re-advertise.

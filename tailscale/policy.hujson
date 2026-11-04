@@ -33,6 +33,20 @@
 
     "autoApprovers": {
         "exitNode": ["tag:k8s-operator"],
+        // Subnet routes advertised by the pi-cluster-exit Connector
+        // (clusters/pi-k3s/tailscale-config/connector.yaml). Before this map
+        // existed, only the exit node auto-approved — the routes survived only
+        // because someone once approved them by hand in the admin console. If
+        // the connector re-registered, the exit node came back but the Pi-hole
+        // /32s did not, silently breaking DNS for any device on the exit node.
+        // Scoped to exactly the advertised /32s (NOT the /24), matching the
+        // grant below. Safe: tag:k8s-operator is admin-owned only (tagOwners).
+        // NOTE: a newly advertised route needs an entry here AND in the grant.
+        "routes": {
+            "192.168.1.55/32": ["tag:k8s-operator"],  // Pi-hole primary (pi-k3s)
+            "192.168.1.56/32": ["tag:k8s-operator"],  // Pi-hole secondary (pi5-worker-1)
+            "192.168.1.70/32": ["tag:k8s-operator"],  // Beelink
+        },
     },
 
     "grants": [
