@@ -44,13 +44,13 @@ spec:
                 secretKeyRef:
                   name: mcp-homelab-secrets
                   key: api-key
-            # Read-only scope (pi-cluster-mcp >= the release with #57); older images ignore it.
+            # Read-only scope (pi-cluster-mcp >= 0.2.1). Not optional on purpose: with optional, a pod
+            # that starts before ESO creates the secret runs with an empty key until restarted.
             - name: MCP_READONLY_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: mcp-homelab-readonly
                   key: api-key
-                  optional: true
             - name: JELLYFIN_API_KEY
               valueFrom:
                 secretKeyRef:
