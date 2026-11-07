@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-denylist
+  namespace: pihole
+data:
+  # ---------------------------------------------------------------------------
+  # Permanent GitOps deny list — comment "gitops-denylist", never toggled.
+  # Pushed to BOTH Pi-holes (.55 + .56) by the pihole-brainrot-setup Job
+  # (setup-job.sh), on groups [0, adults]. Every client is in exactly one of
+  # those two groups, so this is effectively global. It MUST include `adults`:
+  # the LG TV (20:17:42:d2:f7:6c / 192.168.1.158) is MAC-matched into the
+  # adults group, which is NOT in group 0 — a group-0-only deny would miss it.
+  #
+  # Changing this file only reaches the Pi-holes when the Job re-runs: bump the
+  # Job's metadata.name in pihole-brainrot-setup-job.yaml in the same PR.
+  # GitOps source of truth: edit here, never the Pi-hole UI.
+  # ---------------------------------------------------------------------------
+
+  # Exact-match denies (query log status: DENYLIST)
+  exact.txt: |
+    # --- LG webOS firmware-update endpoints (LG C9, 2026-11-07) ---
+    # Deliberate: blocking these STOPS TV firmware updates. To update the TV,
+    # remove these lines (PR) or apply a USB update from LG's support site.
+    snu.lge.com
+    su.lge.com
+    su-ssl.lge.com
+    snu-dev.lge.com
+    su-dev.lge.com
+    nsu.lge.com
+    # --- LG ads / tracking ---
+    ngfts.lge.com        # ad/tracking — NOTE Perflyst SmartTV.txt leaves this commented
+                         # out: "blocks thumbnails from loading in the LG Content Store"
+    ad.lgappstv.com      # Perflyst SmartTV.txt (exact host only — lgappstv.com itself is
+                         # the app/content store and must stay resolvable)
+
+  # Regex denies — domain + all subdomains (query log status: REGEX)
+  regex.txt: |
+    # --- LG ad networks (verified: hagezi native.lgwebos; Perflyst regex.list) ---
+    (\.|^)lgsmartad\.com$
+    (\.|^)lgads\.tv$
+    # DO NOT add: lgtvsdp.com, lgappstv.com (home screen / app + content store),
+    # *.netflix.com, nflximg.com, nflxso.net (Netflix), or anything matching
+    # aic.netflixvoice.lgtvcommon.com (voice search) — e.g. no blanket lgtvcommon.com.

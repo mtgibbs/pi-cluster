@@ -1,12 +1,13 @@
 # One-shot setup for the YouTube/short-form blackout. Runs setup-job.sh against
 # both Pi-holes (op-free — WEBPASSWORD comes from the in-cluster secret), creating
-# the 'adults' group, the deny sets, and the allowlist clients. Replaces the
+# the 'adults' group, the deny sets, the allowlist clients, and the permanent
+# GitOps denylist (pihole-denylist ConfigMap). Replaces the
 # fragile postStart-hook approach; its logs are visible (kubectl logs / MCP).
 # Re-run by bumping `metadata.name` (a completed Job is immutable).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pihole-brainrot-setup-adgroups-3
+  name: pihole-brainrot-setup-denylist-4
   namespace: pihole
   labels:
     app: pihole-brainrot
@@ -39,6 +40,9 @@ spec:
             - name: allowlist
               mountPath: /allow
               readOnly: true
+            - name: denylist
+              mountPath: /deny
+              readOnly: true
           resources:
             requests:
               cpu: 25m
@@ -53,3 +57,6 @@ spec:
         - name: allowlist
           configMap:
             name: pihole-allowlist
+        - name: denylist
+          configMap:
+            name: pihole-denylist

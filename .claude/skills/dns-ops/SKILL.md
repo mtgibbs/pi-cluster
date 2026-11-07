@@ -190,6 +190,14 @@ Current layout:
 
 **DO NOT** add records via the Pi-hole web UI for anything cluster-managed — they will drift from GitOps and will not survive a pod restart. Always edit the ConfigMap and let Flux reconcile.
 
+## Pi-hole Deny List — GitOps Managed
+
+Permanent per-domain blocks live in `clusters/pi-k3s/pihole/pihole-denylist-configmap.yaml` (`exact.txt` → DENYLIST, `regex.txt` → REGEX, comment `gitops-denylist`). The `pihole-brainrot-setup-*` Job pushes them to **both** Pi-holes; editing the ConfigMap alone does nothing until you **bump the Job's `metadata.name`** in the same PR, then re-run the generated-docs injectors (the Job name appears in both maps).
+
+**Groups gotcha:** denies must go on groups `[0, adults]`, not `[0]`. Devices in the `adults` allowlist group (adult Macs/iPhones, the LG TV) are *not* in group 0, so a group-0-only deny silently misses them. The YouTube-blackout regexes are group-0-only *on purpose*; the permanent denylist is not.
+
+**Verify** from a LAN host, not `test_dns_query`: that tool digs from inside the pod as localhost, which isn't mapped to the same groups (it resolved gravity-blocked `prov-lg.alphonso.tv` while the TV got `GRAVITY`). Use `dig <domain> @192.168.1.55` / `@192.168.1.56` → `0.0.0.0`.
+
 ## pi-k3s Master: Static DNS Fallback (CRITICAL — intentional design, DO NOT "fix")
 
 The `pi-k3s` master node is configured with public DNS (`1.1.1.1`, `8.8.8.8`) via NetworkManager. Worker nodes use Pi-hole.
