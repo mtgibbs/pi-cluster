@@ -9,8 +9,16 @@ spec:
     - ReadOnlyMany
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs-video
-  # No nfsvers pinned → auto-negotiates (verified live 2026-06-18: lands on NFSv4.1 with this QNAP).
-  #   Do NOT explicitly set nfsvers=4 — that broke immich mounts (see media-services SKILL).
+  # nfsvers=3 (2026-11-07; was unpinned → auto-negotiated NFSv4.1). The 2026-11-07 lockup was an
+  #   NFSv4.1 *session/lease* stall: 30 READs sent-but-unanswered on the one TCP connection, stream
+  #   rx → 0 for ~16 min, Jellyfin threads 22 → 76 (thread-pool starvation = whole UI "locked up"),
+  #   and it only cleared when the kernel ran v4 state recovery ("NFS: 192.168.1.61: lost 1 locks").
+  #   `soft,timeo` never fired — v4.1 waits on session/state recovery, which timeo does not bound.
+  #   v3 is stateless (no session, no lease, no state recovery), so soft+timeo bounds EVERY read.
+  #   Read-only media + `nolock` → v3 loses nothing. QNAP serves v3 (rpcinfo); test mount from
+  #   pi-k3s read 113 MB/s. Do NOT set nfsvers=4 — that broke immich mounts (media-services SKILL).
+  # NB: the version is fixed at the export's first mount — after merge, fully release the mount
+  #   (deployment is Recreate, so `rollout restart` works) and confirm `vers=3` in /proc/mounts.
   # soft + timeo/retrans: a brief NAS read-stall ERRORS and recovers instead of a `hard`
   #   mount hanging "still trying" forever — that wedge froze Jellyfin 2026-06-15 and needed
   #   a manual force-unmount. (Read-only media, so `soft` is safe — no write-corruption risk.)
@@ -27,6 +35,7 @@ spec:
   #   connection entirely → no subset can get stuck. If hangs STOP, that was the cause. If they
   #   CONTINUE, it's server/disk-side (branch eliminated). Revert to 2/4 if 1 underperforms.
   mountOptions:
+    - nfsvers=3
     - nolock
     - soft
     - timeo=150
