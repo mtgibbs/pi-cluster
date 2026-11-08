@@ -39,6 +39,26 @@ spec:
               reachable): `iostat -x 2`, `cat /proc/net/rpc/nfsd`, `dmesg -T | tail`, `free`. The QNAP
               recorder cron (#1) logs this every minute so a mistimed manual probe no longer loses the event.
 
+        # The lockup the two node-level alerts above MISS. 2026-11-07: a 16-min NFSv4.1 session stall
+        # held node_procs_blocked at 1 and iowait low (CPU 93% idle) while load hit 51 — neither alert
+        # could fire. What DID move: Jellyfin's thread count (22 baseline → 76) as the .NET thread pool
+        # injected threads to replace ones blocked on NFS reads. Positive control (21d of history):
+        # this expr is true ONLY at 11-07 22:31; scheduled-task peaks (02:00–05:00) top out at 44.
+        - alert: JellyfinThreadPileup
+          expr: |
+            min_over_time(container_threads{namespace="jellyfin",container="jellyfin"}[5m]) > 50
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Jellyfin thread pile-up ({{ $value }} threads) — server is likely locked up on blocked I/O"
+            description: >-
+              Jellyfin has held >50 threads for 5m (baseline ~22). Threads blocked on media reads are
+              starving the .NET thread pool, so every request (incl. /health) hangs. Check on pi-k3s:
+              `grep -A40 cluster/media/video /proc/self/mountstats` (xprt sends vs recvs gap),
+              `dmesg -T | grep -i nfs`, and /var/log/nfs-hang-recorder.log. Restarting the pod does not
+              help while reads are blocked in the kernel. See docs/incidents/2026-11-07-jellyfin-nfsv4-session-stall.md.
+
         # Legacy / coarse: iowait-only. KEPT as a wide net but DEPRECATED as a root-cause signal —
         # iowait% over-reads on an idle node (2026-06-20 finding). Trust MediaNFSReadHang (procs_blocked).
         - alert: NodeIOWaitSustained
