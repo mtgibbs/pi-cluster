@@ -185,6 +185,25 @@ data:
           echo "  client $cl -> HTTP $code"
         done
       fi
+      # Permanent GitOps denies (pihole-denylist ConfigMap at /deny) on Default(0)
+      # AND adults($AID) — adults-group devices (e.g. the LG TV) are not in group 0.
+      # POST adds new entries (existing ones are reported as errors and left as-is),
+      # then PUT each to enforce groups/enabled on entries that already existed.
+      if [ -n "${AID:-}" ] && [ "$AID" != "null" ]; then
+        for spec in "/deny/exact.txt:exact" "/deny/regex.txt:regex"; do
+          f=${spec%%:*}; k=${spec##*:}
+          [ -f "$f" ] || continue
+          A=$(arr "$f"); N=$(printf '%s' "$A" | jq length)
+          code=$(curl -s -m 20 -o /tmp/o -w '%{http_code}' -X POST "http://$H/api/domains/deny/$k?sid=$SID" -H 'Content-Type: application/json' -d "{\"domain\":$A,\"comment\":\"gitops-denylist\",\"groups\":[0,$AID],\"enabled\":true}")
+          echo "  deny $k gitops-denylist ($N) -> HTTP $code $(head -c160 /tmp/o)"
+          OK=0
+          for d in $(printf '%s' "$A" | jq -r '.[]|@uri'); do
+            c=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X PUT "http://$H/api/domains/deny/$k/$d?sid=$SID" -H 'Content-Type: application/json' -d "{\"comment\":\"gitops-denylist\",\"groups\":[0,$AID],\"enabled\":true}")
+            case "$c" in 200|201) OK=$((OK+1)) ;; *) echo "  WARN PUT deny/$k/$d -> HTTP $c" ;; esac
+          done
+          echo "  deny $k enforce groups[0,$AID]: $OK/$N"
+        done
+      fi
       # Ad/tracker adlists must apply to BOTH Default(0) AND adults($AID); otherwise
       # allowlisted (adults-group) devices get NO ad-blocking (they were group-0-only,
       # so adults saw ads). Reassign every block list to [0,1], then rebuild gravity so
