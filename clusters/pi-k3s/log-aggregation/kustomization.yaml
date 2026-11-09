@@ -6,3 +6,4 @@ resources:
   - vector-configmap.yaml
   - vector-deployment.yaml
   - vector-ntfy-externalsecret.yaml
+  - vector-heroku-drain-externalsecret.yaml
