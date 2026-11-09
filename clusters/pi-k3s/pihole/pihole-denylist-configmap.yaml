@@ -28,6 +28,12 @@ data:
     snu-dev.lge.com
     su-dev.lge.com
     nsu.lge.com
+    # --- LG voice / "AI" cloud (aic = AI Cloud) ---
+    # Deliberate (Matt's call): kills voice search + AI features on the TV.
+    # Exact hosts seen in the TV's query log (2026-11-07..09).
+    aic.service.lgtvcommon.com
+    aic.homeprv.lgtvcommon.com
+    aic.netflixvoice.lgtvcommon.com
     # --- LG ads / tracking ---
     ngfts.lge.com        # ad/tracking — NOTE Perflyst SmartTV.txt leaves this commented
                          # out: "blocks thumbnails from loading in the LG Content Store"
@@ -39,6 +45,8 @@ data:
     # --- LG ad networks (verified: hagezi native.lgwebos; Perflyst regex.list) ---
     (\.|^)lgsmartad\.com$
     (\.|^)lgads\.tv$
+    # --- LG voice / AI cloud: any aic.<service>.lgtvcommon.com (deliberate) ---
+    ^aic\.[a-z0-9-]+\.lgtvcommon\.com$
     # DO NOT add: lgtvsdp.com, lgappstv.com (home screen / app + content store),
-    # *.netflix.com, nflximg.com, nflxso.net (Netflix), or anything matching
-    # aic.netflixvoice.lgtvcommon.com (voice search) — e.g. no blanket lgtvcommon.com.
+    # *.netflix.com, nflximg.com, nflxso.net (Netflix), or a blanket
+    # lgtvcommon.com (other hosts under it are unverified). Only aic.* is denied.
