@@ -17,8 +17,8 @@ grep -q 'src="/qr-cal-ronin.svg"' "$HTML" && ok "img:cal-ronin"  || no "img:cal-
 grep -q 'src="/qr-cal-rory.svg"'  "$HTML" && ok "img:cal-rory"   || no "img:cal-rory"
 
 # AC4 — literal webcal URLs visible
-grep -q 'webcal://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a' "$HTML" && ok "url:cal-ronin-text" || no "url:cal-ronin-text"
-grep -q 'webcal://n8n-hook.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e'   "$HTML" && ok "url:cal-rory-text"  || no "url:cal-rory-text"
+grep -q 'webcal://n8n.lab.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a' "$HTML" && ok "url:cal-ronin-text" || no "url:cal-ronin-text"
+grep -q 'webcal://n8n.lab.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e'   "$HTML" && ok "url:cal-rory-text"  || no "url:cal-rory-text"
 
 # AC5 — CSS for the new classes
 grep -qE '\.drawer-section *\{' "$HTML" && ok "css:.drawer-section" || no "css:.drawer-section"

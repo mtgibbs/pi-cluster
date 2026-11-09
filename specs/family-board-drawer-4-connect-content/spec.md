@@ -20,7 +20,7 @@ subscribe to the kids' calendars on their phone in one tap (`webcal://` → iOS 
 2. Inside that section, two `<div class="qr-card">` elements:
    - Ronin's: shows `<img src="/qr-cal-ronin.svg" alt="Ronin's calendar QR">`, a label
      "Ronin's calendar", a short instruction line, and the literal URL
-     `webcal://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
+     `webcal://n8n.lab.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
      in readable text below.
    - Rory's: same shape with `/qr-cal-rory.svg` and the literal Rory webcal URL.
 3. The drawer's content lives inside the existing `.drawer` aside (do NOT change the
@@ -46,8 +46,8 @@ file, any other section of `index.html`.
 - QR images at runtime paths `/qr-cal-ronin.svg` and `/qr-cal-rory.svg` (served by the
   board's nginx from the ConfigMap).
 - **Literal URLs** to render as readable text under each QR (copy verbatim):
-  - `webcal://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
-  - `webcal://n8n-hook.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e`
+  - `webcal://n8n.lab.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
+  - `webcal://n8n.lab.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e`
 - Render QR images ~**180px** square (use `width: 180px; height: 180px;` on the `<img>`
   or its wrapper). White background behind the image so the QR contrasts at any device
   rotation.

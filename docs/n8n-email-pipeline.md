@@ -304,12 +304,20 @@ Per-kid ICS calendars, served **dynamically** by n8n (workflow `Calendar ICS (dy
 `workflows/calendar-ics.json`): GET webhook → query (`student IN (kid,'both')`, type
 event/due) → build ICS → respond `text/calendar`. Always current, no file write.
 
-- Ronin: `https://n8n-hook.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
-- Rory:  `https://n8n-hook.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e`
+- Ronin: `https://n8n.lab.mtgibbs.dev/webhook/cal-ronin-dd5bef4b-4b18-4965-96af-c0b26117ee4a`
+- Rory:  `https://n8n.lab.mtgibbs.dev/webhook/cal-rory-d4ba8436-1a91-46e8-ad42-d3a13c85f56e`
 
-Public via tunnel rule `n8n-hook ^/webhook/cal-.*$ → MAIN n8n svc` (main registers
-activations immediately — no webhook-tier roll). GUID-obscured. **Subscribe (per iPhone):**
-Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar → paste URL.
+**LAN/tailnet-only** via the `n8n.lab.mtgibbs.dev` ingress → MAIN n8n svc (main registers
+activations immediately — no webhook-tier roll). They were public on the tunnel until
+2026-11-09; that rule was removed because these paths are committed in this public repo
+(here, the workflow JSON, the board's QR codes), so the GUID protected nothing. Phones
+refresh the subscription while on home Wi-Fi or Tailscale and keep the cached events
+elsewhere. Putting them back on the internet needs real auth, not a path. **Subscribe (per
+iPhone):** scan the QR on the Family Board drawer, or Settings → Calendar → Accounts → Add
+Account → Other → Add Subscribed Calendar → paste URL.
+> QR codes (`family-board/qr-cal-*.svg`) are generated locally with `segno`
+> (`segno.make(url, error='m').save(f, kind='svg', scale=14, border=1)`) — not via an
+> online QR API, which would hand the URL to a third party.
 > ICS details: due dates → timed (date-only → 23:59); events → all-day or timed; **floating
 > local time** (no Z/TZID) to avoid the UTC midnight-shift bug. UID is stable per
 > (msg-id,title,date) so re-extraction updates rather than duplicates.
