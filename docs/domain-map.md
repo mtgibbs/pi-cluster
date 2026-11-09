@@ -274,7 +274,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 
 ### log-aggregation  ·  Flux: `log-aggregation` (after: `cloudflare-tunnel`, `monitoring`)
 - **Deployment/vector** — `timberio/vector`
-  - creds: `vector-ntfy`  _(→ secrets-map.md)_
+  - creds: `vector-heroku-drain`, `vector-ntfy`  _(→ secrets-map.md)_
   - calls: → `ntfy`
 
 ### matrix  ·  Flux: `matrix` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)

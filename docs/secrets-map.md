@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_65 ExternalSecrets · 46 1Password items · 72 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_66 ExternalSecrets · 47 1Password items · 73 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -247,6 +247,8 @@ graph LR
     - `kiwix-mcp/kiwix-mcp-secrets`
 - **local-llm-mcp** → 1 ExternalSecret(s):
     - `local-llm-mcp/local-llm-mcp-secrets`
+- **log-drain** → 1 ExternalSecret(s):
+    - `log-aggregation/vector-heroku-drain`
 - **matrix** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/matrix-db-password`
     - `matrix/matrix-secret`
@@ -431,6 +433,9 @@ graph LR
 - **`local-llm-mcp/local-llm-mcp-secrets`** ← `local-llm-mcp`
   produces Secret `local-llm-mcp-secrets` in `local-llm-mcp`
     → `local-llm-mcp/local-llm-mcp` (Deployment, env)
+- **`log-aggregation/vector-heroku-drain`** ← `log-drain`
+  produces Secret `vector-heroku-drain` in `log-aggregation`
+    → `log-aggregation/vector` (Deployment, env)
 - **`log-aggregation/vector-ntfy`** ← `ntfy`
   produces Secret `vector-ntfy` in `log-aggregation`
     → `log-aggregation/vector` (Deployment, env)

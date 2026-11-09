@@ -198,6 +198,7 @@ data:
       "url": "https://logs.mtgibbs.dev/",
       "method": "POST",
       "body": "test",
+      "accepted_statuscodes": ["401"],
       "interval": 60,
       "retryInterval": 30,
       "maxretries": 3

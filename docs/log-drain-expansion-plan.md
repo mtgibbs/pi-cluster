@@ -445,13 +445,20 @@ data:
 
 After Vector and Cloudflare Tunnel are running:
 
-```bash
-# Add log drain to each Heroku app
-heroku drains:add https://logs.mtgibbs.dev/events -a mtgibbs-tracking
-heroku drains:add https://logs.mtgibbs.dev/events -a mtgibbs-xyz  # if applicable
+> **As built (2026-11-09):** exactly one app drains here — `mtgibbs` — to the root path
+> (`/`, not `/events`). The source requires HTTP Basic auth (user `heroku`, password in
+> 1Password `log-drain/heroku-password` → Secret `vector-heroku-drain`), because
+> `logs.mtgibbs.dev` is on the public internet. Heroku carries the credential in the drain URL.
 
-# Verify drain is active
-heroku drains -a mtgibbs-tracking
+```bash
+# Add the authenticated drain (password read straight from 1Password, never echoed)
+heroku drains:add "https://heroku:$(op read 'op://pi-cluster/log-drain/heroku-password')@logs.mtgibbs.dev/" -a mtgibbs
+
+# Verify (the listed URL contains the password — don't paste it anywhere)
+heroku drains -a mtgibbs
+
+# Rotation: update the 1Password field, wait for the ExternalSecret + Vector roll,
+# drains:add the new URL, then drains:remove the old one. Drains can't be edited.
 ```
 
 ## Phase 7: Grafana Dashboards & Alerts

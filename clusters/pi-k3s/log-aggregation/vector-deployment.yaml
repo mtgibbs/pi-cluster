@@ -54,6 +54,15 @@ spec:
                   name: vector-ntfy
                   key: FAMILY_PASSWORD
                   optional: true
+            # Basic-auth password the public Heroku drain source requires.
+            # NOT optional on purpose: without it the source would have no usable
+            # credential, so a new pod waits for the secret instead of starting
+            # (the old pod keeps serving during the rollout).
+            - name: HEROKU_DRAIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vector-heroku-drain
+                  key: PASSWORD
           volumeMounts:
             - name: config
               mountPath: /etc/vector

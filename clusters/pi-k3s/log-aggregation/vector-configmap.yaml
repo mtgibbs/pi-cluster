@@ -21,6 +21,15 @@ data:
         type: http_server
         address: "0.0.0.0:8080"
         encoding: text
+        # This source is on the public internet (logs.mtgibbs.dev via the tunnel).
+        # Require HTTP Basic auth so only the Heroku drain can write to Loki; the
+        # credential rides in the drain URL (https://heroku:<password>@logs.mtgibbs.dev/).
+        # Unauthenticated requests get 401 before the body is read. Uptime Kuma's
+        # "Log Drain (Heroku)" monitor asserts that 401.
+        auth:
+          strategy: basic
+          username: heroku
+          password: "${HEROKU_DRAIN_PASSWORD}"
         headers:
           - Logplex-Drain-Token
           - Logplex-Frame-Id
