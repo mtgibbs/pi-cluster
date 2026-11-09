@@ -24,11 +24,11 @@ data:
       - hostname: n8n-hook.mtgibbs.dev
         path: ^/webhook/inbound-mail.*$
         service: http://n8n-webhook.n8n.svc.cluster.local:5678
-      # Per-kid calendar ICS feeds (dynamic, served by MAIN n8n which registers
-      # activations immediately). GUID-obscured paths; subscribed by family iPhones.
-      - hostname: n8n-hook.mtgibbs.dev
-        path: ^/webhook/cal-.*$
-        service: http://n8n.n8n.svc.cluster.local:5678
+      # Per-kid calendar ICS feeds (/webhook/cal-*) are intentionally NOT public.
+      # Their paths are committed in this public repo (workflow JSON, board QR codes),
+      # so a GUID in the path protects nothing on the internet. They are served
+      # LAN/tailnet-only via n8n.lab.mtgibbs.dev (nginx ingress). Do not re-add a
+      # public rule for them without real auth in front.
       - hostname: n8n-hook.mtgibbs.dev
         service: http_status:404
 
