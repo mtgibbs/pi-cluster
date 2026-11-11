@@ -816,3 +816,25 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 37. agents - the agent sandbox: the agent-runner Deployment plus the short-lived, locked-down
+# Jobs it launches for n8n (clusters/pi-k3s/agents/README.md, docs/design/agent-sandbox.md).
+# Registered 2026-11-11, once its 1Password fields existed: pi-cluster/agent-runner/api-token and
+# homelab-agent/agent-media-investigator/litellm-key (plus the reused mcp-homelab-readonly/password).
+# `wait: true` turns this red if an ExternalSecret stops resolving or the runner is not Ready.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: agents
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/agents
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

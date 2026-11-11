@@ -49,6 +49,8 @@ spec:
                     # line here. Publishing to an ungranted topic 403s silently from
                     # the caller's point of view — easy to lose an hour to.
                     ntfy access family "model-watch" rw || true
+                    # Results from sandboxed agent runs (n8n agent-run-manual workflow).
+                    ntfy access family "agent-runs" rw || true
           env:
             - name: FAMILY_PASSWORD
               valueFrom:
