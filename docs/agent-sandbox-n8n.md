@@ -32,6 +32,7 @@ Agent Form (LAN: https://n8n.lab.mtgibbs.dev/form/agent-run)
 | `clusters/pi-k3s/n8n/workflows/agent-run-manual.json` | **Recommended.** Form → runner → Wait/resume → ledger → push. |
 | `clusters/pi-k3s/n8n/workflows/agent-run-manual-async.json` | Fallback launcher: same form, callback = `agent-result` webhook, pushes "started". |
 | `clusters/pi-k3s/n8n/workflows/agent-result.json` | Fallback receiver: `POST /webhook/agent-result` (header auth) → ledger → push. |
+| `clusters/pi-k3s/n8n/workflows/agent-alert.json` | Slice 2: Alertmanager webhook → dedupe → ops-investigator → same tail. See [Alert → ops-investigator](#alert--ops-investigator-slice-2). |
 | `clusters/pi-k3s/n8n/workflows/src/agent-*.js` | Code-node sources (each is byte-identical to the `jsCode` in the JSON, the repo's `src/` convention). |
 
 The push carries **outcome, summary, and report title only**. The report body stays in
@@ -240,6 +241,117 @@ Negative:
    and emoji. Expect the row stored verbatim (bound parameter), a single-line ASCII push title, and the
    unknown `outcome` stored as `failed`.
 
+## Alert → ops-investigator (slice 2)
+
+**Status:** 2026-11-11 — written and unit-tested offline, **not imported**. `agent-alert.json` starts the
+read-only `ops-investigator` agent for every warning/critical Alertmanager group (receiver `n8n-agents` in
+`clusters/pi-k3s/monitoring/helmrelease.yaml`) and pushes the outcome to the same `agent-runs` topic.
+
+```
+Alert Webhook   POST /webhook/agent-alert, Header Auth (agent-alert-token), answers 200 at once
+  → Build Event     src/agent-alert-build-event.js: ONE event per group; no items (silent end) if
+                    status != firing or every alert is Watchdog / InfoInhibitor / KubeMemoryOvercommit
+  → Ensure Tables   agent_runs (same DDL as the manual flow) + agent_dedupe
+  → Claim           atomic cooldown claim on dedupe_key (6 h); returns {claimed}
+  → Claimed?        false → end (silent: no ledger row, no push)
+  → Resume Callback → Launch Run → Launched? → Wait for Result → Callback? → Parse Result / Timeout Row
+    → Insert Ledger → Format Push → Alert Title → Push            (shared src/agent-*.js, unchanged)
+  Launch Run error / Launched? false
+    → Refusal Row (exit_reason refused_<HTTP> | runner_unreachable) → Insert Refusal (+ prior_same)
+    → Refusal Push (only when prior_same = 0: one quiet push per refusal kind per 6 h) → Push
+```
+
+**Event** (CONTRACT §1): `type alert.firing`, `source alertmanager`, `trust internal`,
+`subject <alertname>/<namespace or ->`, `dedupe_key alertmanager:<sha256(groupKey)>`, a fresh ULID `id` per launch,
+`data {common_labels, common_annotations, alerts[≤10]{labels, annotations, startsAt, generatorURL}}`, plus
+`alerts_total` and `truncated: true` when anything was cut (Alertmanager's own `truncatedAlerts` from
+`max_alerts` is counted in). Strings are clipped and the event is shrunk until it is ≤ 24 KiB of UTF-8.
+
+**Dedupe — who does what.** The runner dedupes only on (`event.id`, `agent`) and never reads `dedupe_key`.
+n8n owns the cooldown: `agent_dedupe` holds one row per `dedupe_key` with `cooldown_until`; `Claim` is a single
+`INSERT … ON CONFLICT DO UPDATE … WHERE cooldown_until <= now()`, so concurrent re-sends of one group (queue
+mode runs them in parallel) claim at most once. The event `id` is deliberately *not* derived from the group:
+the runner would answer every later legitimate run with 200 "already seen". The claim is kept even when the
+runner refuses (429/503/unreachable): Alertmanager re-sends the group after its 12 h repeat, which is the
+retry — nothing in n8n loops. To force a re-run now: `DELETE FROM agent_dedupe WHERE dedupe_key = '…';`
+
+```sql
+CREATE TABLE IF NOT EXISTS agent_dedupe (dedupe_key TEXT PRIMARY KEY, agent TEXT NOT NULL, subject TEXT,
+  last_event_id TEXT, first_launched TIMESTAMPTZ NOT NULL DEFAULT now(), last_launched TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cooldown_until TIMESTAMPTZ NOT NULL, launches INT NOT NULL DEFAULT 1);
+```
+
+**Pushes.** Finished run: `ops-investigator: <outcome> - <alertname>`, body starting
+`Auto-started by Alertmanager: <subject> (N alerts)`, then the summary and `Report: <title>`, tag
+`rotating_light`. Refusal: `ops-investigator: not started - <alertname>`, priority 2, at most once per
+`exit_reason` per 6 h (counted from `agent_runs`); every refusal still gets a ledger row with
+`run_id nolaunch-<event id>`, `outcome failed`.
+
+### Must exist before activation
+
+| What | Where | Notes |
+|---|---|---|
+| Credential **`agent-alert-token`** | n8n, type *Header Auth* (httpHeaderAuth) | Name `Authorization`, Value `Bearer <token>` — the token is 1Password `pi-cluster/n8n-agent-alert-webhook` field `token`, the value Alertmanager reads from Secret `alertmanager-n8n-agents`. Placeholder id `REPLACE_ON_IMPORT_agent_alert_token`. |
+| Credential **`agent-runner`** | n8n | Already created for the manual flow; re-link placeholder `REPLACE_ON_IMPORT_agent_runner`. |
+| `intake-db`, `ntfy-family` | n8n | Exist; ids kept in the JSON. |
+| Tables `agent_runs`, `agent_dedupe` | n8n Postgres | Created by `Ensure Tables` on first execution. |
+| Manifest `ops-investigator` | `clusters/pi-k3s/agents/manifests/` | Otherwise every launch is a quiet `refused_404`. |
+
+The Webhook node fails closed: a missing or wrong `Authorization` header gets **403** and no execution;
+past the trigger; with no credential linked the node errors and nothing runs. Keep the n8n Wait limit (30 min)
+above the manifest's `limits.timeout` (15 m) + 300 s runner grace + Job start-up.
+
+### Import
+
+1. Create `agent-alert-token` (UI: Credentials → Header Auth; or `POST /api/v1/credentials` with
+   `{"name":"agent-alert-token","type":"httpHeaderAuth","data":{"name":"Authorization","value":"Bearer …"}}`,
+   value read from 1Password into a variable, never typed inline).
+2. Patch both `REPLACE_ON_IMPORT_*` ids, `POST /api/v1/workflows` with `agent-alert.json`, then
+   `POST /api/v1/workflows/<id>/activate`.
+3. Alertmanager posts to the **webhook tier** (`http://n8n-webhook.n8n.svc.cluster.local:5678/webhook/agent-alert`),
+   which does not pick up new activations by itself: bump `n8n.mtgibbs.dev/restarted-at` in `n8n/webhook.yaml`,
+   PR, reconcile (the publish dance in `n8n-email-pipeline.md`). Until then the tier answers 404 and
+   Alertmanager logs a failed notify (Discord delivery is unaffected — `continue: true`).
+
+### Test plan
+
+Run from a pod in the cluster or the LAN; the token comes from 1Password into an env var, never inline.
+
+```bash
+TOK=$(op read op://pi-cluster/n8n-agent-alert-webhook/token)
+URL=https://n8n.lab.mtgibbs.dev/webhook/agent-alert      # main tier on the LAN; in-cluster: the n8n-webhook Service
+cat > /tmp/am.json <<'JSON'
+{"version":"4","status":"firing","receiver":"n8n-agents","groupKey":"{}/{severity=~\"warning|critical\"}:{alertname=\"AgentAlertSmokeTest\", namespace=\"agents\"}",
+ "truncatedAlerts":0,"groupLabels":{"alertname":"AgentAlertSmokeTest","namespace":"agents"},
+ "commonLabels":{"alertname":"AgentAlertSmokeTest","namespace":"agents","severity":"warning"},
+ "commonAnnotations":{"summary":"Smoke test: nothing is broken. Report that and stop."},"externalURL":"http://alertmanager",
+ "alerts":[{"status":"firing","labels":{"alertname":"AgentAlertSmokeTest","namespace":"agents","severity":"warning"},
+   "annotations":{"summary":"Smoke test"},"startsAt":"2026-11-11T12:00:00Z","endsAt":"0001-01-01T00:00:00Z",
+   "generatorURL":"http://prometheus/graph","fingerprint":"0"}]}
+JSON
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL" -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' --data @/tmp/am.json
+```
+
+1. **Happy path:** expect `200` at once, an execution that goes *waiting* → *success*, one `agent_dedupe` row,
+   one `agent_runs` row with `event_type alert.firing`, and a push `ops-investigator: <outcome> - AgentAlertSmokeTest`.
+2. **Cooldown:** repeat the same curl. Expect `200`, an execution that ends at `Claimed?`, no launch, no push,
+   `launches` still 1. Then `DELETE FROM agent_dedupe WHERE subject = 'AgentAlertSmokeTest/agents'` and repeat:
+   a new run.
+3. **Auth:** no header, `Bearer wrong`, and `Basic …` → **403**, no run (execution list unchanged).
+4. **Filtered:** the same payload with `"status":"resolved"`, and one whose only alert is `Watchdog` →
+   `200`, execution ends after `Build Event`, nothing else.
+5. **Refusals:** with `RUNNER_PAUSED=true` post two *different* groupKeys. Expect two `agent_runs` rows with
+   `exit_reason refused_503` and exactly one quiet push. Same for `runs_per_day` exhausted (`refused_429`).
+6. **Real alert:** fire one through Alertmanager itself (it applies the real route, `group_wait 2m`):
+   ```bash
+   kubectl -n monitoring exec sts/alertmanager-kube-prometheus-stack-alertmanager -c alertmanager -- \
+     amtool alert add AgentAlertSmokeTest severity=warning namespace=agents \
+     --annotation=summary="Smoke test: nothing is broken" --end="$(date -u -v+15M +%Y-%m-%dT%H:%M:%SZ)" \
+     --alertmanager.url=http://localhost:9093
+   ```
+   (laptop: `kubectl`; check the StatefulSet name with `kubectl -n monitoring get sts`). Expect the Discord
+   warning as before **and**, about 2 min later, an `agent-alert` execution and the push.
+
 ## Verify against the live n8n (can't be settled from source)
 
 - The real `$execution.resumeUrl` string (a trailing slash on `WEBHOOK_URL`, any `N8N_PATH`). The guard in
@@ -256,3 +368,6 @@ Negative:
   `What should it look into?`, `Subject (optional)`).
 - That the form page submits back to the LAN host it was loaded from, not to `WEBHOOK_URL`.
 - That ntfy accepts the `agent-runs` topic once the ACL line is added.
+- `agent-alert.json`: that the Postgres node returns `claimed` as a JS boolean (the IF also accepts `'t'`),
+  that the webhook tier serves `/webhook/agent-alert` after the roll, and that a Code node returning no items
+  (dropped group) ends the execution as *success*.

@@ -335,7 +335,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 
 ### monitoring  ·  Flux: `monitoring` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
   - ingress: `grafana.lab.mtgibbs.dev`
-  - calls: → `log-aggregation`
+  - calls: → `log-aggregation`, → `n8n`
 
 ### mtgibbs-site  ·  Flux: `mtgibbs-site` (after: `ingress`, `cert-manager-config`)
 - **Deployment/mtgibbs-site** — `ghcr.io/mtgibbs/mtgibbs.xyz` 🔒priv
