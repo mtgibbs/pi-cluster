@@ -78,10 +78,26 @@ spec:
               value: "https://ai.lab.mtgibbs.dev/v1"
             - name: RUNNER_NODE_HOSTNAMES
               value: "pi5-worker-1,pi5-worker-2"
+            # Burst handling (CONTRACT §3/§7). At most MAX_CONCURRENT agent Jobs exist at once; further
+            # runs get 202 "queued" and no Job until a slot frees, so a run's 15m deadline starts at Job
+            # creation, not at accept. MAX_CONCURRENT MUST stay = resourcequota.yaml `pods` - 1 (the
+            # runner's own pod): above it Jobs are created that the quota refuses pods for (the
+            # 2026-11-11 burst); below it a slot sits idle. A full queue answers 429 {"error":"queue_full"};
+            # a run queued longer than MAX_QUEUE_WAIT ends as exit_reason queue_expired. n8n's
+            # agent-alert Wait limit (75m) is sized to MAX_QUEUE_WAIT + agent timeout + margin: raise
+            # one, raise the other.
+            - name: RUNNER_MAX_CONCURRENT
+              value: "2"
+            - name: RUNNER_MAX_QUEUE
+              value: "8"
+            - name: RUNNER_MAX_QUEUE_WAIT
+              value: "45m"
           volumeMounts:
             - name: manifests
               mountPath: /etc/agents
               readOnly: true
+            # The ledger AND the queue spool (/var/lib/agent-runner/queue/<run_id>.json: a queued run's
+            # event until its Job starts), so in-flight and queued runs both survive a restart.
             - name: ledger
               mountPath: /var/lib/agent-runner
             # readOnlyRootFilesystem leaves nowhere to write scratch; Python's tempfile and any HTTP

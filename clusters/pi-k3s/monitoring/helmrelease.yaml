@@ -183,10 +183,19 @@ spec:
             # spent on it; repeat_interval 12h because a still-firing group
             # needs no fresh investigation every 4h (n8n dedupes as well).
             # send_resolved: false on the receiver — a resolve needs no agent.
+            #
+            # Beelink.* / LiteLLM.* are excluded: every one of those alerts is
+            # about the Beelink AI box (prometheusrule-beelink.yaml, and
+            # prometheusrule-litellm.yaml whose metrics come from the Beelink's
+            # LiteLLM exporter), and ops-investigator has no tool that can see
+            # the Beelink, so each run is wasted (2026-11-11 burst). Discord
+            # still gets them. Revisit when an agent gets Beelink visibility.
+            # Matchers are fully anchored; no in-cluster alert starts with
+            # either prefix (checked against every PrometheusRule here).
             - receiver: n8n-agents
               matchers:
                 - severity =~ "warning|critical"
-                - alertname != "InfoInhibitor"
+                - alertname !~ "InfoInhibitor|Beelink.*|LiteLLM.*"
               group_wait: 2m
               group_interval: 10m
               repeat_interval: 12h
