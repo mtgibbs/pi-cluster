@@ -98,7 +98,7 @@ purpose: "Find out why a media client hung. Report; change nothing."
 image: ghcr.io/mtgibbs/agent-runtime-claude:0.1.0
 model:
   key: agent-media-investigator        # its own LiteLLM key, with a daily budget
-  allow: [claude-sonnet, hot-coder]
+  allow: [hot-coder, claude-haiku]     # local first; the small hosted model as fallback (5.4)
 data_class: system                     # system | personal (see 3.3)
 connectors:                            # everything it can reach. Nothing else is routable.
   mcp:
@@ -202,7 +202,7 @@ investigate-by-hand: form → Run agent(<chosen>) → send Matt the report
 ```
 
 **State lives where a person can see it.** For system work, the plan issue and the PR are the state. For everything
-else, the n8n execution is. n8n adds one table for dedupe and one for the run ledger (5.4), and no chain-tracking
+else, the n8n execution is. n8n adds one table for dedupe and one for the run ledger (5.5), and no chain-tracking
 machinery.
 
 **Where n8n stops being the right tool:**
@@ -240,12 +240,13 @@ One Job per run, in an `agents` namespace.
 | Lifetime | The manifest's timeout as a hard deadline. No automatic retries. Cleaned up an hour after finishing. |
 | Network | Default deny. Allowed: DNS, the model gateway, and exactly the manifest's connectors. Agents that need the internet (GitHub) get public `443` with every private address range blocked, so **no agent can reach the LAN**. |
 | Capacity | A namespace quota of 2 concurrent Jobs. The runner answers "busy"; n8n retries. |
+| Placement | The Pi 5 workers. Never the Pi 3 or the master. An agent needs roughly 0.5–1 GiB, so no dedicated node is needed. |
 
 ### 5.3 Credentials
 
 | Credential | How the agent gets it | Scope |
 |---|---|---|
-| Model | A per-agent LiteLLM key, delivered by ExternalSecrets, with a model allowlist and a **daily budget** | That agent's models and spend |
+| Model | A per-agent LiteLLM key, delivered by ExternalSecrets, with a model allowlist and a **daily budget** (5.4) | That agent's models and spend |
 | GitHub | Minted per run by the runner from one GitHub App, narrowed to the manifest | One repo, one permission (issues *or* branch-and-PR), one hour |
 | MCP | A per-role read-only key | Read tools only, enforced by the server |
 | Anything personal (calendar, mail) | **Never.** n8n applies those results. | — |
@@ -253,14 +254,40 @@ One Job per run, in an `agents` namespace.
 The Anthropic key lives only in LiteLLM. Agents see capped LiteLLM keys, so Claude spend has one revocation point and
 shows up in the existing spend metrics.
 
-### 5.4 Seeing what happened
+### 5.4 Spend and models
+
+The Claude plan gives about **$200 of API spend a month**. Three limits protect it, all enforced by LiteLLM, none by
+the agent:
+
+| Limit | Value (start) | What it is for |
+|---|---|---|
+| Monthly, all agents | **$180** | The one that protects the plan. $20 of headroom. |
+| Daily, all agents | **$15** | A spike limiter. A daily cap alone would allow $450 a month, so it is not the main control. One bad day (an alert storm) costs at most about 8% of the month. |
+| Daily, per agent | Set in each manifest; they sum to no more than $15 | One noisy agent cannot starve the others |
+
+When a limit is hit, the model gateway refuses the call, the run ends as `failed` with that reason, and Matt is told.
+Agents whose manifest allows `hot-coder` keep working, since local models cost nothing.
+
+**Small models by default.** Each agent's key lists the models it may call, so this is enforced, not advised.
+
+| Agent type | Model |
+|---|---|
+| Investigators, the family assistant | `hot-coder` on the Beelink, falling back to Haiku |
+| Researchers | Haiku; Sonnet for the weekly sweep |
+| Fixer | Sonnet |
+| Any agent | Never Opus |
+
+What a run actually costs is not known yet. The run ledger records spend per run, so a week of slice 1 gives real
+numbers to retune these against.
+
+### 5.5 Seeing what happened
 
 - **Logs:** agents log JSON lines with `run_id` and `agent`; the existing pipeline carries them to Loki.
 - **Run ledger:** one table. `run_id, agent, event_id, started, finished, outcome, model, spend, output links`. The
   runner writes it.
 - **Alerts:** failure rate, spend near a budget, the kill switch being on. Each has a test that proves it can fire.
 
-### 5.5 When things fail
+### 5.6 When things fail
 
 | Failure | What happens |
 |---|---|
@@ -269,7 +296,7 @@ shows up in the existing spend metrics.
 | The manifest is invalid | The runner refuses. No degraded run. |
 | The Job passes its deadline | Killed. The result is `failed`, with the reason. |
 | The agent exits without a valid result | `failed` |
-| The budget is spent | The model gateway refuses; the result is `failed`. Matt is told. |
+| A spend limit is hit (5.4) | The model gateway refuses; the result is `failed`. Matt is told. Local-model agents keep running. |
 | The Beelink is in family mode and the agent needs the work model | The run is parked and replayed on the mode flip, as inbound mail is today |
 
 ## 6. The safety rules
@@ -286,7 +313,7 @@ These hold for every agent, and each is enforced by something other than the age
    With rule 4, an agent loop cannot form.
 6. **An agent cannot change its own sandbox.** `agents/**` and `.github/**` are off limits to agent PRs, checked in CI,
    and owned by Matt in CODEOWNERS.
-7. **Spend and time are capped per agent**, by the model gateway and the Job deadline.
+7. **Spend and time are capped**, per agent, per day and per month, by the model gateway and the Job deadline.
 8. **Text from outside is data.** Mail bodies, PR text and log lines are fenced as data in the prompt. This is a
    mitigation only; rules 1–7 are what bound a hijacked agent.
 
@@ -299,7 +326,9 @@ event → investigator or researcher (read-only) → plan issue → Matt approve
       → CI + review-hub checks → Matt merges → Flux
 ```
 
-- **Plans are issues in a private repo.** pi-cluster is public, and a plan quotes logs and findings.
+- **Plans are issues in a private repo.** pi-cluster is public. A security finding posted before it is fixed says where
+  the hole is, and investigation plans quote raw logs. (Whether ordinary ops plans could be public instead is an
+  [open question](#11-open-questions-for-matt).)
 - A plan has a fixed shape: what was found and the evidence; likely cause; proposed change, or "no change needed";
   risk; how to verify; how to roll back.
 - **Research findings carry a fingerprint** (`agent | rule | resource`), so a re-run updates the open issue instead of
@@ -340,11 +369,12 @@ LiteLLM and one agent key.
 
 ## 11. Open questions for Matt
 
+Decided 2026-11-11: spend limits and small-model defaults (5.4); agents run on the Pi 5 workers (5.2).
+
 1. **Personal data and hosted models.** Should agents handling family mail and calendars be restricted to Beelink
    models (recommended), or may they use Claude?
 2. **Calendar writes.** Should n8n apply a proposed calendar entry on its own, or ask first with an ntfy button
    (recommended to start)?
-3. **Spend.** What daily budget per agent, and what total daily cap for Claude?
-4. **The plans repo.** A new private repo for plan issues (recommended, since pi-cluster is public)?
-5. **Where agents run.** On pi5-worker-2 beside n8n and the MCPs, or on a node set aside for agents?
-6. **The first agent.** `media-investigator` (the Jellyfin hang is a live problem) or `ops-investigator`?
+3. **The plans repo.** Everything in one new private repo (recommended to start: one place to look, and log redaction
+   is easy to get wrong), or only security findings private and ordinary ops plans in pi-cluster's public issues?
+4. **The first agent.** `media-investigator` (the Jellyfin hang is a live problem) or `ops-investigator`?
