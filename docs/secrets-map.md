@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_66 ExternalSecrets · 47 1Password items · 73 consumer edges · 17 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_68 ExternalSecrets · 49 1Password items · 74 consumer edges · 18 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -141,6 +141,11 @@ graph LR
   nsg65ys --> n1onwzk3
   nghdbx9["mealie-ai-secret<br/>(mealie)"]
   nsg65ys --> nghdbx9
+  nxmumnv(["🔑 mcp-homelab-readonly"])
+  n1icbr5["agent-media-investigator<br/>(agents)"]
+  nxmumnv --> n1icbr5
+  n3t8m4i["mcp-homelab-readonly<br/>(mcp-homelab)"]
+  nxmumnv --> n3t8m4i
   n1q7i1nq(["🔑 mealie"])
   nlf4zo["mealie-db-password<br/>(backup-jobs)"]
   n1q7i1nq --> nlf4zo
@@ -203,6 +208,10 @@ graph LR
 
 ### 1Password items — source of truth (shared = reuse before mint)
 
+- **agent-media-investigator** → 1 ExternalSecret(s):
+    - `agents/agent-media-investigator`
+- **agent-runner** → 1 ExternalSecret(s):
+    - `agents/agent-runner`
 - **ai-controlpanel** → 1 ExternalSecret(s):
     - `homepage/homepage-ai-controlpanel`
 - **alertmanager** → 1 ExternalSecret(s):
@@ -256,7 +265,8 @@ graph LR
     - `homepage/homepage-servarr`
     - `mcp-homelab/mcp-homelab-secrets`
     - `mealie/mealie-ai-secret`
-- **mcp-homelab-readonly** → 1 ExternalSecret(s):
+- **mcp-homelab-readonly** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `agents/agent-media-investigator`
     - `mcp-homelab/mcp-homelab-readonly`
 - **mealie** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/mealie-db-password`
@@ -328,6 +338,12 @@ graph LR
 
 ### ExternalSecret → k8s Secret → consumers
 
+- **`agents/agent-media-investigator`** ← `agent-media-investigator`, `mcp-homelab-readonly`
+  produces Secret `agent-media-investigator` in `agents`
+    → _agent-runner-rendered Job for the media-investigator agent (envFrom; see clusters/pi-k3s/agents/README.md)_ (curated: not a pod-spec ref)
+- **`agents/agent-runner`** ← `agent-runner`
+  produces Secret `agent-runner` in `agents`
+    → `agents/agent-runner` (Deployment, env)
 - **`backup-jobs/backup-ssh-key`** ← `synology_backup`
   produces Secret `backup-ssh-key` in `backup-jobs`
     → `backup-jobs/git-mirror-backup` (CronJob, volume)

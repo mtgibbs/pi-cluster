@@ -1,0 +1,60 @@
+# Flux image automation for the runner, mirroring review-hub/image-automation.yaml: a new semver tag
+# on ghcr.io/mtgibbs/agent-runner is written into deployment.yaml (the `$imagepolicy` setter) by a
+# fluxcdbot commit to main. Inert until this directory is registered with Flux (README.md).
+#
+# The agent-runtime image tag lives in each manifest's `image:` (manifests/*.yaml) and is NOT
+# automated here: a runtime bump changes what every agent executes, so it stays a reviewed PR.
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: agent-runner
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/agent-runner
+  interval: 5m0s
+  # The cluster's one GHCR read identity (ghcr-read-token → ghcr-pull-secret in flux-system), the
+  # same ref harness/ and private-exit-node/ use. Harmless if the package is public; required if it
+  # stays private, or the scan sits InProgress forever.
+  secretRef:
+    name: ghcr-pull-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: agent-runner
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: agent-runner
+  filterTags:
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+  policy:
+    semver:
+      range: ">=0.1.0"
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: agent-runner
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore: update agent-runner to {{range .Changed.Changes}}{{.NewValue}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./clusters/pi-k3s/agents
+    strategy: Setters

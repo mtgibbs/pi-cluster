@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No top-level `namespace:` — the namespace transformer would drag image-automation.yaml out of
+# flux-system (same reason as harness/ and harness-fleet/). Every file declares its own namespace.
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - rbac.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - networkpolicies.yaml
+  - external-secret-runner.yaml
+  - external-secret-media-investigator.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - image-automation.yaml
+
+# Agent manifests → ConfigMap `agent-manifests`, mounted by the runner at /etc/agents. The generator
+# appends a content hash to the name and rewrites the Deployment's reference to match, so changing
+# any manifest changes the pod template and rolls the runner — no stale manifest stays loaded.
+#
+# kustomize `files:` takes no globs: ADD EACH NEW manifests/<name>.yaml HERE. The key is the file
+# name, which CONTRACT §2 requires to equal the manifest's `name`.
+configMapGenerator:
+  - name: agent-manifests
+    namespace: agents
+    files:
+      - manifests/media-investigator.yaml

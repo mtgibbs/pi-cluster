@@ -1,0 +1,52 @@
+# The cap on a runaway runner (or a runaway caller of it).
+#
+# CONCURRENCY IS CAPPED BY `pods`, NOT `count/jobs.batch`. This is the one place this file departs
+# from harness-fleet/resourcequota.yaml, and the reason is the rendered Job's
+# `ttlSecondsAfterFinished: 3600` (CONTRACT §4): a finished Job object lingers for an hour, and
+# `count/jobs.batch` counts Job OBJECTS whatever their state. Capped at 2, two quick runs would lock
+# the sandbox for the next hour with nothing running. The `pods` quota counts only pods in a
+# non-terminal phase, so it measures what is actually running:
+#
+#   pods: 3  =  1 runner pod (deployment.yaml)  +  2 concurrent agent pods
+#
+# The runner pod is in that sum because a quota counts EVERY pod in the namespace, its own launcher
+# included. Rendered Jobs are backoffLimit 0, so one Job never holds more than one pod.
+#
+# The runner's own 429 (CONTRACT §3, "daily cap or cluster quota") is meant to be the first line;
+# this is the backstop if it is wrong. If a third agent Job does get created, its pod is refused
+# here and the Job controller retries (FailedCreate events) until a slot frees or the Job's
+# activeDeadlineSeconds runs out — it queues, it does not oversubscribe the node.
+#
+# count/jobs.batch is a second, looser ceiling on Job objects (running + finished-within-the-TTL),
+# so a tight create loop cannot fill etcd with Jobs that are all waiting on the pod quota.
+#
+# Compute ceilings are sized to the runner PLUS two agents at the LimitRange's per-container MAX
+# (limitrange.yaml), not its default — so a manifest that asks for the full 1 CPU / 1Gi still fits:
+#
+#   limits.cpu    = 250m  (runner)  + 2 x 1     = 2250m
+#   limits.memory = 256Mi (runner)  + 2 x 1Gi   = 2304Mi
+#
+# requests.* mirror those ceilings. They are not here to bind; they are here because a quota that
+# names requests forces every pod to declare them, which is what makes the LimitRange defaults
+# load-bearing (see limitrange.yaml). Raise the runner's limits in deployment.yaml and you must
+# raise these, or the second agent becomes unschedulable and admission names the quota, not the pod
+# that ate the margin.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: agents
+  namespace: agents
+spec:
+  hard:
+    pods: "3"
+    count/jobs.batch: "24"
+    requests.cpu: "2250m"
+    requests.memory: 2304Mi
+    limits.cpu: "2250m"
+    limits.memory: 2304Mi
+    # Nothing here should ever create these; zero makes "nothing" enforceable rather than assumed.
+    # The runner's one PVC is the ledger (pvc.yaml); its one Service is ClusterIP (service.yaml).
+    persistentvolumeclaims: "1"
+    services: "1"
+    services.nodeports: "0"
+    services.loadbalancers: "0"
