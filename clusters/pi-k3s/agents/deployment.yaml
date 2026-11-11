@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: runner
-          image: ghcr.io/mtgibbs/agent-runner:0.1.0 # {"$imagepolicy": "flux-system:agent-runner"}
+          image: ghcr.io/mtgibbs/agent-runner:0.2.0 # {"$imagepolicy": "flux-system:agent-runner"}
           ports:
             - name: http
               containerPort: 8080
