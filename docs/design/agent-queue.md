@@ -1,7 +1,7 @@
 # Agent queue — topic-subscribed, ephemeral, least-privilege agents
 
 **Status:** Draft design, not built. Nothing here is deployed.
-**Date:** 2026-11-10
+**Date:** 2026-11-10, revised 2026-11-11 (plan-first flow, research agents, emitters; see §2.8)
 **Scope:** pi-cluster (the instance) and `mtgibbs/jig` (the dispatcher it already runs).
 **Asks of Matt:** the [Open questions](#7-open-questions-for-matt) at the end.
 
@@ -127,9 +127,14 @@ sensitive-data path, the same principle as the inbound-mail Worker's refs-only J
 
 | Topic | Producer | `data` (refs) | Typical subscribers |
 |---|---|---|---|
-| `ops.alert` | Alertmanager webhook (allowlisted alertnames only) | alertname, labels, fingerprint, status, generatorURL | `ops-fixer` |
-| `ops.workitem` | Human (Matrix `#tasks`, n8n form), loop-doctor | repo, free-text ask (trust=external), requested_by | `ops-fixer` |
-| `flux.failed` | Flux notification-controller → n8n | kind, name, namespace, revision, message | `ops-fixer` |
+| `ops.alert` | Alertmanager webhook (everything that reaches Discord, minus a denylist) | alertname, labels, fingerprint, status, generatorURL | `ops-investigator` |
+| `ops.uptime` | Uptime Kuma webhook notification | monitor, transition (up/down), url | `ops-investigator` |
+| `ops.workitem` | Human (Matrix `#tasks`, n8n form), loop-doctor | repo, free-text ask (trust=external), requested_by | `ops-investigator` |
+| `flux.failed` | Flux notification-controller → n8n (error severity) | kind, name, namespace, revision, message | `ops-investigator` |
+| `repo.changed` | Flux notification-controller → n8n (GitRepository new revision) | repo, revision, changed_paths | `sec-researcher`, `bug-researcher` |
+| `research.sweep` | The one scheduled event (weekly), and a manual n8n form | scope | `sec-researcher`, `bug-researcher` |
+| `plan.proposed` | dispatcher, when an investigator or researcher opens a plan issue | issue ref, finding fingerprint, severity | n8n chain state, notify |
+| `plan.approved` | review-hub receiver, on an `issues.labeled` webhook **whose sender is an allowlisted human** | issue ref, approved_by | `ops-fixer` |
 | `pr.opened` / `pr.updated` | GitHub App webhook via review-hub receiver | repo, number, head_sha, author, labels, changed_paths | review-hub (in-proc), `pr-reviewer`, … |
 | `pr.verdict` | each judge | repo, number, head_sha, judge, conclusion, findings_ref | n8n chain state (merge-readiness summary) |
 | `agent.result` | dispatcher (on Job completion) | run_id, agent, outcome (`shipped`/`noop`/`deferred`/`failed`), refs (pr url, report) | n8n chain state |
@@ -159,7 +164,8 @@ sensitive-data path, the same principle as the inbound-mail Worker's refs-only J
    the n8n UI**. It's the `subscribes:` block of the agent manifests in Git (§2.3), rendered into a ConfigMap that the
    router reads. Adding an agent is a PR, never a UI click (`feedback_everything_as_code`).
 3. **Chain state.** `agentq_chains(correlation_id, subject, state, hop, attempts, open_pr, opened_at, closed_at)` lives in
-   the existing n8n Postgres. States: `open → fixing → in_review → awaiting_human → closed(merged|rejected|expired)`.
+   the existing n8n Postgres. States: `open → investigating → awaiting_plan_approval → fixing → in_review → awaiting_human →
+   closed(merged|rejected|dismissed|accepted_risk|resolved|expired)`.
 4. **Waits and timeouts.** For example, "PR open with no human decision in 72h → close as expired, notify". n8n's
    Wait-with-webhook-resume does this natively, and it's the main reason n8n is a good fit here.
 5. **Human notifications.** ntfy and Matrix, with links: "ops-fixer opened draft PR #N for `FluxKustomizationNotReady:media`".
@@ -205,11 +211,9 @@ metadata:
   name: ops-fixer
   version: 1                           # bump = new LiteLLM key alias + new ledger series
 spec:
-  purpose: "Diagnose an allowlisted ops alert in pi-cluster and propose a fix as a DRAFT PR."
+  purpose: "Carry out a human-approved plan issue in pi-cluster as a DRAFT PR."
   subscribes:
-    - topic: ops.alert
-      filter: 'data.alertname in ["FluxKustomizationNotReady","ExternalSecretSyncError","KubePodCrashLooping"] && data.status == "firing"'
-    - topic: flux.failed
+    - topic: plan.approved             # the only way a writer starts (2.8)
   runtime:
     image: ghcr.io/mtgibbs/agent-runtime-claude:0.1.0   # Claude Code CLI on harness-base; or loop-executor-opencode
     entry: [agent-run, --task, ops-fix]                   # prompt template baked in the image, versioned with it
@@ -224,7 +228,7 @@ spec:
         tools: [get_flux_status, get_pod_logs, get_events, diagnose_dns, list_pods]
   repos:
     - name: mtgibbs/pi-cluster
-      access: branch-pr                # read | branch-pr. There is no "merge" value.
+      access: branch-pr                # read | issues | branch-pr. There is no "merge" value.
       paths_allow: ["clusters/pi-k3s/**", "docs/**"]
       paths_deny:  ["clusters/pi-k3s/flux-system/**", "**/external-secret*.yaml", ".github/**", "agents/**"]
   secrets: []                          # standing secrets (ESO). Empty: everything is per-run (2.4)
@@ -314,7 +318,8 @@ How the minted tokens reach the Job:
   `entrypoint.sh` already uses for `HARNESS_CLONE_PAT`.
 
 **Identities.** There are two new GitHub Apps, one per role (credentials scale by role):
-- **`agentq-writer`** is installed on the repos where agents may open PRs. It is used by fixers.
+- **`agentq-bot`** is installed on the plans repo and on the repos where agents may open PRs. Per-run tokens are
+  narrowed to the manifest, so a reader's token carries `issues:write` only and a fixer's carries the PR scopes.
 - **`review-bot`** (the existing App) also serves agent judges, so verdicts appear under the same identity.
 
 Neither App has bypass rights on any ruleset, and neither is `mtgibbs`. This fixes the "bot and human are
@@ -388,10 +393,10 @@ other than the agent's good behaviour:
 
 | Limit | Value (start) | Enforced by |
 |---|---|---|
-| `hop` max per chain | 4 (alert → fixer → judges → summary) | router drops and dead-letters at `hop > 4` |
+| `hop` max per chain | 5 (event → investigator → approval → fixer → judges → summary) | router drops and dead-letters at `hop > 5` |
 | One open fixer chain per `subject` | 1 | router: a repeat alert attaches to the open chain; no new run |
 | Attempts per chain | `max_attempts_per_chain` (1 for fixers) | router; a second attempt needs a `human.decision: retry` |
-| Agent-authored events can't trigger a fixer | always | router: `actor.kind == agent` events route only to judges/notify. A fixer's PR failing CI does **not** summon the fixer again. |
+| Agent-authored events can't trigger a writer | always | router: `actor.kind == agent` events route only to judges/notify. A writer starts only from `plan.approved`, which requires a human sender. A fixer's PR failing CI does **not** summon the fixer again. |
 | Runs per agent per day | `max_runs_per_day` | router counter in `agentq_chains` |
 | Concurrent Jobs | 2 (ResourceQuota) | quota; dispatcher returns 429; router retries with backoff, then dead-letters |
 | Spend | per-run key `max_budget`; team daily cap | LiteLLM |
@@ -445,6 +450,80 @@ The design assumes injection succeeds and bounds what follows.
 | Agent opened a PR, then the chain times out waiting for a human | After 72h, n8n comments, closes the PR (agent PRs only, by label), and records `closed(expired)`. Nothing merges by default. |
 | Fixer is wrong | The judges catch it, or the human rejects. Rejection is a `human.decision`, recorded on the chain. Repeated rejections of an agent are a ledger query that tells us its eval needs work. |
 
+### 2.8 The agent roster and the plan-first flow (revision 2)
+
+Talking the design through with Matt changed its shape in three ways:
+- **Investigation is separate from fixing.** Reading is automatic; writing starts only from a human's approval.
+- **The unit of work between them is a plan**, written as a GitHub issue.
+- **Agents also find their own work.** Security and bug research run with nothing broken.
+
+**Roster.** There are four agents, in two privilege tiers. The tier is the token, not the prompt.
+
+| Agent | Tier | Starts from | Reads | Can write | Model (start) |
+|---|---|---|---|---|---|
+| `ops-investigator` | reader | `ops.alert`, `ops.uptime`, `flux.failed`, `ops.workitem` | homelab MCP read tools, Loki queries, repo clone | plan issues only | `hot-coder`; Claude for `severity=critical` |
+| `sec-researcher` | reader | `repo.changed` (RBAC, ingress, tunnel, secret, NetworkPolicy paths), `research.sweep` | manifests, MCP read tools, image tags | plan issues only | Claude |
+| `bug-researcher` | reader | new error signature (a Loki ruler alert → `ops.alert`), a chain closed `fix_ineffective`, `research.sweep` | Loki, MCP read tools, repo | plan issues only | Claude |
+| `ops-fixer` | writer | `plan.approved` **only** | the approved issue, repo, MCP read tools | branch + draft PR | Claude |
+
+`pr-reviewer` (§2.5) stays as the agentic judge. A reader's token has `issues:write` on the plans repo and
+`contents:read` elsewhere: it cannot push a branch anywhere.
+
+**Emitters post to n8n directly.** Everything that posts to Discord today also posts to an in-cluster n8n webhook. Discord
+stays as Matt's read-only feed and is never on the agents' path.
+
+| Emitter | Change (one manifest each) | Dedupe key |
+|---|---|---|
+| Alertmanager | A `webhook_configs` entry **inside the existing `discord` receiver** (`receivers[0]`), `send_resolved: true`. Whatever reaches Discord reaches n8n at the same moment, and no receiver index moves, so the `valuesFrom` targetPaths stay valid. | group key + fingerprint |
+| Flux notification-controller | A second `Provider` (type `generic-hmac`) and two `Alert`s: `eventSeverity: error` on Kustomizations/HelmReleases → `flux.failed`; GitRepository revision events → `repo.changed`. The HMAC authenticates the source. | `kind/ns/name@revision` |
+| Uptime Kuma | An autokuma `webhook` notification added to the monitors' `notification_name_list` | monitor id + transition |
+
+Each lands on its own adapter webhook (`/webhook/agentq/{alertmanager,flux,kuma}`) on the in-cluster n8n webhook
+Service, with a shared-secret header. None is exposed through the tunnel.
+
+**The plan issue.** A reader's only output is one issue in a **private** plans repo (proposed: `mtgibbs/homelab-ops`).
+- It must be private. pi-cluster is public, and a plan quotes logs, internal hostnames and security findings. A security
+  finding in a public issue is a disclosure.
+- It follows a fixed template, which is the reader's output contract (`plan/v1`):
+  - what was found, with evidence (queries and log lines);
+  - likely cause and confidence;
+  - proposed change (files and manifests), or "no change needed";
+  - risk and blast radius;
+  - how to verify, and how to roll back.
+- Labels carry the state: `agent:<name>`, `severity:<level>`, `source:alert|research`, then `agentq:approve`,
+  `agentq:dismiss` or `accepted-risk`.
+- **The issue is the chain's human-readable state.** Found, proposed, decided and landed are all in one place.
+  `agentq_chains` stays the machine copy.
+
+**Approval.** Matt comments to amend the plan, then adds `agentq:approve`.
+- GitHub sends `issues.labeled` to the review-hub receiver (the existing public route; `review-bot` is installed on the
+  plans repo and subscribed to `issues`). The receiver forwards a `plan.approved` envelope to n8n.
+- **The receiver checks the webhook's `sender`.** A reader's token has `issues:write`, which includes adding labels, so
+  the label alone proves nothing. Only a `labeled` event whose sender is on a human allowlist becomes `plan.approved`.
+  A positive control covers this: the bot labelling its own issue must produce no run.
+- The fixer reads the issue body plus **comments by allowlisted humans only**. Everything else in the issue is
+  `trust: external` data.
+- The fixer's PR (in pi-cluster) links the issue. Merge closes it. If the alert resolves first, n8n comments, closes the
+  issue and cancels any running Job in the chain.
+
+**Research findings need their own dedupe.**
+- Each finding has a stable fingerprint: `sha256(agent | rule | resource)`, e.g. `sec-researcher | rbac-wildcard |
+  ClusterRole/mcp-homelab`. It is stored in the issue body as a marker, and in `agentq_chains.subject`.
+- A re-run that finds the same thing updates the open issue instead of opening a second one.
+- A finding closed as `accepted-risk` stays closed. The researcher is given the list of accepted fingerprints and must
+  not re-raise them unless the resource changed.
+- **A findings budget:** at most 5 new issues per run, ranked by severity. The rest go in one "also seen" rollup issue.
+- **Researchers get evals, like judges.** A set of seeded known-bad manifests must be found before a clean report is
+  trusted (*green is not proof*). The 2026-11-09 audit's findings are the first eval set; finding #5 is the first case.
+
+**Reactive, with one named exception.** Every trigger above is an event. The exception is `research.sweep`, a weekly
+event for things nothing has touched. It is the same carve-out `model-watch` has, and it is stated here so it doesn't
+grow.
+
+**On autonomy.** Under the standing rule, the system can find work, plan it and fix it, but a human approves the plan
+and a human merges the PR. Removing either gate for a narrow class (e.g. Renovate patch bumps) is a separate decision,
+to be made from the ledger's rejection rate, not designed in here.
+
 ---
 
 ## 3. The examples on the new design
@@ -452,32 +531,48 @@ The design assumes injection succeeds and bounds what follows.
 ### 3.1 Auto-ops, end to end
 
 ```
-1  Alertmanager fires FluxKustomizationNotReady{name="media"}       (critical, still also goes to Discord)
-2  → n8n /webhook/agentq/alertmanager   (in-cluster URL, no tunnel; a new receiver appended AFTER receivers[2])
-   adapter: alertname ∈ allowlist? → envelope{topic: ops.alert, dedupe_key: fingerprint, trust: internal}
+1  Alertmanager fires FluxKustomizationNotReady{name="media"}   → Discord (unchanged) AND n8n (same receiver)
+2  n8n /webhook/agentq/alertmanager: not on the denylist → envelope{topic: ops.alert, dedupe_key: group+fingerprint}
 3  router: insert agentq_events (dup → stop) · open chain for subject? (yes → attach, stop) · new chain, hop 0
-   subscribers(ops.alert) = [ops-fixer]; filter passes; daily cap ok; not paused
-4  → POST dispatcher /runs {agent: ops-fixer, event, idempotency_key: event.id+agent}
-5  dispatcher: load manifest → mint App token (pi-cluster, contents:write, pull_requests:write)
-               → mint LiteLLM key (agent-claude-sonnet + hot-coder, $2, 25m) → per-run Secret
+   subscribers(ops.alert) = [ops-investigator]; daily cap ok; not paused
+4  → POST dispatcher /runs {agent: ops-investigator, event, idempotency_key: event.id+agent}
+5  dispatcher: load manifest → mint App token (homelab-ops issues:write; pi-cluster contents:read)
+               → mint LiteLLM key (hot-coder, capped, 25m) → per-run Secret
                → render Job (agentq ns, no SA token, restricted PSA, egress profile) → ledger: launched
-6  Job: clone → MCP read-only: get_flux_status, get_events, get_pod_logs → diagnose
-        → edit within paths_allow → run local deterministic checks (kubeconform, check-generated-docs.sh)
-        → no green local check → outcome=deferred with diagnosis only (no green gate → no PR)
-        → green → push branch agentq/ops-fixer/<run_id>, open DRAFT PR (labels: agent:ops-fixer, needs-human)
-        → emit result/v1 {outcome: shipped, pr_url}
-7  dispatcher watch: Job complete → revoke key, delete Secret → agent.result → n8n → chain: in_review, hop 1
-   n8n notifies Matt (ntfy + Matrix thread keyed by correlation_id): diagnosis + PR link
-8  GitHub: pull_request opened → review-hub (rollup + opted-in validators) and Actions (drift gate, agents-lint)
-   review-hub forwards pr.opened envelope → router → pr-reviewer agent Job (agentic judge, read-only, Check Run)
-   all verdicts → pr.verdict → chain shows "3/3 checks green, awaiting human"
-9  Matt reviews, marks ready, approves, merges.  ← the checkpoint; nothing above could do this
-10 Flux reconciles. The alert resolves → Alertmanager "resolved" → adapter → chain closed(merged).
+6  Job: MCP read-only (get_flux_status, get_events, get_pod_logs) + Loki queries + repo clone → diagnose
+        → open plan issue (plan/v1) in homelab-ops → emit result/v1 {outcome: shipped, issue_url}
+7  dispatcher watch: Job complete → revoke key, delete Secret → agent.result + plan.proposed → n8n
+   chain: awaiting_plan_approval, hop 1 · n8n notifies Matt (ntfy + Discord) with the issue link
+8  Matt reads the plan, optionally comments, adds `agentq:approve`.          ← checkpoint 1
+   GitHub issues.labeled → review-hub receiver → sender is an allowlisted human → plan.approved → n8n
+9  router → dispatcher → ops-fixer Job: token is pi-cluster contents:write + pull_requests:write, homelab-ops issues:read
+        → implement the approved plan within paths_allow → local deterministic checks (kubeconform,
+          check-generated-docs.sh) → no green check → outcome=deferred, comment on the issue, no PR
+        → green → push branch agentq/ops-fixer/<run_id>, open DRAFT PR linked to the issue
+10 GitHub: pull_request opened → review-hub (rollup + validators), Actions (drift gate, agents-lint),
+   and the pr-reviewer agent Job → Check Runs → pr.verdict → chain shows "checks green, awaiting human"
+11 Matt reviews, marks ready, approves, merges.                              ← checkpoint 2
+12 Flux reconciles. The alert resolves → Alertmanager "resolved" → adapter → issue closed, chain closed(merged).
    If it does NOT resolve within N min of the merge, the router attaches the next firing to the same chain as
-   `fix_ineffective` and notifies. It does not auto-retry (max_attempts_per_chain: 1).
+   `fix_ineffective`, reopens the issue and notifies. It does not auto-retry (max_attempts_per_chain: 1).
+   If the alert resolves BEFORE step 8, n8n comments, closes the issue and cancels any running Job.
 ```
 
-### 3.2 The judges, end to end
+### 3.2 Research, end to end
+
+```
+1  A PR merges to pi-cluster main that touches clusters/pi-k3s/**/rbac.yaml
+2  Flux fetches the new revision → notification-controller → n8n /webhook/agentq/flux (HMAC)
+   envelope{topic: repo.changed, dedupe_key: GitRepository/flux-system@<sha>, changed_paths}
+3  router: sec-researcher's filter matches the paths → dispatcher → reader Job (Claude, read-only)
+4  Job: reads the manifests at that revision + MCP read tools; is handed the accepted-risk fingerprints
+        → for each finding: fingerprint → existing open issue? update it : open a new plan issue (max 5)
+        → emit result/v1 {outcome: shipped|noop, issues: [...]}
+5  Matt triages in homelab-ops: `agentq:approve` → the same fixer path as 3.1 steps 8–11;
+   `accepted-risk` → closed and remembered; `agentq:dismiss` → closed, counted against the agent in the ledger
+```
+
+### 3.3 The judges, end to end
 
 ```
 PR opened/updated on any opted-in repo (by a human, renovate, or an agent)
@@ -501,50 +596,50 @@ It does **not** need a review-hub image rebuild or a branch-protection edit, bec
 
 ---
 
-## 4. Minimal first slice — one topic, one agent, one judge
+## 4. Build order — three slices, each one privilege step
 
-The goal is the smallest thing that proves the *composition* (envelope → router → sandboxed Job → PR → judge → human),
-built mostly from parts that already run.
+Each slice adds one capability and one privilege, and reuses the plumbing of the one before. Nothing with a write token
+runs until two read-only slices have a track record.
 
-**Topic:** `ops.alert`, fed by Alertmanager, with an allowlist of **one** alertname. A good first pick is one whose fix is
-always a manifest edit and is easy to induce on purpose, e.g. `FluxKustomizationNotReady` on a throwaway test
-Kustomization.
+| Slice | Adds | New privilege | Proves |
+|---|---|---|---|
+| **1. `sec-researcher`** | envelope, router, dispatcher agent path, sandbox, plans repo, ledger | `issues:write` on the private plans repo | The whole pipeline, with a read-only agent whose worst case is a noisy issue |
+| **2. `ops-investigator`** | the three emitter adapters, chain open/close on resolve | none (same reader tier) | Event-driven chains, dedupe under repeat alerts, cancellation |
+| **3. `ops-fixer`** | `plan.approved`, draft PRs, the `pr-reviewer` judge | `contents:write` + `pull_requests:write` on pi-cluster | The full chain to a human merge |
 
-**Agent:** `ops-fixer`, Claude via LiteLLM (credits available), with `hot-coder` as fallback, read-only homelab MCP, and
-draft PRs against pi-cluster only.
+**Why `sec-researcher` first:**
+- It needs no Alertmanager wiring. Its triggers are a manual n8n form and `repo.changed`.
+- The 2026-11-09 audit is a ready eval set.
+- Its first real findings (no NetworkPolicies, no required checks, the `mcp-homelab` SA) are the prerequisites for
+  slice 3, so the system's first output is its own hardening backlog.
 
-**Judge:** the existing **review-hub** plus the existing **drift gate**, with no new judge code. The only judge change is
-that the rollup becomes a **required check** on pi-cluster `main`. The agentic `pr-reviewer` is slice 2.
-
-**Phase 0, shadow (1 week).** Same everything, except that the agent's token is `contents:read` only. It writes its
-proposed diff and diagnosis to the run artifact and posts them to the Matrix thread, and opens no PR. Matt reads ~5 of
-these before anything can push.
-
-### Work items, smallest set
+### Slice 1 work items
 
 | # | Where | What | Reuses |
 |---|---|---|---|
-| 1 | pi-cluster | **Required checks + CODEOWNERS on `main`**: review-hub rollup, drift gate, 1 CODEOWNER approval. Keep the Flux deploy-key bypass. | review-hub rollup (exists), drift gate (exists) |
+| 1 | GitHub (human) | Create private `mtgibbs/homelab-ops` with the issue template and labels. Create the `agentq-bot` App (issues RW, contents RW, PRs RW; **no** admin, no bypass). Install on `homelab-ops` and `pi-cluster`. Key into 1Password. | `review-hub` App as the pattern |
 | 2 | pi-cluster | `agentq` namespace: PSA restricted, `default-deny` + `agent-default` NetworkPolicies, `agentq-run` SA with no RBAC and no automount, ResourceQuota 2, LimitRange, node label | `harness-fleet` scaffolding as the template |
-| 3 | jig | Dispatcher v0.2: accept `{agent, event}` alongside `{strategy}`; load `agents/*.yaml` from a mounted ConfigMap; render the hardened Job from the manifest; mint per-run GitHub App and LiteLLM tokens into an owner-referenced Secret; Job watch → result callback; `AGENTQ_PAUSED`. Keeps the strategy path for the build loop. | dispatcher 0.1.2, its ledger, idempotency, entrypoint unset-after-read pattern |
-| 4 | jig | `agent-runtime-claude` image: `harness-base` + Claude Code CLI + `agent-run` wrapper (renders the prompt from the envelope, enforces the tools allowlist via `--allowedTools`, writes `result/v1`). This also sidesteps jig#132 for this path. | `harness-base`, `build-images.yml` smoke |
-| 5 | pi-cluster | `agents/ops-fixer.yaml` + `agents-lint` CI (deterministic). Mark `agents/` and `.github/` CODEOWNER = Matt. | drift-gate workflow shape |
-| 6 | n8n | `agentq-alertmanager` adapter + `agentq-router` workflows (JSON in Git); `agentq_events`/`agentq_chains`/`agentq_runs` tables; dispatch token as an n8n credential *sourced from ESO env*, not hand-typed | queue mode, Postgres, the inbound-mail park/drain pattern |
-| 7 | monitoring | Alertmanager: a new receiver **appended after `receivers[2]`** (the healthchecks `targetPath` index) + a route for the one allowlisted alertname, `continue: true` so Discord still fires | existing Alertmanager config |
-| 8 | Beelink / laptop | GitHub App `agentq-writer` (installed on pi-cluster only, to start); LiteLLM `anthropic` alias + Anthropic key via ESO; an `agentq` LiteLLM team with `max_budget`; a `homelab-readonly` MCP key. **Human-only steps: `op`, App creation.** | `ghcr-pull-secret`, ESO, the `review-hub` App as the pattern |
-| 9 | — | Positive controls: induce the alert on a test Kustomization → expect a shadow diagnosis; send a duplicate → expect a no-op; flip `AGENTQ_PAUSED` → expect parked; give the agent a `paths_deny` bait → expect `agents-lint` red | *green is not proof*; two-direction gate validation |
+| 3 | jig | Dispatcher v0.2: accept `{agent, event}` alongside `{strategy}`; load `agents/*.yaml` from a mounted ConfigMap; render the hardened Job; mint the narrowed App token and the LiteLLM key into an owner-referenced Secret; Job watch → result callback; `AGENTQ_PAUSED`. The strategy path is untouched. | dispatcher 0.1.2, its ledger and idempotency, the entrypoint's unset-after-read pattern |
+| 4 | jig | `agent-runtime-claude` image: `harness-base` + Claude Code CLI + the `agent-run` wrapper (renders the prompt from the envelope, enforces the tools allowlist, validates `plan/v1` / `result/v1` before anything is posted). Sidesteps jig#132 for this path. | `harness-base`, `build-images.yml` smoke |
+| 5 | pi-cluster | `agents/sec-researcher.yaml`, the `agents-lint` CI check, CODEOWNERS for `agents/` and `.github/` | drift-gate workflow shape |
+| 6 | pi-cluster | `specs/agents/sec-researcher/eval/`: seeded known-bad manifests from the audit, expected fingerprints, a score script | `specs/validators/*/eval` layout |
+| 7 | n8n | `agentq-router` + a manual-trigger form + the `agentq-flux` adapter; `agentq_events` / `agentq_chains` / `agentq_runs` tables; the dispatch token from ESO env | queue mode, Postgres |
+| 8 | pi-cluster | Flux `Provider` (generic-hmac → n8n) + `Alert` on GitRepository revisions | `flux-notifications/` |
+| 9 | Beelink (human + ansible PR) | LiteLLM: Anthropic key via the existing secret path, an `anthropic/*` alias, an `agentq` team with `max_budget`, a key that may mint under that team only | virtual-key mechanics |
+| 10 | — | Positive controls, each seen red once: the eval set (recall); a duplicate event (no second run); a re-run (updates, doesn't duplicate); an `accepted-risk` finding (not re-raised); `AGENTQ_PAUSED` (parked); a Job trying a LAN address (blocked) | *green is not proof* |
 
-**Explicitly not in slice 1:**
-- the agentic `pr-reviewer`;
-- the `pr.*` forward from review-hub;
-- Flux and Matrix adapters;
-- the squid domain allowlist;
-- artifact store beyond the coordinator's 1 MiB push;
-- the n8n workflow-sync Job (import the two workflows by hand once and record their hashes).
+**Done for slice 1:** a merge touching RBAC produces at most 5 deduped plan issues in `homelab-ops` from a sandboxed
+Job, with spend in the ledger, and every control in item 10 has gone red once.
 
-**Done for slice 1:** an induced alert produces a draft PR from `agentq-writer`, the required checks run on it, Matt
-merges or rejects it, the chain closes in the ledger with spend recorded, and every positive control in item 9 has gone
-red once.
+**Slice 2 adds:** the Alertmanager and Uptime Kuma emitter changes, the `agentq-alertmanager` / `agentq-kuma` adapters,
+`agents/ops-investigator.yaml`, a Loki read path in the egress profile, resolve → close/cancel, and the alert denylist.
+
+**Slice 3 adds:** required checks + CODEOWNERS on pi-cluster `main` (the prerequisite), `issues` events in the
+review-hub receiver with the sender allowlist, `agents/ops-fixer.yaml`, `agents/pr-reviewer.yaml`, and the rollup
+covering agent judges.
+
+**Deferred past slice 3:** the squid domain allowlist, the n8n workflow-sync Job, `bug-researcher`, an artifact store
+beyond the coordinator's 1 MiB push, the Matrix adapter.
 
 ---
 
@@ -577,16 +672,21 @@ n8n.
 
 ## 7. Open questions for Matt
 
-1. **Claude spend path and caps.** Should the Anthropic key live only in LiteLLM, with per-run virtual keys carrying
-   `max_budget` (recommended), or should each agent role get its own Anthropic workspace key? And what are the numbers:
-   the per-run cap and the daily agentq team cap?
-2. **Required checks on pi-cluster `main`.** Turning on the review-hub rollup + drift gate + 1 CODEOWNER approval is the
-   prerequisite that makes the human checkpoint structural rather than a habit. OK to do that first, as its own PR, with
-   the Flux deploy-key bypass kept?
-3. **Fixer write scope.** Should the agentq fixer be **denied** `.github/**`, `flux-system/**` and ExternalSecrets?
-   (Recommended. It's the opposite of the fleet's OQ1, where build workers got Workflows: write.) Should it start with a
-   one-week shadow phase (no PRs), or open draft PRs from day one?
-4. **Node placement.** Run agentq Jobs on pi5-worker-2 alongside n8n, the exit node and the MCPs, or dedicate and taint a
+Decided in conversation (2026-11-10/11), recorded so they aren't re-asked:
+- Emitters post to n8n directly; Discord is a read-only feed.
+- Investigation is automatic and read-only; a fix starts from an approved plan.
+- Claude API credits are available, so Claude is a first-class model choice.
+
+Still open:
+1. **The plans repo.** Create a private `mtgibbs/homelab-ops` for plan issues (recommended; pi-cluster is public), and is
+   an issue label the approval gesture you want, or would you rather approve from ntfy?
+2. **Claude spend caps.** The Anthropic key lives only in LiteLLM and each run gets a capped virtual key. What per-run
+   cap and what daily cap for the `agentq` team?
+3. **Slice order.** `sec-researcher` first, then the alert investigator, then the fixer (recommended), or the alert
+   investigator first?
+4. **Required checks on pi-cluster `main`.** Review-hub rollup + drift gate + 1 CODEOWNER approval, with the Flux
+   deploy-key bypass kept. It is the prerequisite for slice 3. OK to land it early, as its own PR?
+5. **Node placement.** Run agentq Jobs on pi5-worker-2 alongside n8n, the exit node and the MCPs, or dedicate and taint a
    node for agents?
-5. **Where the dispatcher grows.** Extend the jig dispatcher with an agent path (recommended: one Job-creating identity
+6. **Where the dispatcher grows.** Extend the jig dispatcher with an agent path (recommended: one Job-creating identity
    in the cluster), or stand up a separate agentq dispatcher so the build-loop fleet stays untouched?
