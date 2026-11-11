@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_41 services · 72 workloads · 41 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_41 services · 72 workloads · 42 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -45,13 +45,15 @@ _What must reconcile before what. An arrow A → B means A deploys before B._
 
 ```mermaid
 graph LR
+  k88ev2t["agents"]
+  k1unc8vb["external-secrets-config"]
+  k1unc8vb --> k88ev2t
   k4urrac["atlas"]
   kkuvy6m["ingress"]
   kkuvy6m --> k4urrac
   k19g0j44["cert-manager-config"]
   k19g0j44 --> k4urrac
   kwoyrdm["backup-jobs"]
-  k1unc8vb["external-secrets-config"]
   k1unc8vb --> kwoyrdm
   kfd8pog["pihole"]
   kfd8pog --> kwoyrdm
@@ -173,7 +175,7 @@ _Per service: what it runs (🔒priv = private image), needs (creds → `secrets
 
 _Images are listed **without tags** on purpose — this map is topology, and the deployed version is a property of the cluster, not of this repo. Read the live tag with `get_flux_status` / `describe_resource`. (Tags here made every bot image bump a map change, and image-automation pushes bypass the PR gate that regenerates it, so unrelated PRs inherited a red `drift`.)_
 
-### agents
+### agents  ·  Flux: `agents` (after: `external-secrets-config`)
 - **Deployment/agent-runner** — `ghcr.io/mtgibbs/agent-runner` 🔒priv
   - creds: `agent-runner`  _(→ secrets-map.md)_
   - storage: `agent-runner-ledger`

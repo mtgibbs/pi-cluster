@@ -14,6 +14,11 @@ n8n ──POST /runs──▶ agent-runner (Deployment) ──creates──▶ J
                                                                          └─▶ allowlisted MCP tools
 ```
 
+> **Status, 2026-11-11:** activated. Checklist steps 1, 2 and 4–6 are done: the 1Password fields exist, both
+> images are built and public, and the Kustomization is registered as entry 37. Step 3 (a `claude-haiku`
+> alias) is not done, so the agent runs on `hot-coder` only. Step 7's n8n import and step 8's live checks
+> remain. The section below is kept as the record of why it landed inert first.
+
 ## This directory is inert, on purpose
 
 **It is NOT registered in `clusters/pi-k3s/flux-system/infrastructure.yaml`.** Like `harness-fleet`
