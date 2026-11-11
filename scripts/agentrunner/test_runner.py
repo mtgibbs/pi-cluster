@@ -680,6 +680,290 @@ def test_watch_thread_polls_until_done(env):
     assert env.posts and env.posts[0][1]["exit_reason"] == "completed"
 
 
+# ------------------------------------------------------------------ concurrency gate + FIFO queue
+
+def ids(env):
+    return [j["metadata"]["labels"]["run-id"] for j in env.kube.created]
+
+
+def finish(env, rid, runner=None):
+    env.kube.logs[rid] = encode_result(GOOD)
+    env.kube.set_condition(rid, "Complete")
+    assert (runner or env.runner).poll_once(rid) is True
+
+
+def burst(env, n):
+    out = []
+    for i in range(n):
+        status, body = submit(env, ev=event(f"burst{i}"))
+        assert status == 202, body
+        out.append(body)
+    return out
+
+
+@pytest.fixture
+def qenv(env):
+    """The burst scenario: generous daily cap, default gate (2 concurrent, 8 queued, 45m wait)."""
+    d = copy.deepcopy(MANIFEST)
+    d["limits"]["runs_per_day"] = 50
+    write_manifest(env, d)
+    assert (env.cfg.max_concurrent, env.cfg.max_queue, env.cfg.max_queue_wait_s) == (2, 8, 2700)
+    return env
+
+
+def test_gate_defaults_from_env():
+    cfg = rmod.Config.from_env({})
+    assert (cfg.max_concurrent, cfg.max_queue, cfg.max_queue_wait_s) == (2, 8, 2700)
+    cfg = rmod.Config.from_env({"RUNNER_MAX_CONCURRENT": "3", "RUNNER_MAX_QUEUE": "0",
+                                "RUNNER_MAX_QUEUE_WAIT": "10m"})
+    assert (cfg.max_concurrent, cfg.max_queue, cfg.max_queue_wait_s) == (3, 0, 600)
+
+
+def test_burst_creates_only_max_concurrent_jobs(qenv):
+    bodies = burst(qenv, qenv.cfg.max_concurrent + 3)
+    assert len(qenv.kube.created) == 2
+    assert [b["status"] for b in bodies] == ["launched"] * 2 + ["queued"] * 3
+    assert [b.get("position") for b in bodies[2:]] == [1, 2, 3]
+    queued = bodies[2]["run_id"]
+    status, rec = call(qenv, "GET", f"/runs/{queued}")
+    assert status == 200 and rec["status"] == "queued" and rec["position"] == 1
+    assert "started" not in rec and rec["accepted"] == "2026-11-11T12:00:00Z"
+    # No Job object at all for a queued run: nothing for the Job controller's deadline to count.
+    assert f"run-{queued}" not in qenv.kube.jobs
+
+
+def test_freed_slot_starts_next_in_fifo_order(qenv):
+    bodies = burst(qenv, 5)
+    rids = [b["run_id"] for b in bodies]
+    finish(qenv, rids[1])                 # second-launched finishes first
+    assert ids(qenv) == rids[:3]          # head of the queue (3rd accepted) starts, not a later one
+    finish(qenv, rids[0])
+    assert ids(qenv) == rids[:4]
+    finish(qenv, rids[2])
+    assert ids(qenv) == rids
+    assert call(qenv, "GET", f"/runs/{rids[4]}")[1]["status"] == "launched"
+    # A queued run's Job gets its event from the spool, intact.
+    env_ = {x["name"]: x["value"] for x in qenv.kube.created[4]["spec"]["template"]["spec"]
+            ["containers"][0]["env"]}
+    assert json.loads(env_["AGENT_EVENT"]) == event("burst4")
+    assert list((Path(qenv.cfg.ledger_path).parent / "queue").iterdir()) == []
+
+
+def test_new_submit_waits_behind_queue_even_if_slot_free(qenv):
+    bodies = burst(qenv, 3)
+    qenv.kube.jobs[f"run-{bodies[0]['run_id']}"]["status"] = {"conditions": [
+        {"type": "Complete", "status": "True", "lastTransitionTime": "2026-11-11T12:05:00Z"}]}
+    # Slot is free in Kubernetes but the runner has not polled yet; the queue head goes first.
+    finish(qenv, bodies[0]["run_id"])
+    s, b = submit(qenv, ev=event("late"))
+    assert s == 202 and b["status"] == "queued"
+    assert ids(qenv) == [bodies[0]["run_id"], bodies[1]["run_id"], bodies[2]["run_id"]]
+
+
+def test_queue_full_429_distinct_from_daily_cap(qenv):
+    burst(qenv, 2 + 8)
+    status, body = submit(qenv, ev=event("overflow"))
+    assert status == 429 and body["error"] == "queue_full"
+    assert len(qenv.kube.created) == 2
+    # Refused: not recorded, does not claim the idempotency key, does not count toward the cap.
+    assert qenv.runner.ledger.find("media-investigator", "overflow") is None
+    assert qenv.runner.ledger.count_on_day("media-investigator", "2026-11-11") == 10
+    # The daily-cap body is unchanged.
+    d = copy.deepcopy(MANIFEST)
+    d["limits"]["runs_per_day"] = 10
+    write_manifest(qenv, d)
+    status, body = submit(qenv, ev=event("capped"))
+    assert status == 429 and body["error"] == "daily cap of 10 runs reached"
+
+
+def test_max_queue_zero_refuses_beyond_concurrency(qenv):
+    qenv.cfg.max_queue = 0
+    burst(qenv, 2)
+    status, body = submit(qenv, ev=event("x"))
+    assert (status, body["error"]) == (429, "queue_full")
+
+
+def test_queue_expired_sends_callback(qenv):
+    bodies = burst(qenv, 4)
+    qenv.clock.t = NOW + timedelta(minutes=45)
+    assert qenv.runner.expire_queued() == []          # not yet: strictly more than the wait
+    qenv.clock.t = NOW + timedelta(minutes=45, seconds=1)
+    expired = qenv.runner.expire_queued()
+    assert expired == [bodies[2]["run_id"], bodies[3]["run_id"]]
+    assert len(qenv.posts) == 2
+    url, p = qenv.posts[0]
+    assert url == CB + "abc"
+    assert set(p) == {"run_id", "agent", "event_id", "started", "finished", "exit_reason", "result"}
+    assert p["exit_reason"] == "queue_expired" and p["started"] is None
+    assert p["event_id"] == "burst2" and p["result"]["outcome"] == "failed"
+    assert p["result"]["outputs"] == [] and "45 minutes" in p["result"]["summary"]
+    rec = qenv.runner.ledger.get(bodies[2]["run_id"])
+    assert rec["status"] == "finished" and rec["exit_reason"] == "queue_expired"
+    assert rec["callback_delivered"] is True
+    # Expired runs never start, even when slots free up afterwards.
+    finish(qenv, bodies[0]["run_id"])
+    assert len(qenv.kube.created) == 2
+    # The dedupe key is still held: a replay returns the finished record, not a new run.
+    s, b = submit(qenv, ev=event("burst2"))
+    assert s == 200 and b["exit_reason"] == "queue_expired"
+
+
+def test_timeout_counts_from_job_creation_not_accept(qenv):
+    bodies = burst(qenv, 3)
+    queued = bodies[2]["run_id"]
+    qenv.clock.t = NOW + timedelta(minutes=30)       # waited 30 minutes for a slot
+    finish(qenv, bodies[0]["run_id"])
+    assert ids(qenv)[-1] == queued
+    rec = qenv.runner.ledger.get(queued)
+    assert rec["started"] == "2026-11-11T12:30:00Z" and rec["accepted"] == "2026-11-11T12:00:00Z"
+    assert qenv.kube.created[-1]["spec"]["activeDeadlineSeconds"] == 900
+    # Accept + timeout + grace has passed, but Job creation + timeout + grace has not: still running.
+    qenv.clock.t = NOW + timedelta(minutes=30, seconds=900 + rmod.DEADLINE_GRACE_S - 1)
+    assert qenv.runner.poll_once(queued) is False
+    assert qenv.kube.deleted == []
+    qenv.clock.t = NOW + timedelta(minutes=30, seconds=900 + rmod.DEADLINE_GRACE_S + 1)
+    assert qenv.runner.poll_once(queued) is True
+    assert qenv.kube.deleted == [f"run-{queued}"]
+    assert qenv.posts[-1][1]["started"] == "2026-11-11T12:30:00Z"
+
+
+def test_daily_cap_counts_queued_runs_at_accept(env):
+    # MANIFEST cap is 3: 2 launch, 1 queues, the 4th is the daily cap even though only 2 ran.
+    burst(env, 3)
+    status, body = submit(env, ev=event("over"))
+    assert status == 429 and "daily cap" in body["error"]
+
+
+def test_queued_run_replay_returns_queued_record(qenv):
+    bodies = burst(qenv, 3)
+    s, b = submit(qenv, ev=event("burst2"))
+    assert s == 200 and b["run_id"] == bodies[2]["run_id"] and b["status"] == "queued"
+    assert len(qenv.runner.queue) == 1
+
+
+def test_quota_refusal_on_dequeue_keeps_run_at_head(qenv):
+    bodies = burst(qenv, 4)
+    qenv.kube.create_error = KubeError(403, "exceeded quota: agents")
+    finish(qenv, bodies[0]["run_id"])
+    assert len(qenv.kube.created) == 2
+    assert list(qenv.runner.queue) == [bodies[2]["run_id"], bodies[3]["run_id"]]
+    rec = qenv.runner.ledger.get(bodies[2]["run_id"])
+    assert rec["status"] == "queued" and rec.get("started") is None
+    qenv.kube.create_error = None
+    qenv.runner.tick()
+    assert ids(qenv)[-1] == bodies[2]["run_id"]
+
+
+def test_other_kube_error_on_dequeue_fails_that_run_with_callback(qenv):
+    bodies = burst(qenv, 3)
+    qenv.kube.create_error = KubeError(403, "forbidden: RBAC")
+    finish(qenv, bodies[0]["run_id"])
+    p = qenv.posts[-1][1]
+    assert p["run_id"] == bodies[2]["run_id"] and p["exit_reason"] == "job_failed"
+    assert "kubernetes API error 403" in p["result"]["summary"]
+    assert list(qenv.runner.queue) == []
+
+
+def test_manifest_removed_while_queued_fails_run(qenv):
+    bodies = burst(qenv, 3)
+    (qenv.mdir / "media-investigator.yaml").unlink()
+    finish(qenv, bodies[0]["run_id"])
+    p = qenv.posts[-1][1]
+    assert p["run_id"] == bodies[2]["run_id"] and p["exit_reason"] == "job_failed"
+
+
+def test_paused_runner_does_not_start_queued_runs(qenv):
+    bodies = burst(qenv, 3)
+    qenv.cfg.paused = True
+    finish(qenv, bodies[0]["run_id"])
+    assert len(qenv.kube.created) == 2
+    qenv.clock.t = NOW + timedelta(minutes=46)
+    assert qenv.runner.expire_queued() == [bodies[2]["run_id"]]
+
+
+def test_queue_survives_restart_in_fifo_order(qenv):
+    bodies = burst(qenv, 5)
+    rids = [b["run_id"] for b in bodies]
+    # The ledger stays identifiers-only even with runs queued; the event is in the spool.
+    assert SENTINEL not in Path(qenv.cfg.ledger_path).read_text()
+    r2 = rmod.Runner(qenv.cfg, qenv.kube, Ledger(qenv.cfg.ledger_path),
+                     post=lambda u, p: qenv.posts.append((u, p)) or 200,
+                     now=qenv.clock, sleep=lambda s: None, spawn_watchers=False)
+    assert r2.readopt() == rids[:2]
+    assert list(r2.queue) == rids[2:]
+    assert call(qenv, "GET", f"/runs/{rids[3]}")[1]["status"] == "queued"
+    finish(qenv, rids[0], runner=r2)
+    assert ids(qenv) == rids[:3]
+    env_ = {x["name"]: x["value"] for x in qenv.kube.created[2]["spec"]["template"]["spec"]
+            ["containers"][0]["env"]}
+    assert json.loads(env_["AGENT_EVENT"]) == event("burst2")
+    # Queue wait is measured from the ORIGINAL accept, across the restart.
+    qenv.clock.t = NOW + timedelta(minutes=46)
+    assert r2.expire_queued() == rids[3:]
+
+
+def test_restart_prunes_orphan_spool_and_fails_lost_event(qenv):
+    bodies = burst(qenv, 3)
+    spool = Path(qenv.cfg.ledger_path).parent / "queue"
+    (spool / "orphan123.json").write_text("{}")
+    (spool / f"{bodies[2]['run_id']}.json").unlink()   # event lost (e.g. volume restored)
+    r2 = rmod.Runner(qenv.cfg, qenv.kube, Ledger(qenv.cfg.ledger_path),
+                     post=lambda u, p: qenv.posts.append((u, p)) or 200,
+                     now=qenv.clock, sleep=lambda s: None, spawn_watchers=False)
+    r2.readopt()
+    assert not (spool / "orphan123.json").exists()
+    finish(qenv, bodies[0]["run_id"], runner=r2)
+    p = qenv.posts[-1][1]
+    assert p["run_id"] == bodies[2]["run_id"] and p["exit_reason"] == "job_failed"
+    assert "lost" in p["result"]["summary"]
+
+
+def test_concurrent_submits_never_exceed_the_gate(qenv):
+    """Many POSTs from parallel threads (as ThreadingHTTPServer delivers them) must still create exactly max_concurrent Jobs."""
+    real_create = qenv.kube.create_job
+    gate = threading.Event()
+
+    def slow_create(job):            # widen the race window inside the critical section
+        gate.wait(0.002)
+        return real_create(job)
+    qenv.kube.create_job = slow_create
+    results_ = []
+    lock = threading.Lock()
+
+    def one(i):
+        r = submit(qenv, ev=event(f"t{i}"))
+        with lock:
+            results_.append(r)
+    threads = [threading.Thread(target=one, args=(i,)) for i in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    statuses = sorted((s, b.get("status") or b.get("error")) for s, b in results_)
+    assert len(qenv.kube.created) == 2
+    assert statuses.count((202, "launched")) == 2
+    assert statuses.count((202, "queued")) == 8
+    assert statuses.count((429, "queue_full")) == 2
+    assert len(qenv.runner.queue) == 8
+
+
+def test_dispatcher_thread_expires_queued_runs(qenv):
+    done = threading.Event()
+    qenv.runner.sleep = lambda s: done.wait(0.01)
+    bodies = burst(qenv, 3)
+    stop = qenv.runner.start_dispatcher()
+    try:
+        qenv.clock.t = NOW + timedelta(minutes=46)
+        for _ in range(300):
+            if qenv.posts:
+                break
+            done.wait(0.01)
+    finally:
+        stop.set()
+    assert [(p["run_id"], p["exit_reason"]) for _, p in qenv.posts] == [
+        (bodies[2]["run_id"], "queue_expired")]
+
+
 # ------------------------------------------------------------------ process / server
 
 def test_refuses_to_start_without_token(monkeypatch):

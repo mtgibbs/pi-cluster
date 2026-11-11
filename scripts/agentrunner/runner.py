@@ -2,8 +2,9 @@
 """agent-runner — launches one ephemeral, least-privilege Kubernetes Job per (event, agent).
 
 n8n decides *when* (POST /runs); the runner decides *how*: validate the agent manifest + event,
-enforce the kill switch / daily cap / idempotency, render the Job (CONTRACT.md §4), watch it, read
-the agent's Result from the pod log (§5), and POST it to the caller's callback.
+enforce the kill switch / daily cap / idempotency, gate concurrency (at most RUNNER_MAX_CONCURRENT
+Jobs; the rest wait in a bounded FIFO queue), render the Job (CONTRACT.md §4), watch it, read the
+agent's Result from the pod log (§5), and POST it to the caller's callback.
 
 The runner never reads Secrets (it only names the agent's Secret in envFrom) and treats the
 agent's Result purely as data.
@@ -12,6 +13,7 @@ Env (CONTRACT.md §3):
   RUNNER_API_TOKEN (required)  RUNNER_NAMESPACE=agents  RUNNER_MANIFEST_DIR=/etc/agents
   RUNNER_LEDGER_PATH=/data/ledger.jsonl  RUNNER_CALLBACK_PREFIXES  RUNNER_LOCAL_MODELS
   RUNNER_PAUSED  RUNNER_LITELLM_BASE_URL  RUNNER_NODE_HOSTNAMES
+  RUNNER_MAX_CONCURRENT=2  RUNNER_MAX_QUEUE=8  RUNNER_MAX_QUEUE_WAIT=45m
   PORT=8080  RUNNER_POLL_SECONDS=5  (tunables)
 """
 import hmac
@@ -24,6 +26,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,7 +38,7 @@ import agentspec  # noqa: E402
 import jobspec  # noqa: E402
 import results  # noqa: E402
 from kubeapi import KubeClient, KubeError  # noqa: E402
-from ledger import Ledger, utc_iso  # noqa: E402
+from ledger import Ledger, Spool, utc_iso  # noqa: E402
 
 _VFILE = Path(__file__).resolve().parent / "VERSION"
 VERSION = _VFILE.read_text().strip() if _VFILE.exists() else "?"
@@ -74,6 +77,9 @@ class Config:
     node_hostnames: list = field(default_factory=list)
     port: int = 8080
     poll_seconds: float = 5.0
+    max_concurrent: int = 2          # agent Jobs alive at once; resourcequota.yaml pods = this + 1
+    max_queue: int = 8               # runs waiting for a slot; beyond this POST /runs is 429 queue_full
+    max_queue_wait_s: int = 45 * 60  # a run still queued after this ends as exit_reason queue_expired
 
     @classmethod
     def from_env(cls, env):
@@ -91,6 +97,10 @@ class Config:
             node_hostnames=_csv(env.get("RUNNER_NODE_HOSTNAMES")),
             port=int(env.get("PORT", "8080")),
             poll_seconds=float(env.get("RUNNER_POLL_SECONDS", "5")),
+            max_concurrent=max(1, int(env.get("RUNNER_MAX_CONCURRENT", "2"))),
+            max_queue=max(0, int(env.get("RUNNER_MAX_QUEUE", "8"))),
+            max_queue_wait_s=agentspec.parse_duration(
+                (env.get("RUNNER_MAX_QUEUE_WAIT") or "45m").strip()),
         )
 
     def callback_allowed(self, url):
@@ -154,7 +164,12 @@ class Runner:
         self.now = now
         self.sleep = sleep
         self.spawn_watchers = spawn_watchers
+        # admit_lock serialises every admission decision AND every queue/slot change: the
+        # dedupe/cap/slot checks and the Job create happen under it, so two concurrent POSTs (or a
+        # POST racing a watcher that just freed a slot) can never both take the last slot.
         self.admit_lock = threading.Lock()
+        self.queue = deque()  # run_ids waiting for a slot, FIFO; guarded by admit_lock
+        self.spool = Spool(Path(cfg.ledger_path).parent / "queue")
         self._watching = set()
         self._watch_lock = threading.Lock()
 
@@ -183,7 +198,12 @@ class Runner:
         if method == "GET" and path.startswith("/runs/"):
             rid = path[len("/runs/"):]
             rec = self.ledger.get(rid) if RUN_ID_RE.match(rid) else None
-            return (200, rec) if rec else (404, {"error": "unknown run"})
+            if not rec:
+                return 404, {"error": "unknown run"}
+            if rec.get("status") == "queued":
+                with self.admit_lock:
+                    rec["position"] = (self.queue.index(rid) + 1) if rid in self.queue else None
+            return 200, rec
         return 404, {"error": "not found"}
 
     # ---------------------------------------------------------------- admission
@@ -228,14 +248,33 @@ class Runner:
                 return 429, {"error": f"daily cap of {cap} runs reached"}
 
             run_id = uuid.uuid4().hex[:16]
+            # FIFO: a free slot is only taken directly when nobody is already waiting for one.
+            if self.queue or self.ledger.count_launched() >= self.cfg.max_concurrent:
+                if len(self.queue) >= self.cfg.max_queue:
+                    jlog("rejected", agent=agent, event_id=event["id"], reason="queue_full",
+                         queued=len(self.queue))
+                    return 429, {"error": "queue_full",
+                                 "detail": f"{len(self.queue)} runs already waiting for a slot"}
+                # Spool first: a crash before the ledger line leaves an orphan file (pruned on
+                # start), never a queued ledger record with no event.
+                self.spool.save(run_id, {"event": event})
+                self.ledger.append(
+                    "queue", run_id, agent=agent, event_id=event["id"], event_type=event["type"],
+                    event_subject=event["subject"], callback=callback, accepted=utc_iso(now))
+                self.queue.append(run_id)
+                position = len(self.queue)
+                jlog("queued", run_id=run_id, agent=agent, event_id=event["id"],
+                     event_type=event["type"], subject=event["subject"], position=position)
+                return 202, {"run_id": run_id, "status": "queued", "position": position}
+
             job = jobspec.render_job(run_id, manifest, event, timeout_s, self.cfg.namespace,
                                      self.cfg.litellm_base_url, self.cfg.node_hostnames)
             # Ledger first: a crash between this line and the create is re-adopted on restart
             # (Job 404 -> job_failed), never silently lost or launched twice.
             self.ledger.append(
                 "launch", run_id, agent=agent, event_id=event["id"], event_type=event["type"],
-                event_subject=event["subject"], callback=callback, started=utc_iso(now),
-                timeout_s=timeout_s, job=jobspec.job_name(run_id),
+                event_subject=event["subject"], callback=callback, accepted=utc_iso(now),
+                started=utc_iso(now), timeout_s=timeout_s, job=jobspec.job_name(run_id),
                 allowed_outputs=list(manifest["outputs"]))
             try:
                 self.kube.create_job(job)
@@ -255,6 +294,144 @@ class Runner:
              event_type=event["type"], subject=event["subject"], timeout_s=timeout_s)
         self.watch(run_id)
         return 202, {"run_id": run_id, "status": "launched"}
+
+    # ---------------------------------------------------------------- queue
+    def pump(self):
+        """Start queued runs, head first, while a slot is free. Safe from any thread."""
+        started, failed = [], []
+        with self.admit_lock:
+            while (self.queue and not self.cfg.paused
+                   and self.ledger.count_launched() < self.cfg.max_concurrent):
+                rid = self.queue[0]
+                outcome, why = self._start_queued(rid)
+                if outcome == "retry":
+                    break  # head stays at the head; the next tick tries again
+                self.queue.popleft()
+                if outcome == "launched":
+                    started.append(rid)
+                elif outcome == "failed":
+                    failed.append((rid, why))
+        for rid in started:
+            self.watch(rid)
+        # Delivery retries sleep, so they run outside the lock.
+        for rid, why in failed:
+            run = self.ledger.get(rid)
+            if run:
+                self.finish_unstarted(run, "job_failed", why)
+        return started
+
+    def _start_queued(self, rid):
+        """Create the Job for queued run `rid`. Caller holds admit_lock.
+        ("launched"|"failed"|"retry"|"gone", reason)."""
+        run = self.ledger.get(rid)
+        if not run or run.get("status") != "queued":
+            return "gone", None
+        agent = run.get("agent")
+        doc = self.spool.load(rid)
+        event = (doc or {}).get("event")
+        if not isinstance(event, dict):
+            jlog("start_failed", run_id=rid, agent=agent, reason="spool_missing")
+            return "failed", "the queued event was lost before the run could start"
+        # The manifest is re-read now, not at accept: what runs is what is deployed when it starts
+        # (a removed or broken manifest stops queued runs too).
+        try:
+            manifest, timeout_s = agentspec.load_manifest(
+                self.cfg.manifest_dir, agent, self.cfg.local_models)
+        except (agentspec.AgentNotFound, agentspec.ManifestError) as e:
+            jlog("start_failed", run_id=rid, agent=agent, reason="manifest")
+            return "failed", f"agent manifest no longer loads: {str(e)[:300] or 'not found'}"
+        now = self.now()
+        job = jobspec.render_job(rid, manifest, event, timeout_s, self.cfg.namespace,
+                                 self.cfg.litellm_base_url, self.cfg.node_hostnames)
+        # `started` is set HERE, at Job creation: the run's deadline counts from now, not accept.
+        self.ledger.append("launch", rid, started=utc_iso(now), timeout_s=timeout_s,
+                           job=jobspec.job_name(rid), allowed_outputs=list(manifest["outputs"]))
+        try:
+            self.kube.create_job(job)
+        except KubeError as e:
+            if not e.quota_exceeded:
+                jlog("start_failed", run_id=rid, agent=agent, status=e.status)
+                return "failed", f"could not create the Job: kubernetes API error {e.status}"
+            self.ledger.append("requeue", rid, started=None, error=f"kubernetes {e.status}")
+            jlog("start_deferred", run_id=rid, agent=agent, reason="quota")
+            return "retry", None
+        except Exception as e:  # noqa: BLE001 — transport blip: keep it queued, retry next tick
+            self.ledger.append("requeue", rid, started=None, error=type(e).__name__)
+            jlog("start_deferred", run_id=rid, agent=agent, error=type(e).__name__)
+            return "retry", None
+        self.spool.delete(rid)
+        jlog("launched", run_id=rid, agent=agent, event_id=run.get("event_id"),
+             event_type=run.get("event_type"), subject=run.get("event_subject"),
+             timeout_s=timeout_s, queued_since=run.get("accepted"))
+        return "launched", None
+
+    def expire_queued(self):
+        """Finish every run queued longer than max_queue_wait_s with exit_reason queue_expired."""
+        now = self.now()
+        limit = timedelta(seconds=self.cfg.max_queue_wait_s)
+        expired = []
+        with self.admit_lock:
+            for rid in list(self.queue):
+                run = self.ledger.get(rid)
+                accepted = _parse_ts((run or {}).get("accepted"))
+                if run is None or (accepted and now - accepted > limit):
+                    self.queue.remove(rid)
+                    if run:
+                        expired.append(run)
+        for run in expired:
+            mins = self.cfg.max_queue_wait_s // 60
+            self.finish_unstarted(
+                run, "queue_expired",
+                f"not started: still waiting for a free agent slot after {mins} minutes "
+                f"(at most {self.cfg.max_concurrent} agents run at once)")
+        return [r["run_id"] for r in expired]
+
+    def tick(self):
+        """One dispatcher step: expire stale queued runs, then fill free slots."""
+        self.expire_queued()
+        self.pump()
+
+    def restore_queue(self):
+        """On start: rebuild the in-memory FIFO from the ledger's queued runs (accept order)."""
+        runs = self.ledger.queued()
+        with self.admit_lock:
+            self.queue = deque(r["run_id"] for r in runs)
+            pruned = self.spool.prune(set(self.queue))
+        for rid in pruned:
+            jlog("spool_pruned", run_id=rid)
+        return [r["run_id"] for r in runs]
+
+    def start_dispatcher(self, stop=None):
+        """Background tick every poll_seconds (queue expiry; retries after a deferred start).
+        Slots freed by a finishing run are refilled at once by finalize(), not by this loop."""
+        stop = stop or threading.Event()
+
+        def loop():
+            while not stop.is_set():
+                try:
+                    self.tick()
+                except Exception as e:  # noqa: BLE001 — never let the dispatcher die
+                    jlog("dispatch_error", error=type(e).__name__)
+                self.sleep(self.cfg.poll_seconds)
+        threading.Thread(target=loop, daemon=True, name="dispatcher").start()
+        return stop
+
+    def finish_unstarted(self, run, exit_reason, why):
+        """End a run that never got a Job: send the normal callback (failed Result), then record."""
+        run_id = run["run_id"]
+        finished = utc_iso(self.now())
+        result = results.failed_result(f"{exit_reason}: {why}")
+        payload = {"run_id": run_id, "agent": run.get("agent"), "event_id": run.get("event_id"),
+                   "started": None, "finished": finished,
+                   "exit_reason": exit_reason, "result": result}
+        delivered, attempts = self.deliver(run.get("callback"), payload, run_id)
+        self.ledger.append("finished", run_id, finished=finished, exit_reason=exit_reason,
+                           outcome=result["outcome"], output_kinds=[],
+                           callback_delivered=delivered, callback_attempts=attempts)
+        self.spool.delete(run_id)
+        jlog("finished", run_id=run_id, agent=run.get("agent"), exit_reason=exit_reason,
+             outcome=result["outcome"], callback_delivered=delivered, attempts=attempts)
+        return payload
 
     # ---------------------------------------------------------------- watching
     def watch(self, run_id):
@@ -281,11 +458,13 @@ class Runner:
                 self._watching.discard(run_id)
 
     def readopt(self):
-        """On start: resume watching every run the ledger shows as launched but not finished."""
+        """On start: resume watching every run the ledger shows as launched but not finished, and
+        rebuild the queue (its events are in the spool). Returns the re-adopted launched runs."""
         runs = self.ledger.unfinished()
         for r in runs:
             jlog("readopt", run_id=r["run_id"], agent=r.get("agent"))
             self.watch(r["run_id"])
+        self.restore_queue()
         return [r["run_id"] for r in runs]
 
     def poll_once(self, run_id):
@@ -352,6 +531,7 @@ class Runner:
                            callback_delivered=delivered, callback_attempts=attempts)
         jlog("finished", run_id=run_id, agent=run.get("agent"), exit_reason=exit_reason,
              outcome=result["outcome"], callback_delivered=delivered, attempts=attempts)
+        self.pump()  # a slot just freed
         return payload
 
     def deliver(self, url, payload, run_id):
@@ -420,7 +600,10 @@ def main():
     runner = Runner(cfg, KubeClient(cfg.namespace), Ledger(cfg.ledger_path))
     adopted = runner.readopt()
     jlog("started", version=VERSION, port=cfg.port, namespace=cfg.namespace,
-         paused=cfg.paused, readopted=len(adopted))
+         paused=cfg.paused, readopted=len(adopted), queued=len(runner.queue),
+         max_concurrent=cfg.max_concurrent, max_queue=cfg.max_queue,
+         max_queue_wait_s=cfg.max_queue_wait_s)
+    runner.start_dispatcher()
     make_server(runner, port=cfg.port).serve_forever()
 
 

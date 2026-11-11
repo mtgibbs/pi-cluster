@@ -238,7 +238,7 @@ One Job per run, in an `agents` namespace.
 | Workspace | An `emptyDir` with a size limit. Gone when the Job is. |
 | Lifetime | The manifest's timeout as a hard deadline. No automatic retries. Cleaned up an hour after finishing. |
 | Network | Default deny. Allowed: DNS, the model gateway, and exactly the manifest's connectors. Agents that need the internet (GitHub) get public `443` with every private address range blocked, so **no agent can reach the LAN**. |
-| Capacity | A namespace quota of 2 concurrent Jobs. The runner answers "busy"; n8n retries. |
+| Capacity | A namespace quota of 2 concurrent Jobs as the backstop. *As built (runner 0.2.0):* the runner gates itself to 2 Jobs and holds further runs in a bounded FIFO queue (no Job until a slot frees, so the deadline starts at launch); a full queue answers 429 `queue_full`, a run queued 45m ends `queue_expired`. n8n does not retry. See `scripts/agentrunner/CONTRACT.md` §7a. |
 | Placement | The Pi 5 workers. Never the Pi 3 or the master. An agent needs roughly 0.5–1 GiB, so no dedicated node is needed. |
 
 ### 5.3 Credentials

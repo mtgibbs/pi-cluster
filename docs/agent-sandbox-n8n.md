@@ -106,6 +106,12 @@ ledger (`GET /runs/<run_id>`).
 Keep the Wait limit (30 min) comfortably above every manifest's `limits.timeout` (media-investigator: 15m)
 plus Job start-up time. If a manifest's timeout goes up, raise the Wait limit with it.
 
+**Known gap since runner 0.2.0 (burst queue):** a manual run can now answer 202 `"status":"queued"` and wait up
+to `RUNNER_MAX_QUEUE_WAIT` (45m) for a slot before its 15m deadline starts, so this 30-minute Wait can give up
+(`callback_timeout` row) on a run that later completes; its result is then only in `GET /runs/<run_id>`. The
+manual workflow was deliberately left unchanged (it is live). To close the gap, raise its Wait to 75 minutes as
+`agent-alert.json` does and re-import it.
+
 ## The "Run agent" recipe (copy into any workflow)
 
 Three steps. Everything before step 1 just has to produce `{agent, event}`.
@@ -245,7 +251,9 @@ Negative:
 
 **Status:** 2026-11-11 — written and unit-tested offline, **not imported**. `agent-alert.json` starts the
 read-only `ops-investigator` agent for every warning/critical Alertmanager group (receiver `n8n-agents` in
-`clusters/pi-k3s/monitoring/helmrelease.yaml`) and pushes the outcome to the same `agent-runs` topic.
+`clusters/pi-k3s/monitoring/helmrelease.yaml`) and pushes the outcome to the same `agent-runs` topic. The route
+already drops `InfoInhibitor` and every `Beelink*` / `LiteLLM*` alert (the agent has no Beelink tools), so those
+never reach n8n.
 
 ```
 Alert Webhook   POST /webhook/agent-alert, Header Auth (agent-alert-token), answers 200 at once
@@ -254,10 +262,13 @@ Alert Webhook   POST /webhook/agent-alert, Header Auth (agent-alert-token), answ
   → Ensure Tables   agent_runs (same DDL as the manual flow) + agent_dedupe
   → Claim           atomic cooldown claim on dedupe_key (6 h); returns {claimed}
   → Claimed?        false → end (silent: no ledger row, no push)
-  → Resume Callback → Launch Run → Launched? → Wait for Result → Callback? → Parse Result / Timeout Row
-    → Insert Ledger → Format Push → Alert Title → Push            (shared src/agent-*.js, unchanged)
+  → Resume Callback → Launch Run → Launched? (202 = launched OR queued) → Wait for Result (75 min)
+    → Callback? → Parse Result / Timeout Row (src/agent-alert-timeout-row.js)
+    → Insert Ledger → Format Push → Alert Title → Push   (Resume Callback, Parse Result, Format Push: shared
+                                                         src/agent-*.js, unchanged)
   Launch Run error / Launched? false
-    → Refusal Row (exit_reason refused_<HTTP> | runner_unreachable) → Insert Refusal (+ prior_same)
+    → Refusal Row (exit_reason refused_<HTTP> | refused_queue_full | runner_unreachable)
+    → Insert Refusal (+ prior_same)
     → Refusal Push (only when prior_same = 0: one quiet push per refusal kind per 6 h) → Push
 ```
 
@@ -285,7 +296,27 @@ CREATE TABLE IF NOT EXISTS agent_dedupe (dedupe_key TEXT PRIMARY KEY, agent TEXT
 `Auto-started by Alertmanager: <subject> (N alerts)`, then the summary and `Report: <title>`, tag
 `rotating_light`. Refusal: `ops-investigator: not started - <alertname>`, priority 2, at most once per
 `exit_reason` per 6 h (counted from `agent_runs`); every refusal still gets a ledger row with
-`run_id nolaunch-<event id>`, `outcome failed`.
+`run_id nolaunch-<event id>`, `outcome failed`. Queue expired (below): `ops-investigator: not investigated
+(queue busy) - <alertname>`, priority 2, tags `hourglass,rotating_light`, one per expired run.
+
+### Bursts — the runner's queue (runner 0.2.0)
+
+When Alertmanager flushes many groups at once (route enabled, Alertmanager restart, a node going down), the
+runner starts at most `RUNNER_MAX_CONCURRENT` (2) agent Jobs and answers the rest 202 `"status":"queued"`
+without creating a Job, so a run's 15-minute deadline only starts when it actually gets a slot. Knobs, all in
+`clusters/pi-k3s/agents/deployment.yaml` (CONTRACT §3, §7a):
+
+| Env | Default | Effect |
+|---|---|---|
+| `RUNNER_MAX_CONCURRENT` | 2 | Agent Jobs alive at once. Must equal the `agents` ResourceQuota `pods` − 1. |
+| `RUNNER_MAX_QUEUE` | 8 | Runs waiting for a slot. Beyond it: 429 `{"error":"queue_full"}` → `refused_queue_full` row (its own push kind, so it never silences a later daily-cap `refused_429` push). |
+| `RUNNER_MAX_QUEUE_WAIT` | 45m | A run still queued after this ends `exit_reason queue_expired` (`outcome failed`) with the normal callback → ledger row + the quiet "not investigated" push. |
+
+The daily cap (`runs_per_day: 12`) still counts at accept, so a queued or expired run uses one of the 12.
+`Claimed?` holds the group's 6 h cooldown either way; a still-firing group comes back on Alertmanager's 12 h
+repeat. The Wait limit is **75 min** = 45m queue + 15m agent timeout + 5m runner grace + margin: raise it if
+any of those go up. Queued runs survive a runner restart (spooled on the ledger PVC), and the callback still
+reaches this execution.
 
 ### Must exist before activation
 
@@ -298,8 +329,8 @@ CREATE TABLE IF NOT EXISTS agent_dedupe (dedupe_key TEXT PRIMARY KEY, agent TEXT
 | Manifest `ops-investigator` | `clusters/pi-k3s/agents/manifests/` | Otherwise every launch is a quiet `refused_404`. |
 
 The Webhook node fails closed: a missing or wrong `Authorization` header gets **403** and no execution;
-past the trigger; with no credential linked the node errors and nothing runs. Keep the n8n Wait limit (30 min)
-above the manifest's `limits.timeout` (15 m) + 300 s runner grace + Job start-up.
+past the trigger; with no credential linked the node errors and nothing runs. Keep the n8n Wait limit (75 min)
+above `RUNNER_MAX_QUEUE_WAIT` (45 m) + the manifest's `limits.timeout` (15 m) + 300 s runner grace + Job start-up.
 
 ### Import
 
@@ -312,6 +343,14 @@ above the manifest's `limits.timeout` (15 m) + 300 s runner grace + Job start-up
    which does not pick up new activations by itself: bump `n8n.mtgibbs.dev/restarted-at` in `n8n/webhook.yaml`,
    PR, reconcile (the publish dance in `n8n-email-pipeline.md`). Until then the tier answers 404 and
    Alertmanager logs a failed notify (Discord delivery is unaffected — `continue: true`).
+
+**Re-import after the burst-handling change (runner 0.2.0).** `agent-alert.json` changed (Wait 30 → 75 min;
+Timeout Row, Alert Title and Refusal Row code). n8n does not read the file from Git: update the live workflow
+in place — `PUT /api/v1/workflows/<id>` with the new JSON (re-patch the two `REPLACE_ON_IMPORT_*` credential
+ids), or paste the changed nodes in the editor — then deactivate/activate it and do the webhook-tier
+`restarted-at` bump from step 3. Executions already *waiting* keep their old 30-minute limit. Import it
+**after** the 0.2.0 runner is live; the old runner never queues, so the new JSON is harmless with it.
+`agent-run-manual.json` did not change and needs no re-import.
 
 ### Test plan
 
@@ -342,6 +381,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL" -H "Authorization: Beare
    `200`, execution ends after `Build Event`, nothing else.
 5. **Refusals:** with `RUNNER_PAUSED=true` post two *different* groupKeys. Expect two `agent_runs` rows with
    `exit_reason refused_503` and exactly one quiet push. Same for `runs_per_day` exhausted (`refused_429`).
+5a. **Burst:** post 4 *different* groupKeys within a few seconds. Expect 2 `run-*` Jobs in `agents` and
+   `GET /runs/<id>` → `"status":"queued"` for the other two, which start as the first two finish (no
+   `FailedCreate … exceeded quota` events). For `queue_full`/`queue_expired` without waiting 45 minutes, set
+   `RUNNER_MAX_QUEUE: "0"` (→ `refused_queue_full` rows, one quiet push) or `RUNNER_MAX_QUEUE_WAIT: "1m"`
+   (→ `queue_expired` rows and "not investigated (queue busy)" pushes) in a throwaway PR, then revert.
 6. **Real alert:** fire one through Alertmanager itself (it applies the real route, `group_wait 2m`):
    ```bash
    kubectl -n monitoring exec sts/alertmanager-kube-prometheus-stack-alertmanager -c alertmanager -- \

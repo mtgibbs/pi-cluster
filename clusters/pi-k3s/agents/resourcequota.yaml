@@ -12,10 +12,14 @@
 # The runner pod is in that sum because a quota counts EVERY pod in the namespace, its own launcher
 # included. Rendered Jobs are backoffLimit 0, so one Job never holds more than one pod.
 #
-# The runner's own 429 (CONTRACT §3, "daily cap or cluster quota") is meant to be the first line;
-# this is the backstop if it is wrong. If a third agent Job does get created, its pod is refused
-# here and the Job controller retries (FailedCreate events) until a slot frees or the Job's
-# activeDeadlineSeconds runs out — it queues, it does not oversubscribe the node.
+# The runner's concurrency gate (RUNNER_MAX_CONCURRENT=2 in deployment.yaml, runner 0.2.0+) is the
+# first line: it never creates more than 2 agent Jobs, and queues the rest with no Job object. Keep
+#   pods = RUNNER_MAX_CONCURRENT + 1
+# — change one, change the other. This quota is the backstop if the gate is wrong. If a third agent
+# Job does get created, its pod is refused here and the Job controller retries (FailedCreate events)
+# until a slot frees or the Job's activeDeadlineSeconds runs out. It does not oversubscribe the node,
+# but that deadline is already counting while the Job waits — which is why the gate exists (runner
+# 0.1.0 had none; the 2026-11-11 burst of 8 left 6 Jobs waiting here).
 #
 # count/jobs.batch is a second, looser ceiling on Job objects (running + finished-within-the-TTL),
 # so a tight create loop cannot fill etcd with Jobs that are all waiting on the pod quota.

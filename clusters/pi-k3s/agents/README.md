@@ -55,8 +55,39 @@ red (and blocks media-investigator updates). Do steps 1–2 **before** merging.
      throwaway PrometheusRule) and watch n8n get a request with the bearer header, the runner start an
      `ops-investigator` Job, and the callback arrive. Then send one request **without** the header and
      confirm n8n refuses it (403) — a gate you have never seen refuse proves nothing.
-   - The runner's daily cap (`runs_per_day: 12`) and the quota (2 concurrent agents) bound an alert
-     storm; check that a burst is refused with 429 rather than queued forever.
+   - The runner's daily cap (`runs_per_day: 12`), its concurrency gate (2 Jobs) and bounded queue (8 runs,
+     45m) bound an alert storm; see "Bursts" below for the burst check.
+
+## Bursts: the concurrency gate and queue (runner 0.2.0)
+
+On 2026-11-11, enabling the `n8n-agents` route made Alertmanager flush 8 already-firing groups in a minute.
+Runner 0.1.0 created 8 Jobs at once; the quota admitted 2 pods, and the other 6 Jobs sat in `FailedCreate
+… exceeded quota` while their 15-minute deadlines ran. Since 0.2.0 the runner itself never has more than
+`RUNNER_MAX_CONCURRENT` agent Jobs. Further runs are accepted (202 `"status":"queued"`) but get **no Job**
+until a slot frees, then start in FIFO order, and their deadline counts from Job creation.
+
+| Knob (`deployment.yaml`) | Default | Meaning |
+|---|---|---|
+| `RUNNER_MAX_CONCURRENT` | 2 | Agent Jobs alive at once. **Keep `resourcequota.yaml` `pods` = this + 1** (the runner's own pod). |
+| `RUNNER_MAX_QUEUE` | 8 | Runs waiting. Beyond it POST /runs is 429 `{"error":"queue_full"}` (the daily-cap 429 body is unchanged). |
+| `RUNNER_MAX_QUEUE_WAIT` | 45m | A run queued longer ends `exit_reason: queue_expired` with the normal callback; n8n records it and sends a quiet "not investigated (queue busy)" push. |
+
+- The daily cap still counts at accept: a burst of 10 still uses 10 of ops-investigator's 12 runs/day. The
+  Alertmanager route now excludes the Beelink/LiteLLM alerts the agent has no tools for, which removes most of
+  those runs.
+- `GET /runs/<id>` shows `queued` with `position`.
+- `RUNNER_PAUSED=true` also stops queued runs from starting (they expire).
+- Restarts: launched runs are re-adopted (as in 0.1.0) and queued runs are restored in order. A queued run's
+  event sits in `/var/lib/agent-runner/queue/<run_id>.json` on the ledger PVC until its Job starts.
+- **n8n:** `agent-alert.json`'s Wait limit is 75 min (45m queue + 15m run + grace). It is not read from Git,
+  so **re-import it** after the 0.2.0 runner is live (`docs/agent-sandbox-n8n.md`, "Re-import after the
+  burst-handling change"). `agent-run-manual.json` is unchanged; its 30-minute Wait can give up on a manual run
+  that queued (known gap, documented there).
+- **Image:** merging bumps `scripts/agentrunner/VERSION` to 0.2.0, CI pushes `agent-runner:0.2.0`, and Flux
+  image automation commits the tag into `deployment.yaml`. Don't hand-bump it: with `strategy: Recreate`, a tag
+  that isn't pushed yet takes the runner down (ImagePullBackOff) until CI finishes.
+- **Verify live:** fire 4 test groups at once (test plan step 5a in `docs/agent-sandbox-n8n.md`). Expect 2 Jobs,
+  2 `queued` runs that start as the first two finish, and no `FailedCreate` events in `agents`.
 
 ## This directory is inert, on purpose
 
@@ -74,7 +105,7 @@ useful ones: the Kustomization goes red if a secret stops resolving.
 | `namespace.yaml` | Pod Security **`restricted` enforced** (plus audit and warn). A root, privileged or hostPath pod is refused at admission. |
 | `serviceaccounts.yaml` | Agents run as `agent-run`, which has **no RBAC and no mounted token**, so a compromised agent can't talk to the API server. The namespace `default` SA also has its token turned off. |
 | `rbac.yaml` | `agent-runner` can only create, get, list, watch and delete **Jobs**, get and list **pods**, and get **pods/log**, all **in this namespace**. It has **no Secret verbs** and nothing cluster-scoped. It launches agents but can't read their credentials. |
-| `resourcequota.yaml` | **At most 2 agents run at once** (`pods: 3` = runner + 2). Compute is capped at runner + 2 × the LimitRange max. No NodePorts or LoadBalancers. The header explains why the cap is `pods` and not `count/jobs.batch`: finished Jobs stay around for an hour. |
+| `resourcequota.yaml` | **At most 2 agents run at once** (`pods: 3` = runner + 2). This is the backstop; the runner's own gate (`RUNNER_MAX_CONCURRENT=2`) is the first line. Compute is capped at runner + 2 × the LimitRange max. No NodePorts or LoadBalancers. The header explains why the cap is `pods` and not `count/jobs.batch`: finished Jobs stay around for an hour. |
 | `limitrange.yaml` | Default 1 CPU / 512Mi limit, max 1 CPU / 1Gi per container. Manifests that leave out `resources` still pass the quota. |
 | `networkpolicies.yaml` | **Default-deny in both directions.** Agents may reach only DNS and the LiteLLM gateway. Agents named in `agent-mcp-homelab-egress` (`media-investigator`, `ops-investigator`) may also reach the homelab MCP on :3000. The runner accepts traffic only from `n8n` on :8080, and may reach only DNS, the Kubernetes API (192.168.1.55:6443) and n8n on :5678. |
 | `external-secret-runner.yaml` | The runner's bearer token, Tier 2, kept in the `pi-cluster` vault (Touch ID). |
