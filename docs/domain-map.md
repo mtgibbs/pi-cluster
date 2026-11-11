@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_40 services · 71 workloads · 41 Flux Kustomizations · 9 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_41 services · 72 workloads · 41 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -172,6 +172,13 @@ graph LR
 _Per service: what it runs (🔒priv = private image), needs (creds → `secrets-map.md`, storage), how it's reached (ingress), and who it talks to (calls)._
 
 _Images are listed **without tags** on purpose — this map is topology, and the deployed version is a property of the cluster, not of this repo. Read the live tag with `get_flux_status` / `describe_resource`. (Tags here made every bot image bump a map change, and image-automation pushes bypass the PR gate that regenerates it, so unrelated PRs inherited a red `drift`.)_
+
+### agents
+- **Deployment/agent-runner** — `ghcr.io/mtgibbs/agent-runner` 🔒priv
+  - creds: `agent-runner`  _(→ secrets-map.md)_
+  - storage: `agent-runner-ledger`
+  - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
+  - calls: → `default`, → `mcp-homelab`, → `n8n`
 
 ### atlas  ·  Flux: `atlas` (after: `ingress`, `cert-manager-config`)
 - **Deployment/atlas** — `nginx`

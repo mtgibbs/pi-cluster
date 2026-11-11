@@ -1,0 +1,31 @@
+# Defaults and ceilings for every container in the namespace.
+#
+# Why it must exist: resourcequota.yaml constrains requests/limits, and the moment a quota does that,
+# Kubernetes REJECTS any pod that does not set them. CONTRACT §2 makes an agent manifest's
+# `resources` optional, so a manifest without it would render a Job the quota refuses at admission
+# — with an error naming the quota, not the missing field. These defaults fill the gap.
+#
+# default (limit) 1 CPU / 512Mi, defaultRequest 100m / 256Mi: an agent is a stdlib-Python loop that
+# spends almost all its life waiting on HTTP to LiteLLM and the MCP server (CONTRACT §6). The model
+# runs on the Beelink, never here.
+#
+# max 1 CPU / 1Gi: the most any one agent may ask for. resourcequota.yaml is sized to two agents at
+# THIS number plus the runner, so a manifest can raise its own resources up to here and still run
+# two-at-a-time. Raise max and you must raise the quota.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: agents-defaults
+  namespace: agents
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+      max:
+        cpu: "1"
+        memory: 1Gi

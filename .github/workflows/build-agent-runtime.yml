@@ -1,0 +1,57 @@
+name: build-agent-runtime
+
+# Builds + pushes the agent-sandbox runtime image to GHCR on change. Version comes
+# from scripts/agentruntime/VERSION (bump it to cut a release); agent manifests pin
+# `image: ghcr.io/mtgibbs/agent-runtime:<version>`. Multi-arch so it runs on the arm64 Pis.
+# The unit tests (stdlib + pytest, no network) gate the push.
+#
+# NOTE: after the first push, flip the GHCR package public (cluster pulls anon):
+#   gh api -X PATCH /user/packages/container/agent-runtime -f visibility=public
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/agentruntime/**'
+      - '.github/workflows/build-agent-runtime.yml'
+  pull_request:
+    paths:
+      - 'scripts/agentruntime/**'
+      - '.github/workflows/build-agent-runtime.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest
+      - run: python -m pytest scripts/agentruntime -q
+
+  build:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: echo "v=$(cat scripts/agentruntime/VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/agentruntime/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ghcr.io/mtgibbs/agent-runtime:${{ steps.ver.outputs.v }}

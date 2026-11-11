@@ -1,0 +1,17 @@
+# ClusterIP only — deliberately NO Ingress. POST /runs creates compute, so the endpoint stays
+# unreachable from outside the cluster; n8n calls it in-cluster at
+#   http://agent-runner.agents.svc.cluster.local:8080/runs
+# and networkpolicies.yaml narrows "in-cluster" to the n8n namespace only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-runner
+  namespace: agents
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-runner
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

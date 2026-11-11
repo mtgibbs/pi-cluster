@@ -1,0 +1,23 @@
+# The agent sandbox: short-lived AI agent Jobs run here, launched by the agent-runner Deployment.
+#
+# A namespace of its own, not a corner of harness-fleet, because every containment property in this
+# directory is namespace-scoped: the runner's Role (rbac.yaml), the quota (resourcequota.yaml) and
+# the default-deny NetworkPolicy (networkpolicies.yaml). Mixing a model-driven agent in beside
+# anything else would widen all three at once.
+#
+# Pod Security `restricted` is ENFORCED, not just warned. The rendered Job (scripts/agentrunner/
+# CONTRACT.md §4) and the runner Deployment are both written to it, so a pod that drifts from it —
+# a privileged sidecar, a root user, a hostPath — is refused at admission instead of running.
+# audit + warn at the same level make a violation visible in the API audit log and in the client
+# that tried it, which is what you want while the runner is new.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agents
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

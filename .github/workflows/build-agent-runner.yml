@@ -1,0 +1,47 @@
+name: build-agent-runner
+
+# Builds + pushes the agent-runner image to GHCR on change. Version comes from
+# scripts/agentrunner/VERSION (bump it to cut a release). Multi-arch so it runs
+# on the arm64 Pis.
+#
+# NOTE: after the first push, flip the GHCR package public (cluster pulls anon):
+#   gh api -X PATCH /user/packages/container/agent-runner -f visibility=public
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/agentrunner/**'
+      - '.github/workflows/build-agent-runner.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: test
+        run: |
+          pip install pytest "pyyaml==6.0.2"
+          python -m pytest scripts/agentrunner -q
+      - id: ver
+        run: echo "v=$(cat scripts/agentrunner/VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/agentrunner/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ghcr.io/mtgibbs/agent-runner:${{ steps.ver.outputs.v }}

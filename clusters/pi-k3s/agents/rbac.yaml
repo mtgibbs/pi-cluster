@@ -1,0 +1,42 @@
+# The runner's bounds. Same shape and the same argument as harness-fleet/rbac.yaml.
+#
+# A Role, never a ClusterRole: a runner that can create Jobs cluster-wide can create them in
+# kube-system. The namespace boundary is the containment.
+#
+# NO verb on secrets, deliberately. The runner launches agents but never needs to READ what they are
+# given — CONTRACT §2 says it plainly: "The runner never reads it." The Job's `envFrom` names the
+# Secret and the kubelet resolves it; the creating identity needs no read access for that.
+#
+# pods get/list: find the pod behind a Job. pods/log get: read the `::agent-result::` marker line
+# from the pod's log (CONTRACT §5) — that is how a result leaves the sandbox. jobs delete: clean up
+# ahead of ttlSecondsAfterFinished when needed. No create on pods: the Job controller does that,
+# so the runner cannot launch a bare pod that skips the Job's deadline.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-runner
+  namespace: agents
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-runner
+  namespace: agents
+subjects:
+  - kind: ServiceAccount
+    name: agent-runner
+    namespace: agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-runner

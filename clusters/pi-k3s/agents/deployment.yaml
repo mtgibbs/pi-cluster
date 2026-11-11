@@ -1,0 +1,129 @@
+# The agent runner — decides HOW an agent runs (scripts/agentrunner/CONTRACT.md §3): validates the
+# manifest and event, enforces the daily cap and pause switch, renders the Job (§4), reads the
+# result from the pod log (§5) and calls n8n back. It never runs a model and never reads an agent's
+# Secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-runner
+  namespace: agents
+spec:
+  replicas: 1
+  # Recreate: the ledger is a ReadWriteOnce local-path volume, so a second pod cannot mount it
+  # while the first holds it (and two runners would race the same ledger anyway).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agent-runner
+  template:
+    metadata:
+      labels:
+        app: agent-runner
+    spec:
+      serviceAccountName: agent-runner
+      # Off the 1GB Pi 3 and off pi-k3s (control plane, DNS, Jellyfin, SD card). Matches
+      # RUNNER_NODE_HOSTNAMES below, so the runner and its agents share the same two nodes.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["pi5-worker-1", "pi5-worker-2"]
+      # Pod Security `restricted` (namespace.yaml enforces it): non-root, fixed uid/gid, RuntimeDefault
+      # seccomp. fsGroup so the ledger volume is group-writable by 10001.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: ghcr.io/mtgibbs/agent-runner:0.1.0 # {"$imagepolicy": "flux-system:agent-runner"}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The bearer n8n presents. Not optional: a missing Secret is a pod that cannot start,
+            # never a runner serving POST /runs unauthenticated.
+            - name: RUNNER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-runner
+                  key: token
+            - name: RUNNER_NAMESPACE
+              value: agents
+            - name: RUNNER_MANIFEST_DIR
+              value: /etc/agents
+            - name: RUNNER_LEDGER_PATH
+              value: /var/lib/agent-runner/ledger.jsonl
+            # The only callback hosts allowed — both n8n Services, both :5678 (clusters/pi-k3s/n8n/
+            # service.yaml and webhook.yaml). networkpolicies.yaml allows exactly this egress too.
+            - name: RUNNER_CALLBACK_PREFIXES
+              value: "http://n8n-webhook.n8n.svc.cluster.local:5678/,http://n8n.n8n.svc.cluster.local:5678/"
+            # Models that run on the Beelink. A `data_class: personal` manifest may only list these.
+            - name: RUNNER_LOCAL_MODELS
+              value: "hot-coder"
+            # The kill switch: "true" makes POST /runs answer 503. Flip it here (PR) to stop new runs
+            # without deleting anything.
+            - name: RUNNER_PAUSED
+              value: "false"
+            # Passed to every Job as LITELLM_BASE_URL. Must stay on 192.168.1.70:443 — the only
+            # model egress the agent NetworkPolicy permits.
+            - name: RUNNER_LITELLM_BASE_URL
+              value: "https://ai.lab.mtgibbs.dev/v1"
+            - name: RUNNER_NODE_HOSTNAMES
+              value: "pi5-worker-1,pi5-worker-2"
+          volumeMounts:
+            - name: manifests
+              mountPath: /etc/agents
+              readOnly: true
+            - name: ledger
+              mountPath: /var/lib/agent-runner
+            # readOnlyRootFilesystem leaves nowhere to write scratch; Python's tempfile and any HTTP
+            # client that spools want one. Small and bounded.
+            - name: tmp
+              mountPath: /tmp
+          # /healthz is the one unauthenticated path (CONTRACT §3), so an httpGet probe works here.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          # Load-bearing numbers: resourcequota.yaml is sized to this pod PLUS two agents at the
+          # LimitRange max. Raise these and raise the quota, or the second agent stops scheduling.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # Name is rewritten to the hashed ConfigMap by kustomize's configMapGenerator, so editing any
+        # manifest changes the pod template and rolls the runner.
+        - name: manifests
+          configMap:
+            name: agent-manifests
+        - name: ledger
+          persistentVolumeClaim:
+            claimName: agent-runner-ledger
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

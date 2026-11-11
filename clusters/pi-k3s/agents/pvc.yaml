@@ -1,0 +1,19 @@
+# The runner's ledger: the (event.id, agent) dedupe record behind CONTRACT §3's "200 with the existing
+# run", plus the per-agent daily counts behind runs_per_day. A ledger a restart forgets is a runner
+# that launches a second agent for a redelivered webhook and resets every daily cap — so it lives on
+# a volume, not in the pod.
+#
+# No storageClassName, same as harness-fleet/pvc.yaml: the cluster default (local-path), so the
+# volume binds to the node the runner first schedules on. deployment.yaml's node affinity keeps that
+# a Pi 5 worker. Small: append-only JSONL that grows by one line per run.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-runner-ledger
+  namespace: agents
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 256Mi

@@ -1,0 +1,181 @@
+# Network containment for the agent sandbox. Read the header before changing a rule.
+#
+# ENFORCEMENT IS ON in this cluster: k3s runs its embedded kube-router network-policy controller
+# (confirmed live 2026-07-20, kube-router v2.6.3 — docs/research/2026-07-20-homelab-resilience-audit.md,
+# "Decisive facts"). Nothing in this repo passes `--disable-network-policy` to k3s. These are the
+# first application NetworkPolicies in the cluster, so this namespace is also where any surprise in
+# kube-router's behaviour will show up first.
+#
+# Shape: deny everything, then allow by name. NetworkPolicies are additive (a pod is allowed the
+# UNION of every policy that selects it), so each rule below exists in exactly one place with its
+# reason, and anything not listed is refused.
+#
+# kube-router evaluates after kube-proxy's DNAT, so a connection to a Service ClusterIP is matched
+# against the BACKEND pod/IP and port, not the ClusterIP. That is why DNS is allowed to the CoreDNS
+# pods by label, and why the API-server rule names the node IP and :6443 (see the runner policy).
+---
+# 1. Default deny, both directions, for every pod in the namespace — present and future. A pod that
+#    no other policy selects (a mislabelled Job, a debug pod) can reach nothing and be reached by
+#    nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2. Every agent pod: DNS and the LiteLLM gateway, and nothing else.
+#
+#    Selects on BOTH labels the runner stamps on every Job pod (CONTRACT §4): `part-of` says it came
+#    from the runner, `agent` says which manifest it is. A pod with only one of them gets nothing.
+#    No ingress rule at all: an agent pod is never a server; results leave via its own log, which
+#    the runner reads through the API server, not over the pod network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-base-egress
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: agent-sandbox
+    matchExpressions:
+      - key: agent
+        operator: Exists
+  policyTypes:
+    - Egress
+  egress:
+    # DNS — CoreDNS in kube-system. Needed to resolve ai.lab.mtgibbs.dev and the in-cluster MCP
+    # Service name. Both protocols: large/truncated answers retry over TCP.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The LiteLLM gateway: Caddy on the Beelink, 192.168.1.70:443, which is what ai.lab.mtgibbs.dev
+    # resolves to (pihole-custom-dns.yaml). The ONLY way an agent reaches a model. The agent's
+    # LiteLLM virtual key — not this rule — decides WHICH models; this rule decides that LiteLLM is
+    # the only door. Everything else on the LAN and the internet stays unreachable, so a prompt-
+    # injected agent cannot exfiltrate to an arbitrary host.
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.70/32
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# 3. media-investigator only: the homelab MCP server.
+#
+#    Per-agent, so a future agent that needs no MCP does not inherit a path to it. The MCP server
+#    (namespace mcp-homelab, Service :3000 → pod :3000) is where every one of this agent's tools
+#    lives; the read-only key in its Secret is what keeps those tools to `readOnly: true` ones
+#    (enforced server-side — see manifests/media-investigator.yaml). mcp-homelab has no
+#    NetworkPolicy of its own, so its ingress side needs no matching rule today.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-media-investigator-egress
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: agent-sandbox
+      agent: media-investigator
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-homelab
+          podSelector:
+            matchLabels:
+              app: mcp-homelab
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# 4. The runner.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-runner
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-runner
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # n8n is the only caller (it decides WHEN; the runner decides HOW). POST /runs creates compute,
+    # so nothing else in the cluster — and nothing outside it; there is no Ingress — may reach it.
+    # Whole namespace rather than one Deployment: in queue mode a workflow can execute on the main
+    # pod, a worker or the webhook pod.
+    #
+    # Kubelet health probes come from the node itself, not from a pod. kube-router permits
+    # node-local traffic to pods regardless of policy, so /healthz probes need no rule here — if the
+    # runner flaps Ready the moment this lands, that assumption is the first thing to check.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: n8n
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # DNS, same reason as the agents: resolve the n8n callback Service names.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The Kubernetes API — create Jobs, read pods and logs. In k3s the API server is NOT a pod: it
+    # runs inside the k3s process on the server node, pi-k3s (192.168.1.55), on :6443. The
+    # in-cluster address `kubernetes.default.svc` (10.43.0.1:443) is DNAT'd to that endpoint before
+    # kube-router evaluates the packet, so the rule must name the node IP and 6443 — a podSelector
+    # can never match it. 10.43.0.1:443 is listed as well, as a cheap hedge in case a code path
+    # ever evaluates pre-DNAT. If the server node's IP changes, or a second server joins, this rule
+    # is the thing that silently breaks the runner (symptom: Job creation times out, not 403).
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.55/32
+      ports:
+        - protocol: TCP
+          port: 6443
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - protocol: TCP
+          port: 443
+    # Callbacks to n8n (CONTRACT §3: the runner POSTs the run result to the event's callback URL).
+    # Both n8n Services listen on 5678 (n8n, n8n-webhook — clusters/pi-k3s/n8n/), and
+    # RUNNER_CALLBACK_PREFIXES in deployment.yaml allows exactly those two hosts. The two layers
+    # agree on purpose: the env var refuses other URLs, this refuses other destinations.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: n8n
+      ports:
+        - protocol: TCP
+          port: 5678
