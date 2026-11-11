@@ -180,8 +180,7 @@ Adding an agent is one manifest, and one n8n workflow or one more branch in an e
 
 An agent with `data_class: personal` (family mail, calendars, school data) may only use models served on the Beelink.
 The runner enforces this: it refuses a `personal` manifest whose `model.allow` names a hosted model. System agents may
-use Claude. This is the email rule applied to agents, and it is an [open question](#11-open-questions-for-matt) whether
-Matt wants it this strict.
+use Claude. This is the email rule applied to agents, for privacy. (Decided 2026-11-11.)
 
 ## 4. n8n as the workflow and state engine
 
@@ -327,8 +326,8 @@ event → investigator or researcher (read-only) → plan issue → Matt approve
 ```
 
 - **Plans are issues in a private repo.** pi-cluster is public. A security finding posted before it is fixed says where
-  the hole is, and investigation plans quote raw logs. (Whether ordinary ops plans could be public instead is an
-  [open question](#11-open-questions-for-matt).)
+  the hole is, and investigation plans quote raw logs. All plans start private (decided 2026-11-11); whether ordinary
+  ops plans can move to public issues is revisited once there are real ones to look at.
 - A plan has a fixed shape: what was found and the evidence; likely cause; proposed change, or "no change needed";
   risk; how to verify; how to roll back.
 - **Research findings carry a fingerprint** (`agent | rule | resource`), so a re-run updates the open issue instead of
@@ -350,7 +349,7 @@ Each slice adds one capability. Nothing that can write to a repo runs until the 
 
 | Slice | Builds | Proves |
 |---|---|---|
-| **1. The sandbox, driven by hand** | The runner, the `agents` namespace and its policies, the Claude runtime image, the *Run agent* step, the form trigger, the run ledger, and one read-only agent (`media-investigator` or `ops-investigator`) returning a `report` | n8n can hand an event to a sandboxed agent and get a result back. This alone replaces "open a session and ask". |
+| **1. The sandbox, driven by hand** | The runner, the `agents` namespace and its policies, the Claude runtime image, the *Run agent* step, the form trigger, the run ledger, and one read-only agent, `media-investigator`, returning a `report` | n8n can hand an event to a sandboxed agent and get a result back. This alone replaces "open a session and ask". |
 | **2. Events in** | The Alertmanager, Flux and Uptime Kuma emitters to n8n (one manifest each; Discord unchanged), dedupe | Investigations start on their own |
 | **3. Plans** | The private plans repo, the GitHub App, `sec-researcher`, finding fingerprints and an eval set of seeded faults | Agents find and write up their own work |
 | **4. Fixes** | Required checks on `main`, the approval path, `ops-fixer` | The full path to a merge Matt makes |
@@ -369,12 +368,16 @@ LiteLLM and one agent key.
 
 ## 11. Open questions for Matt
 
-Decided 2026-11-11: spend limits and small-model defaults (5.4); agents run on the Pi 5 workers (5.2).
+Decided 2026-11-11:
+- Spend limits and small-model defaults (5.4).
+- Agents run on the Pi 5 workers (5.2).
+- Personal-data agents use Beelink models only (3.3).
+- All plans start in one private repo (7).
+- `media-investigator` is the first agent (9).
 
-1. **Personal data and hosted models.** Should agents handling family mail and calendars be restricted to Beelink
-   models (recommended), or may they use Claude?
-2. **Calendar writes.** Should n8n apply a proposed calendar entry on its own, or ask first with an ntfy button
-   (recommended to start)?
-3. **The plans repo.** Everything in one new private repo (recommended to start: one place to look, and log redaction
-   is easy to get wrong), or only security findings private and ordinary ops plans in pi-cluster's public issues?
-4. **The first agent.** `media-investigator` (the Jellyfin hang is a live problem) or `ops-investigator`?
+Still open, and not blocking until slice 5:
+1. **Calendar writes.** Should n8n apply a proposed calendar entry on its own, or ask first? If it asks, the options
+   are:
+   - an ntfy notification with **Add** and **Skip** buttons. The button calls n8n, which today is reachable only at
+     home or over Tailscale;
+   - a "proposed" card on the Family Board, confirmed with the existing ack tap, which Julia could also use.
