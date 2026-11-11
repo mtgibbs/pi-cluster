@@ -19,6 +19,45 @@ n8n ──POST /runs──▶ agent-runner (Deployment) ──creates──▶ J
 > alias) is not done, so the agent runs on `hot-coder` only. Step 7's n8n import and step 8's live checks
 > remain. The section below is kept as the record of why it landed inert first.
 
+## Agent roster
+
+| Agent | Started by | Tools | Output | Status |
+|---|---|---|---|---|
+| `media-investigator` | n8n form (`agent-run-manual`), by hand | 7 read-only homelab MCP tools (media-focused) | `report` | slice 1 — active |
+| `ops-investigator` | Alertmanager → n8n `agent-alert` webhook, automatically (warning/critical) | 15 read-only homelab MCP tools (cluster-wide triage) | `report` | slice 2 — manifests landed; see its activation checklist |
+
+## Activation checklist for `ops-investigator` (slice 2, human-only, in order)
+
+The `agents` Kustomization has `wait: true`, so a missing 1Password item turns the **whole** Kustomization
+red (and blocks media-investigator updates). Do steps 1–2 **before** merging.
+
+1. **Mint the ops-investigator LiteLLM key** on the Beelink LiteLLM: `models: [hot-coder, claude-haiku]`,
+   `max_budget: 3`, `budget_duration: 1d`, alias `agent-ops-investigator`. Store it in the
+   **`homelab-agent`** vault as item `agent-ops-investigator`, field `litellm-key`. The MCP key is the
+   reused `mcp-homelab-readonly/password`; don't mint one.
+2. **Create the Alertmanager→n8n webhook token.** In the **`pi-cluster`** vault, create item
+   `n8n-agent-alert-webhook` with field `token` set to a long random value (`openssl rand -hex 32`).
+   The `monitoring` ExternalSecret `alertmanager-n8n-agents` reads it; Alertmanager sends it as
+   `Authorization: Bearer <token>`. Until it exists, that ExternalSecret fails, the Secret is missing,
+   and the Alertmanager pod cannot mount it (it will not start after its next roll).
+3. **Give n8n the same token.** Create an n8n Header Auth credential (name `Authorization`, value
+   `Bearer <token>`) and attach it to the `agent-alert` Webhook node, following
+   `docs/agent-sandbox-n8n.md`. Import/activate the alert workflow there.
+4. **`claude-haiku` alias** — same caveat as step 3 of the slice-1 checklist below: without the alias
+   the fallback just fails, so the agent effectively runs on `hot-coder`.
+5. **Merge**, reconcile the source, then `agents` and `monitoring` (`docs/flux-gitops.md`).
+6. **Verify live.**
+   - `agents/agent-ops-investigator` and `monitoring/alertmanager-n8n-agents` are `SecretSynced`.
+   - NetworkPolicy `agent-media-investigator-egress` is gone (pruned) and `agent-mcp-homelab-egress`
+     exists; a media-investigator run still reaches the MCP (the rename must not cut slice 1 off).
+   - Alertmanager's status page lists receiver `n8n-agents`; Discord still receives the same alerts.
+   - **Positive control:** fire a test warning alert (e.g. `amtool alert add` against Alertmanager, or a
+     throwaway PrometheusRule) and watch n8n get a request with the bearer header, the runner start an
+     `ops-investigator` Job, and the callback arrive. Then send one request **without** the header and
+     confirm n8n refuses it (403) — a gate you have never seen refuse proves nothing.
+   - The runner's daily cap (`runs_per_day: 12`) and the quota (2 concurrent agents) bound an alert
+     storm; check that a burst is refused with 429 rather than queued forever.
+
 ## This directory is inert, on purpose
 
 **It is NOT registered in `clusters/pi-k3s/flux-system/infrastructure.yaml`.** Like `harness-fleet`
@@ -37,10 +76,12 @@ useful ones: the Kustomization goes red if a secret stops resolving.
 | `rbac.yaml` | `agent-runner` can only create, get, list, watch and delete **Jobs**, get and list **pods**, and get **pods/log**, all **in this namespace**. It has **no Secret verbs** and nothing cluster-scoped. It launches agents but can't read their credentials. |
 | `resourcequota.yaml` | **At most 2 agents run at once** (`pods: 3` = runner + 2). Compute is capped at runner + 2 × the LimitRange max. No NodePorts or LoadBalancers. The header explains why the cap is `pods` and not `count/jobs.batch`: finished Jobs stay around for an hour. |
 | `limitrange.yaml` | Default 1 CPU / 512Mi limit, max 1 CPU / 1Gi per container. Manifests that leave out `resources` still pass the quota. |
-| `networkpolicies.yaml` | **Default-deny in both directions.** Agents may reach only DNS and the LiteLLM gateway. `media-investigator` may also reach the homelab MCP on :3000. The runner accepts traffic only from `n8n` on :8080, and may reach only DNS, the Kubernetes API (192.168.1.55:6443) and n8n on :5678. |
+| `networkpolicies.yaml` | **Default-deny in both directions.** Agents may reach only DNS and the LiteLLM gateway. Agents named in `agent-mcp-homelab-egress` (`media-investigator`, `ops-investigator`) may also reach the homelab MCP on :3000. The runner accepts traffic only from `n8n` on :8080, and may reach only DNS, the Kubernetes API (192.168.1.55:6443) and n8n on :5678. |
 | `external-secret-runner.yaml` | The runner's bearer token, Tier 2, kept in the `pi-cluster` vault (Touch ID). |
 | `external-secret-media-investigator.yaml` | The agent's own scoped LiteLLM key plus the **reused read-only** homelab-MCP key, both Tier 1, in the `homelab-agent` vault. Each agent gets its own Secret. |
 | `manifests/media-investigator.yaml` | A read-only investigator with an allowlist of 7 read-only MCP tools. Tools that could make the MCP server contact an arbitrary host are left out. |
+| `external-secret-ops-investigator.yaml` | Same shape as media-investigator's: its own scoped LiteLLM key plus the **reused read-only** homelab-MCP key, `homelab-agent` vault. |
+| `manifests/ops-investigator.yaml` | Read-only alert triage, started by Alertmanager via n8n. 15 read-only MCP tools, **including** `diagnose_dns` and `get_node_networking` (a DNS-lookup side channel, accepted for DNS triage — see the manifest header). Proposes fixes, never applies them. |
 | `kustomization.yaml` | The `configMapGenerator` builds `agent-manifests` with a hash suffix, so any manifest edit rolls the runner. |
 | `deployment.yaml` / `service.yaml` / `pvc.yaml` | Restricted-compliant runner on the Pi 5 workers, **ClusterIP only, no Ingress**. The dedupe and daily-cap ledger is on a PVC so it survives a restart. `RUNNER_PAUSED` is the kill switch. |
 | `image-automation.yaml` | Flux bumps the runner's image tag automatically. The agent-runtime tag in each manifest is deliberately **not** automated. |
@@ -49,7 +90,7 @@ What this does **not** cover: the read-only MCP key limits *which tools* an agen
 *what data* they return. `get_pod_logs` can read any namespace's logs. Agents also hold their own
 LiteLLM key, so the **LiteLLM key's model allowlist and budget** are the real spend boundary.
 
-## Activation checklist (human-only, in order)
+## Activation checklist — slice 1 / media-investigator (human-only, in order)
 
 1. **Create the runner token.** In the `pi-cluster` vault, create item `agent-runner` with field
    `api-token` set to a long random value. Put the same value in n8n's credential store when the

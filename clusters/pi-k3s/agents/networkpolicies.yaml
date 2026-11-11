@@ -75,23 +75,31 @@ spec:
         - protocol: TCP
           port: 443
 ---
-# 3. media-investigator only: the homelab MCP server.
+# 3. Named agents only: the homelab MCP server.
 #
-#    Per-agent, so a future agent that needs no MCP does not inherit a path to it. The MCP server
-#    (namespace mcp-homelab, Service :3000 → pod :3000) is where every one of this agent's tools
-#    lives; the read-only key in its Secret is what keeps those tools to `readOnly: true` ones
-#    (enforced server-side — see manifests/media-investigator.yaml). mcp-homelab has no
-#    NetworkPolicy of its own, so its ingress side needs no matching rule today.
+#    An explicit `In` list of agents, so a future agent that needs no MCP does not inherit a path
+#    to it — ADD an agent here only when its manifest has a `homelab` MCP connector. The MCP server
+#    (namespace mcp-homelab, Service :3000 → pod :3000) is where every one of these agents' tools
+#    lives; the read-only key in each agent's Secret is what keeps those tools to `readOnly: true`
+#    ones (enforced server-side — see manifests/*.yaml). mcp-homelab has no NetworkPolicy of its
+#    own, so its ingress side needs no matching rule today.
+#
+#    (Was `agent-media-investigator-egress` before ops-investigator joined; Flux prunes the old name.)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: agent-media-investigator-egress
+  name: agent-mcp-homelab-egress
   namespace: agents
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/part-of: agent-sandbox
-      agent: media-investigator
+    matchExpressions:
+      - key: agent
+        operator: In
+        values:
+          - media-investigator
+          - ops-investigator
   policyTypes:
     - Egress
   egress:

@@ -121,6 +121,11 @@ spec:
     alertmanager:
       enabled: true
       alertmanagerSpec:
+        # Secrets mounted into the Alertmanager pod at
+        # /etc/alertmanager/secrets/<name>/<key> (prometheus-operator). Used by
+        # the n8n-agents receiver's credentials_file below.
+        secrets:
+          - alertmanager-n8n-agents
         resources:
           requests:
             cpu: 10m
@@ -170,6 +175,22 @@ spec:
             - receiver: 'null'
               matchers:
                 - alertname = "KubeMemoryOvercommit"
+            # Agent sandbox, slice 2 (docs/design/agent-sandbox.md §9): every
+            # warning/critical alert group ALSO goes to n8n, which dedupes it and
+            # starts the read-only ops-investigator agent. `continue: true` so
+            # the routes below still match — Discord delivery is unchanged.
+            # group_wait 2m lets a flapping alert settle before an agent run is
+            # spent on it; repeat_interval 12h because a still-firing group
+            # needs no fresh investigation every 4h (n8n dedupes as well).
+            # send_resolved: false on the receiver — a resolve needs no agent.
+            - receiver: n8n-agents
+              matchers:
+                - severity =~ "warning|critical"
+                - alertname != "InfoInhibitor"
+              group_wait: 2m
+              group_interval: 10m
+              repeat_interval: 12h
+              continue: true
             # Critical alerts get sent immediately
             - receiver: discord
               matchers:
@@ -199,6 +220,25 @@ spec:
             webhook_configs:
               - send_resolved: false
                 url: "https://hc-ping.com/placeholder-overwritten-by-valuesFrom"
+          # Agent sandbox → n8n (receivers[3]: APPENDED, so the valuesFrom
+          # indices above — receivers[0] and receivers[2] — still line up; never
+          # insert above it). In-cluster Service of n8n's webhook tier; the path
+          # is the `agent-alert` Webhook node in n8n. Not exposed by the public
+          # tunnel (path-restricted to /webhook/inbound-mail), but reachable on
+          # the LAN via n8n.lab.mtgibbs.dev, so it carries a shared bearer token:
+          # the alertmanager-n8n-agents Secret, mounted by alertmanagerSpec.secrets
+          # at /etc/alertmanager/secrets/<secret>/<key> and read per request
+          # (rotation needs no restart). max_alerts caps the payload so a storm
+          # cannot exceed the runner's 64 KiB event limit.
+          - name: n8n-agents
+            webhook_configs:
+              - send_resolved: false
+                url: "http://n8n-webhook.n8n.svc.cluster.local:5678/webhook/agent-alert"
+                max_alerts: 20
+                http_config:
+                  authorization:
+                    type: Bearer
+                    credentials_file: /etc/alertmanager/secrets/alertmanager-n8n-agents/token
 
     # Node exporter - lightweight
     nodeExporter:

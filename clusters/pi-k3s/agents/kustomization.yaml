@@ -11,6 +11,7 @@ resources:
   - networkpolicies.yaml
   - external-secret-runner.yaml
   - external-secret-media-investigator.yaml
+  - external-secret-ops-investigator.yaml
   - pvc.yaml
   - deployment.yaml
   - service.yaml
@@ -27,3 +28,4 @@ configMapGenerator:
     namespace: agents
     files:
       - manifests/media-investigator.yaml
+      - manifests/ops-investigator.yaml

@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_68 ExternalSecrets · 49 1Password items · 74 consumer edges · 18 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_70 ExternalSecrets · 51 1Password items · 74 consumer edges · 18 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -144,6 +144,8 @@ graph LR
   nxmumnv(["🔑 mcp-homelab-readonly"])
   n1icbr5["agent-media-investigator<br/>(agents)"]
   nxmumnv --> n1icbr5
+  n1054qib["agent-ops-investigator<br/>(agents)"]
+  nxmumnv --> n1054qib
   n3t8m4i["mcp-homelab-readonly<br/>(mcp-homelab)"]
   nxmumnv --> n3t8m4i
   n1q7i1nq(["🔑 mealie"])
@@ -210,6 +212,8 @@ graph LR
 
 - **agent-media-investigator** → 1 ExternalSecret(s):
     - `agents/agent-media-investigator`
+- **agent-ops-investigator** → 1 ExternalSecret(s):
+    - `agents/agent-ops-investigator`
 - **agent-runner** → 1 ExternalSecret(s):
     - `agents/agent-runner`
 - **ai-controlpanel** → 1 ExternalSecret(s):
@@ -265,8 +269,9 @@ graph LR
     - `homepage/homepage-servarr`
     - `mcp-homelab/mcp-homelab-secrets`
     - `mealie/mealie-ai-secret`
-- **mcp-homelab-readonly** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **mcp-homelab-readonly** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `agents/agent-media-investigator`
+    - `agents/agent-ops-investigator`
     - `mcp-homelab/mcp-homelab-readonly`
 - **mealie** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/mealie-db-password`
@@ -283,6 +288,8 @@ graph LR
 - **n8n** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/n8n-db-password`
     - `n8n/n8n-secret`
+- **n8n-agent-alert-webhook** → 1 ExternalSecret(s):
+    - `monitoring/alertmanager-n8n-agents`
 - **n8n-automation** → 1 ExternalSecret(s):
     - `family-board/family-board-feed`
 - **nas** `crown-jewel` → 1 ExternalSecret(s):
@@ -341,6 +348,9 @@ graph LR
 - **`agents/agent-media-investigator`** ← `agent-media-investigator`, `mcp-homelab-readonly`
   produces Secret `agent-media-investigator` in `agents`
     → _agent-runner-rendered Job for the media-investigator agent (envFrom; see clusters/pi-k3s/agents/README.md)_ (curated: not a pod-spec ref)
+- **`agents/agent-ops-investigator`** ← `agent-ops-investigator`, `mcp-homelab-readonly`
+  produces Secret `agent-ops-investigator` in `agents`
+    → _agent-runner-rendered Job for the ops-investigator agent (envFrom; see clusters/pi-k3s/agents/README.md)_ (curated: not a pod-spec ref)
 - **`agents/agent-runner`** ← `agent-runner`
   produces Secret `agent-runner` in `agents`
     → `agents/agent-runner` (Deployment, env)
@@ -503,6 +513,9 @@ graph LR
 - **`monitoring/alertmanager-healthchecks`** ← `healthchecks`
   produces Secret `alertmanager-healthchecks` in `monitoring`
     → _kube-prometheus-stack HelmRelease (Alertmanager watchdog ping, valuesFrom)_ (curated: not a pod-spec ref)
+- **`monitoring/alertmanager-n8n-agents`** ← `n8n-agent-alert-webhook`
+  produces Secret `alertmanager-n8n-agents` in `monitoring`
+    → _kube-prometheus-stack HelmRelease (alertmanagerSpec.secrets mount; n8n-agents receiver bearer credentials_file)_ (curated: not a pod-spec ref)
 - **`monitoring/grafana-secret`** ← `grafana`
   produces Secret `grafana-secret` in `monitoring`
     → _kube-prometheus-stack HelmRelease (grafana.admin existingSecret)_ (curated: not a pod-spec ref)
