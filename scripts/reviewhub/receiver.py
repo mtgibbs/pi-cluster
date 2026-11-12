@@ -10,7 +10,7 @@ from the webhook payload.
 Env:
   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY (PEM), GITHUB_WEBHOOK_SECRET   (required)
   TRIGGERABLE_JUDGE_LITELLM_KEY                                        (model auth)
-  JUDGE_REPEAT=5  JUDGE_TIMEOUT=240  JUDGE_MODEL=hot-coder  PORT=8080  (tunables)
+  JUDGE_REPEAT=5  JUDGE_TIMEOUT=360  JUDGE_MODEL=hot-coder  PORT=8080  (tunables)
   LOG_LEVEL=INFO
 """
 import hashlib
@@ -49,7 +49,7 @@ APP_ID = os.environ.get("GITHUB_APP_ID")
 PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY")
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "").encode()
 REPS = int(os.environ.get("JUDGE_REPEAT", "5"))
-TIMEOUT = int(os.environ.get("JUDGE_TIMEOUT", "240"))
+TIMEOUT = int(os.environ.get("JUDGE_TIMEOUT", "360"))
 MODEL = os.environ.get("JUDGE_MODEL", "hot-coder")
 PORT = int(os.environ.get("PORT", "8080"))
 CONCURRENCY = int(os.environ.get("VALIDATOR_CONCURRENCY", "4"))  # validators run in parallel
