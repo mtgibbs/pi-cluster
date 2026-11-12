@@ -1,0 +1,76 @@
+# Flux → n8n: "the cluster applied a new revision" → the sec-researcher workflow
+# (clusters/pi-k3s/n8n/workflows/agent-sec-researcher.json, docs/agent-sandbox-n8n.md "sec-researcher").
+#
+# Event-driven, not polling: kustomize-controller emits an event when a Kustomization applies a
+# revision; notification-controller forwards it here. Every Kustomization emits its own event for the
+# same revision, so n8n dedupes on the commit sha (atomic claim in its `agent_dedupe` table) and, once per
+# revision, asks GitHub's public compare API which files changed. Only a revision that touched
+# access-control paths starts a run.
+#
+# Auth (fails closed): notification-controller sends `Authorization: Bearer <token>` from the Secret
+# below; n8n's Webhook node checks it with its Header Auth credential and answers 403 without it. No
+# Secret → the Provider is not Ready → no events are sent at all.
+#
+# Credential: REUSED, not minted. 1Password `pi-cluster/n8n-agent-alert-webhook` field `token` is
+# the "in-cluster sender → n8n agent webhook" identity Alertmanager already uses (monitoring/
+# external-secret.yaml). Same role, same receiver (n8n's agent webhooks, behind the same n8n
+# credential `agent-alert-token`), same blast radius: whoever holds it can start READ-ONLY agent runs,
+# bounded by dedupe and each manifest's runs_per_day. It is NOT n8n/webhook-token, which sits at the
+# public edge (Cloudflare Email Worker).
+#
+# Address: the n8n webhook tier's in-cluster Service. flux-system's `allow-egress` policy permits all
+# egress from notification-controller; n8n has no NetworkPolicy.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: n8n-agent-flux-webhook
+  namespace: flux-system
+spec:
+  refreshInterval: 24h
+  secretStoreRef:
+    name: onepassword
+    kind: ClusterSecretStore
+  target:
+    name: n8n-agent-flux-webhook
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        # Provider type `generic` reads extra request headers from the `headers` key (YAML map).
+        headers: |
+          Authorization: Bearer {{ .token }}
+  data:
+    - secretKey: token
+      remoteRef:
+        key: n8n-agent-alert-webhook/token
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: n8n-agents
+  namespace: flux-system
+spec:
+  type: generic
+  address: http://n8n-webhook.n8n.svc.cluster.local:5678/webhook/agent-sec-revision
+  timeout: 15s
+  secretRef:
+    name: n8n-agent-flux-webhook
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: sec-researcher-revisions
+  namespace: flux-system
+spec:
+  providerRef:
+    name: n8n-agents
+  # info = successful applies (they carry the revision). Error events also pass this filter; n8n
+  # ignores anything that is not severity info with a commit sha in its metadata.
+  eventSeverity: info
+  eventSources:
+    - kind: Kustomization
+      name: '*'
+  exclusionList:
+    - ".*waiting.*socket.*"
+    - ".*Dependencies do not meet ready condition.*"
+    - ".*[Hh]ealth check failed.*"

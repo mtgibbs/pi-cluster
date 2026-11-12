@@ -1,4 +1,4 @@
-# Agent sandbox — contracts (slice 1; burst handling added in runner 0.2.0)
+# Agent sandbox — contracts (slice 1; burst handling in runner 0.2.0; plans, repo checkout and per-event models in runner 0.3.0 / runtime 0.2.0)
 
 Design: `docs/design/agent-sandbox.md` (PR #258). Four parts: n8n decides *when*, the **runner** decides *how*,
 the **agent runtime** image decides *what*, existing gates decide *whether*. These contracts are what the parts
@@ -22,6 +22,8 @@ image: ghcr.io/mtgibbs/agent-runtime:0.1.0
 data_class: system                  # system | personal. personal => every model must be in RUNNER_LOCAL_MODELS
 model:
   allow: [hot-coder, claude-haiku]  # tried in order; next one on API error
+  by_event_type:                    # optional (runner 0.3.0): event.type -> its own list, used INSTEAD of allow
+    security.sweep: [claude-sonnet, claude-haiku]   # the personal-data rule applies to every list
 secret: agent-media-investigator    # k8s Secret in ns `agents`, envFrom'd into the Job. Holds AGENT_LITELLM_KEY
                                     # and any connector keys. The runner never reads it.
 connectors:
@@ -31,7 +33,10 @@ connectors:
       header: X-API-Key
       key_env: MCP_HOMELAB_READONLY_KEY     # env var name inside the Job (from `secret`)
       tools: [get_media_status, get_cluster_health]   # allowlist; nothing else is offered to the model
-outputs: [report]                   # result output kinds this agent may return
+checkout:                           # optional (runner 0.3.0, runtime 0.2.0): read-only repo copy, §4a
+  source: flux-system/flux-system   # <namespace>/<name> of a Flux GitRepository; the HOST is the runner's
+  include: [clusters/]              # optional: path prefixes to unpack (default: everything)
+outputs: [report]                   # result output kinds this agent may return (report | plan, §5a)
 prompt: |
   multi-line instructions for the agent
 limits:
@@ -67,7 +72,8 @@ Runner env: `RUNNER_API_TOKEN`, `RUNNER_NAMESPACE` (agents), `RUNNER_MANIFEST_DI
 `RUNNER_LEDGER_PATH`, `RUNNER_CALLBACK_PREFIXES`, `RUNNER_LOCAL_MODELS` (comma list), `RUNNER_PAUSED`,
 `RUNNER_LITELLM_BASE_URL` (passed to Jobs as `LITELLM_BASE_URL`), `RUNNER_NODE_HOSTNAMES` (comma list for
 required node affinity on `kubernetes.io/hostname`), `RUNNER_MAX_CONCURRENT` (default 2),
-`RUNNER_MAX_QUEUE` (default 8), `RUNNER_MAX_QUEUE_WAIT` (default `45m`, `Ns`/`Nm`/`Nh`).
+`RUNNER_MAX_QUEUE` (default 8), `RUNNER_MAX_QUEUE_WAIT` (default `45m`, `Ns`/`Nm`/`Nh`),
+`RUNNER_CHECKOUT_BASE_URL` (default `http://source-controller.flux-system.svc.cluster.local.`, §4a).
 
 ## 4. The Job the runner renders (ns `agents`)
 
@@ -79,8 +85,35 @@ required node affinity on `kubernetes.io/hostname`), `RUNNER_MAX_CONCURRENT` (de
   `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`.
 - One `emptyDir` (sizeLimit 1Gi) at `/work`; env `HOME=/work/home`, `TMPDIR=/work/tmp`.
 - env: `AGENT_MANIFEST` (manifest as JSON), `AGENT_EVENT` (event as JSON), `AGENT_RUN_ID`, `LITELLM_BASE_URL`;
-  `envFrom` the manifest's `secret`.
+  `envFrom` the manifest's `secret`. `AGENT_MANIFEST` carries the **effective** model list: `model` is
+  `{"allow": <by_event_type[event.type] or allow>}`, so the runtime never sees `by_event_type`.
 - No `command`/`args`: the image's entrypoint runs the agent.
+- With `checkout:` — see §4a.
+
+## 4a. Repo checkout (manifest `checkout:`)
+
+An agent that reads a repository gets it **without internet egress**: Flux's source-controller already holds the
+repo as an artifact (a `.tar.gz` of the tree at one revision) and serves it over in-cluster HTTP.
+
+- The Job gets an **init container** `checkout`: the manifest's `image`, `command: ["python", "/app/checkout.py"]`,
+  the same restricted securityContext and resources, **no `envFrom`** (it needs no credential), mounts `work` and a
+  second `emptyDir` `repo` (sizeLimit 256Mi) at `/repo`. Env: `CHECKOUT_URL`, `CHECKOUT_FALLBACK_URL`,
+  `CHECKOUT_DEST=/repo/tree`, `CHECKOUT_INFO=/repo/checkout.json`, `CHECKOUT_INCLUDE` (JSON list), `HOME`, `TMPDIR`.
+- The agent container mounts `repo` at `/repo` **read-only** and gets `AGENT_REPO_DIR=/repo/tree`,
+  `AGENT_CHECKOUT_INFO=/repo/checkout.json`.
+- URLs: `<RUNNER_CHECKOUT_BASE_URL>/gitrepository/<ns>/<name>/<file>`. `<file>` is `<sha>.tar.gz` when
+  `event.data.revision` is exactly 40 lowercase hex characters (then `CHECKOUT_FALLBACK_URL` is `latest.tar.gz`, used
+  on a 404 because source-controller garbage-collects old artifacts), else `latest.tar.gz` with no fallback. No other
+  event field reaches the URL, and the manifest cannot choose the host.
+- `checkout.py` downloads (≤ 32 MiB), then unpacks **by hand**: regular files and directories only (symlinks, hard
+  links, devices skipped), member names that are absolute or contain `..`, NUL or `\` skipped, ≤ 10,000 files,
+  ≤ 128 MiB unpacked, ≤ 8 MiB per file, `include` prefixes applied. It **always exits 0** and writes
+  `checkout.json` `{"ok": true|false, "requested", "served", "sha256", "files", …, "error"}`.
+- The runtime reads `checkout.json`: `ok: false` (or a missing file) is a `failed` Result, "repository checkout
+  failed: …". Otherwise it offers the model `repo__list_files`, `repo__read_file`, `repo__search` (§6) and tells it
+  which artifact it got (and, when `served != requested`, that it is reading a newer revision).
+- Network: the pod needs egress to source-controller :9090 and source-controller needs a matching ingress allow;
+  both are NetworkPolicies naming the agent (`clusters/pi-k3s/agents/networkpolicies.yaml` 3b and 5).
 
 ## 5. Result (agent → runner)
 
@@ -91,15 +124,39 @@ The agent's **last stdout line** is `::agent-result::<base64 of the Result JSON>
  "outputs": [{"kind": "report", "title": "…", "body": "markdown, <= 32 KiB"}]}
 ```
 The runner reads it from the pod log, and rejects it (`invalid_result`, outcome forced to `failed`) if the JSON is
-malformed, `outcome` is unknown, or any `outputs[].kind` is not in the manifest's `outputs`. No marker line →
-`no_result`. The runner treats the result as data and never executes anything in it.
+malformed, `outcome` is unknown, any `outputs[].kind` is not in the manifest's `outputs`, or any output does not
+match its kind's exact shape (`report` and other prose kinds: exactly `kind/title/body`; `plan`: §5a). No marker
+line → `no_result`. The runner treats the result as data and never executes anything in it.
+
+### 5a. `plan` outputs (runner 0.3.0)
+
+A structured finding. It carries **no** issue URL: the agent holds no GitHub credential, and n8n files plans
+(`docs/agent-sandbox-n8n.md`, "sec-researcher").
+
+```json
+{"kind": "plan", "title": "one line, <= 200 chars", "severity": "critical|high|medium|low|info",
+ "fingerprint": {"rule": "netpol-broad-egress", "resource": "agents/NetworkPolicy/agent-base-egress"},
+ "plan": {"found": "…", "evidence": "…", "likely_cause": "…", "proposed_change": "… or 'No change needed.'",
+          "risk": "…", "verify": "…", "rollback": "…"}}
+```
+- Exact keys at every level; every section a non-empty string; `evidence` ≤ 8 KiB, every other section ≤ 4 KiB
+  (UTF-8); `title` one line.
+- `fingerprint.rule`: `^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`. `fingerprint.resource`:
+  `<namespace | cluster>/<Kind>/<name>`, `^[a-z0-9][a-z0-9.-]{0,62}/[A-Z][A-Za-z0-9]{0,62}/[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$`.
+- n8n's identity for a finding is `sha256("<agent>|<rule>|<resource>")`.
+- The runtime offers this schema to the model, bounces a malformed plan back to it, and at emit truncates oversize
+  sections and drops a plan it cannot repair (saying so in the summary), so the runner should never have to reject.
 
 ## 6. Agent runtime (image `agent-runtime`)
 
 Stdlib-only Python. Reads `AGENT_MANIFEST` / `AGENT_EVENT`; talks to LiteLLM's OpenAI-compatible
 `$LITELLM_BASE_URL/chat/completions` with `Authorization: Bearer $AGENT_LITELLM_KEY`; connects to each MCP server
 (streamable HTTP, JSON-RPC) and offers the model **only** the allowlisted tools, named `<connector>__<tool>`, plus
-a built-in `submit_result` tool whose arguments are the Result. The loop ends when `submit_result` is called, at
+a built-in `submit_result` tool whose arguments are the Result, plus — only with `checkout:` (§4a) — three local,
+read-only file tools over `AGENT_REPO_DIR`: `repo__list_files`, `repo__read_file` (≤ 800 lines / 64 KiB per call),
+`repo__search` (literal substring, never a regex; ≤ 100 matches). Paths are relative with no `..`, no NUL/backslash;
+every component is `lstat`ed and any symlink is refused; the resolved path must stay under the root; walks never
+follow links; files over 2 MiB and binary files are refused. The loop ends when `submit_result` is called, at
 `max_steps`, or on an unrecoverable error (then it emits an `outcome: failed` Result itself). Event content is
 passed to the model fenced as data, with `trust` stated.
 

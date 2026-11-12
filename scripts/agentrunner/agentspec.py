@@ -16,9 +16,17 @@ ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 DURATION_RE = re.compile(r"^(\d+)([smh])$")
 TOOL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+EVENT_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+# checkout.source names a Flux source object as <namespace>/<name>. The runner, not the manifest,
+# decides the host it is fetched from (RUNNER_CHECKOUT_BASE_URL), so a manifest cannot point an
+# init container at an arbitrary URL.
+CHECKOUT_SOURCE_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+INCLUDE_RE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$")
+CHECKOUT_KEYS = {"source", "include"}
+MAX_INCLUDE = 20
 
 TOP_KEYS = {"kind", "name", "purpose", "image", "data_class", "model", "secret", "connectors",
-            "outputs", "prompt", "limits", "resources"}
+            "outputs", "prompt", "limits", "resources", "checkout"}
 REQUIRED = {"kind", "name", "purpose", "image", "data_class", "model", "secret", "outputs",
             "prompt", "limits"}
 LIMIT_KEYS = {"timeout", "runs_per_day", "max_steps"}
@@ -68,6 +76,18 @@ def _pos_int(v):
     return isinstance(v, int) and not isinstance(v, bool) and v > 0
 
 
+def _model_list(v):
+    return (isinstance(v, list) and bool(v)
+            and all(isinstance(x, str) and MODEL_RE.match(x) for x in v))
+
+
+def models_for(manifest, event_type):
+    """The model list a run of `manifest` uses for an event of `event_type`: the matching
+    model.by_event_type entry, else model.allow. Both were validated (incl. the personal rule)."""
+    m = manifest["model"]
+    return list((m.get("by_event_type") or {}).get(event_type) or m["allow"])
+
+
 def validate_manifest(doc, file_stem, local_models):
     """Raise ManifestError listing every problem; return the timeout in seconds when valid."""
     errs = []
@@ -97,20 +117,32 @@ def validate_manifest(doc, file_stem, local_models):
         errs.append("secret must be a Kubernetes object name")
 
     # model
-    allow = None
+    model_lists = []   # every model list the manifest can select (allow + each by_event_type entry)
     if "model" in doc:
         m = doc["model"]
-        if not isinstance(m, dict) or set(m) != {"allow"}:
-            errs.append("model must be a mapping with exactly one key: allow")
+        if not isinstance(m, dict) or "allow" not in m or set(m) - {"allow", "by_event_type"}:
+            errs.append("model must be a mapping with key allow (and optionally by_event_type)")
         else:
             allow = m["allow"]
-            if not (isinstance(allow, list) and allow
-                    and all(isinstance(x, str) and MODEL_RE.match(x) for x in allow)):
+            if _model_list(allow):
+                model_lists.append(allow)
+            else:
                 errs.append("model.allow must be a non-empty list of model names")
-                allow = None
-    if doc.get("data_class") == "personal" and allow is not None:
+            if "by_event_type" in m:
+                bet = m["by_event_type"]
+                if not (isinstance(bet, dict) and bet):
+                    errs.append("model.by_event_type must be a non-empty mapping of event type -> models")
+                else:
+                    for et, lst in bet.items():
+                        if not (isinstance(et, str) and EVENT_TYPE_RE.match(et)):
+                            errs.append(f"model.by_event_type key {et!r} is not an event type")
+                        elif not _model_list(lst):
+                            errs.append(f"model.by_event_type[{et}] must be a non-empty list of model names")
+                        else:
+                            model_lists.append(lst)
+    if doc.get("data_class") == "personal" and model_lists:
         local = set(local_models)
-        nonlocal_models = [x for x in allow if x not in local]
+        nonlocal_models = sorted({x for lst in model_lists for x in lst if x not in local})
         if nonlocal_models:
             errs.append(f"data_class personal requires local models only; not in "
                         f"RUNNER_LOCAL_MODELS: {nonlocal_models}")
@@ -178,6 +210,22 @@ def validate_manifest(doc, file_stem, local_models):
                 if not (isinstance(tools, list) and tools
                         and all(isinstance(t, str) and TOOL_RE.match(t) for t in tools)):
                     errs.append(f"{where}.tools must be a non-empty list of tool names")
+
+    # checkout (optional): a read-only copy of a Flux source artifact (CONTRACT §2, §4)
+    if "checkout" in doc:
+        co = doc["checkout"]
+        if not isinstance(co, dict) or set(co) - CHECKOUT_KEYS or "source" not in co:
+            errs.append("checkout must be a mapping with key source (and optionally include)")
+        else:
+            if not (isinstance(co["source"], str) and CHECKOUT_SOURCE_RE.match(co["source"])):
+                errs.append("checkout.source must be <namespace>/<name> of a Flux GitRepository")
+            if "include" in co:
+                inc = co["include"]
+                if not (isinstance(inc, list) and inc and len(inc) <= MAX_INCLUDE and all(
+                        isinstance(x, str) and INCLUDE_RE.match(x) and ".." not in x.split("/")
+                        for x in inc)):
+                    errs.append(f"checkout.include must be 1..{MAX_INCLUDE} relative path prefixes "
+                                "(no leading '/', no '..')")
 
     # resources (optional)
     if "resources" in doc:

@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_70 ExternalSecrets · 51 1Password items · 74 consumer edges · 18 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_72 ExternalSecrets · 52 1Password items · 74 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -146,6 +146,8 @@ graph LR
   nxmumnv --> n1icbr5
   n1054qib["agent-ops-investigator<br/>(agents)"]
   nxmumnv --> n1054qib
+  n1ky4zo3["agent-sec-researcher<br/>(agents)"]
+  nxmumnv --> n1ky4zo3
   n3t8m4i["mcp-homelab-readonly<br/>(mcp-homelab)"]
   nxmumnv --> n3t8m4i
   n1q7i1nq(["🔑 mealie"])
@@ -159,6 +161,11 @@ graph LR
   nez177h --> n12hamnt
   n1c98ym["n8n-secret<br/>(n8n)"]
   nez177h --> n1c98ym
+  n1wjj1ny(["🔑 n8n-agent-alert-webhook"])
+  n1k2o83e["n8n-agent-flux-webhook<br/>(flux-system)"]
+  n1wjj1ny --> n1k2o83e
+  nsibs2u["alertmanager-n8n-agents<br/>(monitoring)"]
+  n1wjj1ny --> nsibs2u
   nmyw6do(["🔑 new-horizons"])
   nl73o2w["new-horizons-push-secrets<br/>(new-horizons)"]
   nmyw6do --> nl73o2w
@@ -216,6 +223,8 @@ graph LR
     - `agents/agent-ops-investigator`
 - **agent-runner** → 1 ExternalSecret(s):
     - `agents/agent-runner`
+- **agent-sec-researcher** → 1 ExternalSecret(s):
+    - `agents/agent-sec-researcher`
 - **ai-controlpanel** → 1 ExternalSecret(s):
     - `homepage/homepage-ai-controlpanel`
 - **alertmanager** → 1 ExternalSecret(s):
@@ -269,9 +278,10 @@ graph LR
     - `homepage/homepage-servarr`
     - `mcp-homelab/mcp-homelab-secrets`
     - `mealie/mealie-ai-secret`
-- **mcp-homelab-readonly** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **mcp-homelab-readonly** → 4 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `agents/agent-media-investigator`
     - `agents/agent-ops-investigator`
+    - `agents/agent-sec-researcher`
     - `mcp-homelab/mcp-homelab-readonly`
 - **mealie** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/mealie-db-password`
@@ -288,7 +298,8 @@ graph LR
 - **n8n** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `backup-jobs/n8n-db-password`
     - `n8n/n8n-secret`
-- **n8n-agent-alert-webhook** → 1 ExternalSecret(s):
+- **n8n-agent-alert-webhook** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `flux-system/n8n-agent-flux-webhook`
     - `monitoring/alertmanager-n8n-agents`
 - **n8n-automation** → 1 ExternalSecret(s):
     - `family-board/family-board-feed`
@@ -354,6 +365,9 @@ graph LR
 - **`agents/agent-runner`** ← `agent-runner`
   produces Secret `agent-runner` in `agents`
     → `agents/agent-runner` (Deployment, env)
+- **`agents/agent-sec-researcher`** ← `agent-sec-researcher`, `mcp-homelab-readonly`
+  produces Secret `agent-sec-researcher` in `agents`
+    → _agent-runner-rendered Job for the sec-researcher agent (envFrom, agent container only; see clusters/pi-k3s/agents/README.md)_ (curated: not a pod-spec ref)
 - **`backup-jobs/backup-ssh-key`** ← `synology_backup`
   produces Secret `backup-ssh-key` in `backup-jobs`
     → `backup-jobs/git-mirror-backup` (CronJob, volume)
@@ -405,6 +419,9 @@ graph LR
 - **`flux-system/ghcr-pull-secret`** ← `ghcr-read-token`
   produces Secret `ghcr-pull-secret` in `flux-system`
     → _Flux source/kustomize/helm controllers (ghcr.io/mtgibbs registry auth)_ (curated: not a pod-spec ref)
+- **`flux-system/n8n-agent-flux-webhook`** ← `n8n-agent-alert-webhook`
+  produces Secret `n8n-agent-flux-webhook` in `flux-system`
+    → _Flux notification-controller (Provider n8n-agents in flux-notifications/n8n-agents.yaml; bearer header to n8n's agent-sec-revision webhook)_ (curated: not a pod-spec ref)
 - **`flux-system/nfs-credentials`** ← `nas`
   produces Secret `nfs-credentials` in `flux-system`
     → _Flux Kustomizations (postBuild.substituteFrom NAS uid/gid, 4 refs in infrastructure.yaml)_ (curated: not a pod-spec ref)

@@ -25,6 +25,55 @@ n8n ──POST /runs──▶ agent-runner (Deployment) ──creates──▶ J
 |---|---|---|---|---|
 | `media-investigator` | n8n form (`agent-run-manual`), by hand | 7 read-only homelab MCP tools (media-focused) | `report` | slice 1 — active |
 | `ops-investigator` | Alertmanager → n8n `agent-alert` webhook, automatically (warning/critical) | 15 read-only homelab MCP tools (cluster-wide triage) | `report` | slice 2 — manifests landed; see its activation checklist |
+| `sec-researcher` | n8n `agent-sec-researcher`: a Flux revision that touched access-control paths; the weekly sweep (Sun 06:00); Matt's form | Read-only repo checkout (Flux artifact, `repo__*` tools) + 4 read-only homelab MCP tools | `plan` — **filed as issues by n8n**, not by the agent | slice 3 — landed inert-safe; see its activation checklist |
+
+## Activation checklist for `sec-researcher` (slice 3, human-only, in order)
+
+The agent holds **no** GitHub credential and the runner holds no GitHub App key: the agent returns `plan` items and
+the n8n workflow files them (`docs/agent-sandbox-n8n.md`, "sec-researcher"). As with slice 2, `wait: true` means a
+missing 1Password item turns the whole `agents` Kustomization red — do step 2 **before** merging.
+
+1. **Create the private plans repo** `mtgibbs/homelab-plans` (private; issues on). Optionally create the labels
+   `sec-researcher`, `accepted-risk`, `severity:critical|high|medium|low|info` (GitHub creates missing labels on
+   issue create when the token may; the lookup does not depend on labels — it reads a marker in the issue body).
+2. **Mint the sec-researcher LiteLLM key** on the Beelink LiteLLM: `models: [claude-haiku, claude-sonnet]` (never
+   Opus), `max_budget: 3`, `budget_duration: 1d`, alias `agent-sec-researcher`. Store it in the **`homelab-agent`**
+   vault as item `agent-sec-researcher`, field `litellm-key`. The MCP key is the reused
+   `mcp-homelab-readonly/password`; don't mint one. Both aliases must exist in LiteLLM (`claude-haiku` is still open
+   from slice 1, step 3); without `claude-sonnet` the weekly sweep falls back to Haiku.
+3. **Mint the n8n GitHub token** — a fine-grained PAT (or App installation token) with **Issues: read and write** on
+   `mtgibbs/homelab-plans` **only** (Metadata: read is implied). Store it in 1Password (e.g. `pi-cluster/github-plans`,
+   field `token`) for rotation; n8n holds the working copy as Header-Auth credential `github-plans`
+   (`Authorization: Bearer <token>`). Restrict the credential's allowed domains to `api.github.com`.
+4. **No new Flux→n8n token.** `flux-notifications/n8n-agents.yaml` reuses `pi-cluster/n8n-agent-alert-webhook/token`
+   (the same "in-cluster sender → n8n agent webhook" identity Alertmanager uses), so that item must exist — it is
+   step 2 of the slice-2 checklist. If it does not, `flux-notifications` goes not-Ready (it also has `wait: true`).
+5. **Merge.** CI pushes `agent-runner:0.3.0` and `agent-runtime:0.2.0`; Flux image automation bumps the runner tag.
+   The manifest pins `agent-runtime:0.2.0` (not automated, as for the other agents). Until the 0.3.0 runner is live,
+   the old runner refuses the sec-researcher manifest (unknown keys `checkout`, `by_event_type`) with 422 — nothing
+   else is affected. Reconcile the source, then `agents` and `flux-notifications`.
+6. **Import the n8n workflow** `clusters/pi-k3s/n8n/workflows/agent-sec-researcher.json` (credentials: patch
+   `REPLACE_ON_IMPORT_agent_alert_token`, `REPLACE_ON_IMPORT_agent_runner`, `REPLACE_ON_IMPORT_github_plans`), activate
+   it, and do the webhook-tier `restarted-at` roll so `/webhook/agent-sec-revision` is served
+   (`docs/agent-sandbox-n8n.md`, "sec-researcher → Import").
+7. **Verify live** (none of this could be checked from the PR):
+   - `agents/agent-sec-researcher` and `flux-system/n8n-agent-flux-webhook` are `SecretSynced`; Provider
+     `n8n-agents` and Alert `sec-researcher-revisions` are Ready.
+   - **Checkout path (untested live):** a sec-researcher Job's `checkout` init container logs `"event": "checkout",
+     "ok": true`. If it fails with a connection error, kube-router is dropping agents → source-controller:9090: check
+     NetworkPolicies `agents/agent-checkout-egress` and `flux-system/allow-agent-checkout`. **Positive control:** a
+     throwaway pod in `agents` labelled `app.kubernetes.io/part-of: agent-sandbox, agent: sec-researcher` can
+     `wget http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/latest.tar.gz`;
+     the same pod labelled `agent: media-investigator` cannot. Confirm `latest.tar.gz` exists (source-controller keeps
+     the symlink; if a Flux upgrade drops it, every run without an exact revision fails "artifact not found").
+   - Submit the form (`/form/agent-sec-run`) with a narrow focus: a push `sec-researcher: …` arrives, and either
+     issues appear in `homelab-plans` or the push says why not.
+   - Re-run the same focus: the existing issues show `unchanged`/`updated`, no duplicates. Close one as *not
+     planned*; the next run reports it `skipped (accepted risk)`.
+   - Merge a harmless PR that only bumps an image tag: n8n gets the Flux events, `Path Filter` says "no
+     access-control change", no run. Merge one that touches a `networkpolicies.yaml`: one run, once (not once per
+     Kustomization).
+   - **Negative:** POST to `/webhook/agent-sec-revision` without the bearer → 403.
 
 ## Activation checklist for `ops-investigator` (slice 2, human-only, in order)
 
@@ -107,11 +156,13 @@ useful ones: the Kustomization goes red if a secret stops resolving.
 | `rbac.yaml` | `agent-runner` can only create, get, list, watch and delete **Jobs**, get and list **pods**, and get **pods/log**, all **in this namespace**. It has **no Secret verbs** and nothing cluster-scoped. It launches agents but can't read their credentials. |
 | `resourcequota.yaml` | **At most 2 agents run at once** (`pods: 3` = runner + 2). This is the backstop; the runner's own gate (`RUNNER_MAX_CONCURRENT=2`) is the first line. Compute is capped at runner + 2 × the LimitRange max. No NodePorts or LoadBalancers. The header explains why the cap is `pods` and not `count/jobs.batch`: finished Jobs stay around for an hour. |
 | `limitrange.yaml` | Default 1 CPU / 512Mi limit, max 1 CPU / 1Gi per container. Manifests that leave out `resources` still pass the quota. |
-| `networkpolicies.yaml` | **Default-deny in both directions.** Agents may reach only DNS and the LiteLLM gateway. Agents named in `agent-mcp-homelab-egress` (`media-investigator`, `ops-investigator`) may also reach the homelab MCP on :3000. The runner accepts traffic only from `n8n` on :8080, and may reach only DNS, the Kubernetes API (192.168.1.55:6443) and n8n on :5678. |
+| `networkpolicies.yaml` | **Default-deny in both directions.** Agents may reach only DNS and the LiteLLM gateway. Agents named in `agent-mcp-homelab-egress` (`media-investigator`, `ops-investigator`, `sec-researcher`) may also reach the homelab MCP on :3000. Agents named in `agent-checkout-egress` (`sec-researcher`) may reach Flux source-controller :9090 for their repo checkout, matched by `flux-system/allow-agent-checkout` (the only object here outside `agents`: Flux's own policies admit no cross-namespace traffic to :9090). The runner accepts traffic only from `n8n` on :8080, and may reach only DNS, the Kubernetes API (192.168.1.55:6443) and n8n on :5678. |
 | `external-secret-runner.yaml` | The runner's bearer token, Tier 2, kept in the `pi-cluster` vault (Touch ID). |
 | `external-secret-media-investigator.yaml` | The agent's own scoped LiteLLM key plus the **reused read-only** homelab-MCP key, both Tier 1, in the `homelab-agent` vault. Each agent gets its own Secret. |
 | `manifests/media-investigator.yaml` | A read-only investigator with an allowlist of 7 read-only MCP tools. Tools that could make the MCP server contact an arbitrary host are left out. |
 | `external-secret-ops-investigator.yaml` | Same shape as media-investigator's: its own scoped LiteLLM key plus the **reused read-only** homelab-MCP key, `homelab-agent` vault. |
+| `external-secret-sec-researcher.yaml` | Same shape again: its own scoped LiteLLM key (Haiku + Sonnet only) plus the **reused read-only** MCP key. No GitHub credential: n8n files its plans. |
+| `manifests/sec-researcher.yaml` | Read-only access-control review. `checkout:` gives it a read-only copy of the repo from the Flux artifact (no internet egress); 4 read-only MCP tools; `outputs: [plan]` only; Sonnet only for `security.sweep` (`model.by_event_type`). |
 | `manifests/ops-investigator.yaml` | Read-only alert triage, started by Alertmanager via n8n. 15 read-only MCP tools, **including** `diagnose_dns` and `get_node_networking` (a DNS-lookup side channel, accepted for DNS triage — see the manifest header). Proposes fixes, never applies them. |
 | `kustomization.yaml` | The `configMapGenerator` builds `agent-manifests` with a hash suffix, so any manifest edit rolls the runner. |
 | `deployment.yaml` / `service.yaml` / `pvc.yaml` | Restricted-compliant runner on the Pi 5 workers, **ClusterIP only, no Ingress**. The dedupe and daily-cap ledger is on a PVC so it survives a restart. `RUNNER_PAUSED` is the kill switch. |
@@ -195,5 +246,6 @@ Also update the node-workload list in `ARCHITECTURE.md` (Decision #13) when the 
 3. Add `external-secret-<name>.yaml`: one Secret per agent, with a LiteLLM key minted for that agent,
    reusing existing items for connector keys.
 4. Give it egress only if it needs more than DNS and LiteLLM: add an `agent: <name>` policy to
-   `networkpolicies.yaml`.
+   `networkpolicies.yaml`. A manifest with `checkout:` (CONTRACT §4a) must be added to BOTH lists in
+   `agent-checkout-egress` and `flux-system/allow-agent-checkout`, and needs `agent-runtime` ≥ 0.2.0.
 5. Regenerate the docs: `bash scripts/check-generated-docs.sh`.

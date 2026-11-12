@@ -14,6 +14,7 @@ Env (CONTRACT.md §3):
   RUNNER_LEDGER_PATH=/data/ledger.jsonl  RUNNER_CALLBACK_PREFIXES  RUNNER_LOCAL_MODELS
   RUNNER_PAUSED  RUNNER_LITELLM_BASE_URL  RUNNER_NODE_HOSTNAMES
   RUNNER_MAX_CONCURRENT=2  RUNNER_MAX_QUEUE=8  RUNNER_MAX_QUEUE_WAIT=45m
+  RUNNER_CHECKOUT_BASE_URL=http://source-controller.flux-system.svc.cluster.local.
   PORT=8080  RUNNER_POLL_SECONDS=5  (tunables)
 """
 import hmac
@@ -80,6 +81,7 @@ class Config:
     max_concurrent: int = 2          # agent Jobs alive at once; resourcequota.yaml pods = this + 1
     max_queue: int = 8               # runs waiting for a slot; beyond this POST /runs is 429 queue_full
     max_queue_wait_s: int = 45 * 60  # a run still queued after this ends as exit_reason queue_expired
+    checkout_base_url: str = jobspec.DEFAULT_CHECKOUT_BASE_URL  # Flux source-controller (manifest `checkout:`)
 
     @classmethod
     def from_env(cls, env):
@@ -101,6 +103,8 @@ class Config:
             max_queue=max(0, int(env.get("RUNNER_MAX_QUEUE", "8"))),
             max_queue_wait_s=agentspec.parse_duration(
                 (env.get("RUNNER_MAX_QUEUE_WAIT") or "45m").strip()),
+            checkout_base_url=(env.get("RUNNER_CHECKOUT_BASE_URL") or "").strip()
+            or jobspec.DEFAULT_CHECKOUT_BASE_URL,
         )
 
     def callback_allowed(self, url):
@@ -268,7 +272,8 @@ class Runner:
                 return 202, {"run_id": run_id, "status": "queued", "position": position}
 
             job = jobspec.render_job(run_id, manifest, event, timeout_s, self.cfg.namespace,
-                                     self.cfg.litellm_base_url, self.cfg.node_hostnames)
+                                     self.cfg.litellm_base_url, self.cfg.node_hostnames,
+                                     checkout_base_url=self.cfg.checkout_base_url)
             # Ledger first: a crash between this line and the create is re-adopted on restart
             # (Job 404 -> job_failed), never silently lost or launched twice.
             self.ledger.append(
@@ -342,7 +347,8 @@ class Runner:
             return "failed", f"agent manifest no longer loads: {str(e)[:300] or 'not found'}"
         now = self.now()
         job = jobspec.render_job(rid, manifest, event, timeout_s, self.cfg.namespace,
-                                 self.cfg.litellm_base_url, self.cfg.node_hostnames)
+                                 self.cfg.litellm_base_url, self.cfg.node_hostnames,
+                                     checkout_base_url=self.cfg.checkout_base_url)
         # `started` is set HERE, at Job creation: the run's deadline counts from now, not accept.
         self.ledger.append("launch", rid, started=utc_iso(now), timeout_s=timeout_s,
                            job=jobspec.job_name(rid), allowed_outputs=list(manifest["outputs"]))

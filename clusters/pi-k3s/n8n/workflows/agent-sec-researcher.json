@@ -1,0 +1,1285 @@
+{
+  "name": "Agent — sec-researcher (Flux revision / weekly sweep / form) → plans repo issues",
+  "nodes": [
+    {
+      "id": "CAB77A68-E721-5368-92FB-1A4921ADBC00",
+      "name": "Flux Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -200
+      ],
+      "webhookId": "8E4D4B31-3B53-52FB-B4E1-0254F72EA9CF",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-sec-revision",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT_agent_alert_token",
+          "name": "agent-alert-token"
+        }
+      }
+    },
+    {
+      "id": "5083E4C4-3E2C-5BC3-9BEF-5B9792174D38",
+      "name": "Flux Revision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// sec-researcher trigger 1/3: ONE Flux notification-controller event (Provider type generic, POSTed by the\n// `n8n-agents` Provider in clusters/pi-k3s/flux-notifications/n8n-agents.yaml) → the trigger record for\n// `Trigger`. Returns NO items (the execution ends quietly) unless it is an info event from a Kustomization\n// that names a commit sha. Every Kustomization sends its own event for the same revision; `Claim` keeps\n// exactly one per sha (key sec-researcher:flux-rev:<sha>, held for a year). Nothing from the payload except\n// the validated 40-hex sha is used.\nconst item = $input.first().json || {};\nconst p = (item.body && typeof item.body === 'object') ? item.body : item;   // webhook item, or a bare payload in tests\nconst obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};\n\nif (p.severity !== 'info') return [];\nif (obj(p.involvedObject).kind !== 'Kustomization') return [];\nconst meta = obj(p.metadata);\n// notification-controller trims the involved object's group prefix from metadata keys; accept both forms.\nconst raw = String(meta.revision || meta['kustomize.toolkit.fluxcd.io/revision'] || '');\nconst m = raw.match(/(?:^|[@:])([0-9a-f]{40})$/);\nif (!m) return [];\nconst revision = m[1];\n\nreturn [{ json: {\n  trigger: 'flux',\n  revision,\n  dedupe_key: `sec-researcher:flux-rev:${revision}`,\n  subject: revision,\n  cooldown_hours: 24 * 365,\n} }];\n"
+      }
+    },
+    {
+      "id": "9DC8AA4B-D4DD-514C-BB6F-22D40F81B64D",
+      "name": "Weekly Sweep",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "0D128886-EF5E-53EC-BA1A-635C905A0DF5",
+      "name": "Sweep Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// sec-researcher trigger 2/3: the ONE named weekly sweep (design §10: the only scheduled poll). One run per ISO\n// week: Claim holds sec-researcher:sweep:<YYYY-Www> for 6 days, so a re-fired schedule (n8n restart, a\n// manual \"execute\") in the same week does nothing.\nconst now = new Date();\n// ISO week of `now` (UTC): Thursday of this week decides the year.\nconst d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));\nconst dow = d.getUTCDay() || 7;\nd.setUTCDate(d.getUTCDate() + 4 - dow);\nconst yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));\nconst week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);\nconst isoWeek = `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;\n\nreturn [{ json: {\n  trigger: 'sweep',\n  week: isoWeek,\n  dedupe_key: `sec-researcher:sweep:${isoWeek}`,\n  subject: `sweep:${isoWeek}`,\n  cooldown_hours: 24 * 6,\n} }];\n"
+      }
+    },
+    {
+      "id": "C686B7B3-2C17-5C61-96AA-434BC3E07162",
+      "name": "Sec Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "5DCD8822-8080-5AF7-88AC-1C9D326BE9B8",
+      "parameters": {
+        "authentication": "none",
+        "formTitle": "Run the security researcher",
+        "formDescription": "Starts a read-only sec-researcher run (access control). Findings are filed as issues in the private plans repo; a summary is pushed to ntfy topic agent-runs.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "What should it focus on? (optional)",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "responseMode": "onReceived",
+        "options": {
+          "path": "agent-sec-run",
+          "ignoreBots": true,
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "text",
+              "formSubmittedText": "Started. The summary will arrive as an ntfy push (topic agent-runs)."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "F7E2D05A-AC2E-5D09-8BF7-4E40600CFBAE",
+      "name": "Form Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// sec-researcher trigger 3/3: Matt's form (LAN only, https://n8n.lab.mtgibbs.dev/form/agent-sec-run). The text is\n// DATA: it only ever lands in event.data.ask (a JSON POST body). Each submission is its own run (fresh key).\nconst MAX_ASK = 4000;\nlet f = {};\ntry { f = $('Sec Form').first().json || {}; } catch (e) { f = $input.first().json || {}; }\nconst ask = String(f['What should it focus on? (optional)'] || f.ask || '').trim().slice(0, MAX_ASK);\n\nconst B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';\nlet t = Date.now(), time = '';\nfor (let i = 0; i < 10; i++) { time = B32[t % 32] + time; t = Math.floor(t / 32); }\nlet rand = '';\nfor (let i = 0; i < 16; i++) rand += B32[Math.floor(Math.random() * 32)];\nconst key = time + rand;\n\nreturn [{ json: {\n  trigger: 'manual',\n  ask: ask || 'General access-control review of clusters/pi-k3s/. Start with what faces the outside.',\n  dedupe_key: `sec-researcher:manual:${key}`,\n  subject: 'manual',\n  cooldown_hours: 1,\n} }];\n"
+      }
+    },
+    {
+      "id": "5F166095-B2E0-5CA9-8934-134FB9D62F2A",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// The one merge point of the three sec-researcher triggers (Flux Revision / Sweep Input / Form Input). Later\n// nodes read $('Trigger'). It re-checks the record's shape, so nothing downstream (Claim's SQL parameter, the\n// GitHub compare URL, the event) ever sees a value that did not come from one of the three input nodes.\nconst t = $input.first().json || {};\nconst KEY = /^sec-researcher:(flux-rev:[0-9a-f]{40}|sweep:\\d{4}-W\\d{2}|manual:[0-9A-Z]{26})$/;\nif (!['flux', 'sweep', 'manual'].includes(t.trigger)) throw new Error('unknown trigger');\nif (!KEY.test(String(t.dedupe_key || ''))) throw new Error('malformed dedupe_key');\nif (t.trigger === 'flux' && !/^[0-9a-f]{40}$/.test(String(t.revision || ''))) throw new Error('flux trigger without a revision');\nconst hours = Number(t.cooldown_hours);\nreturn [{ json: {\n  trigger: t.trigger,\n  dedupe_key: t.dedupe_key,\n  subject: String(t.subject || '').slice(0, 64),\n  cooldown_hours: Number.isInteger(hours) && hours >= 1 ? hours : 1,\n  revision: t.trigger === 'flux' ? t.revision : null,\n  week: t.trigger === 'sweep' ? String(t.week || '').slice(0, 8) : null,\n  ask: t.trigger === 'manual' ? String(t.ask || '').slice(0, 4000) : null,\n} }];\n"
+      }
+    },
+    {
+      "id": "E1C92CE2-B3C9-5940-9C2E-623510302AC4",
+      "name": "Ensure Tables",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS agent_runs (run_id TEXT PRIMARY KEY, agent TEXT NOT NULL, event_id TEXT, event_type TEXT, subject TEXT, started TIMESTAMPTZ, finished TIMESTAMPTZ, exit_reason TEXT, outcome TEXT, summary TEXT, outputs JSONB NOT NULL DEFAULT '[]'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE INDEX IF NOT EXISTS agent_runs_created_idx ON agent_runs (created_at DESC); CREATE TABLE IF NOT EXISTS agent_dedupe (dedupe_key TEXT PRIMARY KEY, agent TEXT NOT NULL, subject TEXT, last_event_id TEXT, first_launched TIMESTAMPTZ NOT NULL DEFAULT now(), last_launched TIMESTAMPTZ NOT NULL DEFAULT now(), cooldown_until TIMESTAMPTZ NOT NULL, launches INT NOT NULL DEFAULT 1); CREATE TABLE IF NOT EXISTS agent_plan_filings (run_id TEXT NOT NULL, fingerprint TEXT NOT NULL, rule TEXT, resource TEXT, severity TEXT, action TEXT NOT NULL, issue_number INT, issue_url TEXT, http_status INT, detail TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (run_id, fingerprint)); CREATE INDEX IF NOT EXISTS agent_plan_filings_fp_idx ON agent_plan_filings (fingerprint, created_at DESC);",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "01436215-4F79-507D-A649-36E579512278",
+      "name": "Claim",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH s AS (SELECT $1::jsonb AS p), claim AS ( INSERT INTO agent_dedupe AS d (dedupe_key, agent, subject, last_event_id, last_launched, cooldown_until) SELECT p->>'dedupe_key', 'sec-researcher', p->>'subject', NULL, now(), now() + make_interval(hours => GREATEST(COALESCE((p->>'cooldown_hours')::int, 1), 1)) FROM s WHERE COALESCE(p->>'dedupe_key', '') <> '' ON CONFLICT (dedupe_key) DO UPDATE SET last_launched = now(), cooldown_until = EXCLUDED.cooldown_until, subject = EXCLUDED.subject, launches = d.launches + 1 WHERE d.cooldown_until <= now() RETURNING d.dedupe_key), base AS (SELECT d.subject FROM agent_dedupe d, s WHERE d.dedupe_key LIKE 'sec-researcher:flux-rev:%' AND d.dedupe_key <> s.p->>'dedupe_key' ORDER BY d.first_launched DESC LIMIT 1) SELECT EXISTS (SELECT 1 FROM claim) AS claimed, (SELECT subject FROM base) AS base;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($('Trigger').first().json) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "A9DBC094-FFA9-55D9-A11A-E2793E967F13",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "CF0DEE6A-6979-547E-800C-8A4461DC68A2",
+              "leftValue": "={{ $json.claimed === true || $json.claimed === 't' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9549C1B7-DBEC-5768-B5E5-91066425D058",
+      "name": "Is Flux?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "AAC28019-D618-5420-B479-D8E0B4463B49",
+              "leftValue": "={{ $('Trigger').first().json.trigger === 'flux' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ED9D38DD-CE16-5B3C-AFBB-CAEE4D53E81A",
+      "name": "Compare URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// Which files did this revision change? Ask GitHub's PUBLIC API for the public pi-cluster repo (no token):\n// compare <previous revision seen>...<this revision>, or, for the first revision ever seen, the commit itself\n// (its diff against its first parent). The previous revision comes from Claim (the newest earlier\n// sec-researcher:flux-rev row). Only validated 40-hex shas are put in the URL.\nconst REPO = 'mtgibbs/pi-cluster';\nconst SHA = /^[0-9a-f]{40}$/;\nconst t = $('Trigger').first().json;\nconst claim = $input.first().json || {};\nconst revision = String(t.revision || '');\nif (!SHA.test(revision)) throw new Error('no revision to compare');\nconst base = SHA.test(String(claim.base || '')) && claim.base !== revision ? claim.base : null;\nreturn [{ json: {\n  revision,\n  base,\n  url: base\n    ? `https://api.github.com/repos/${REPO}/compare/${base}...${revision}`\n    : `https://api.github.com/repos/${REPO}/commits/${revision}`,\n} }];\n"
+      }
+    },
+    {
+      "id": "CA5E5779-C02B-535A-BDAE-8488ADFD4D28",
+      "name": "Compare",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-sec-researcher"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "74D889F1-C8C5-5644-98F0-D9AC6DF32874",
+      "name": "Path Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// Deterministic gate: did this revision touch access control? Input = the GitHub compare/commit response\n// (HTTP node, full response, never error). Two tests, either is enough:\n//   1. the PATH looks access-control-shaped (RBAC, ServiceAccounts, NetworkPolicies, ExternalSecrets,\n//      ingress, namespaces, the agent sandbox, Flux itself, the secrets overlay);\n//   2. a YAML file under clusters/ ADDED OR REMOVED a line with an access-control keyword (only +/- lines of\n//      the patch — context lines and image-tag bumps do not count).\n// Fails toward reviewing: a failed/odd API answer, a truncated file list (GitHub caps at 300) or a YAML\n// patch GitHub omitted (too large) all count as relevant. The daily cap and per-revision dedupe bound that.\nconst PATHS = [\n  /(^|\\/)[^/]*(rbac|role|rolebinding|clusterrole|serviceaccount|networkpolic|external-secret|secretstore|secret-store|ingress|namespace|pod-security|psa)[^/]*\\.ya?ml$/i,\n  /^clusters\\/pi-k3s\\/(agents|harness-fleet|flux-system|flux-notifications|external-secrets|external-secrets-config|cloudflare-tunnel|tailscale|tailscale-config|ingress|cert-manager-config)\\//,\n  /^docs\\/secrets-overlay\\.yaml$/,\n];\nconst KEYWORD = new RegExp([\n  'kind:\\\\s*(Role|ClusterRole|RoleBinding|ClusterRoleBinding|ServiceAccount|NetworkPolicy|Ingress|IngressRoute|ExternalSecret|SecretStore|ClusterSecretStore|Namespace)\\\\b',\n  'securityContext', 'privileged', 'allowPrivilegeEscalation', 'runAs(NonRoot|User|Group)', 'readOnlyRootFilesystem',\n  'host(Network|PID|IPC|Path|Port)', 'capabilities', 'seccompProfile', 'automountServiceAccountToken',\n  'serviceAccountName', 'secretKeyRef', 'secretRef', 'envFrom', 'remoteRef', 'pod-security\\\\.kubernetes\\\\.io',\n  'ipBlock', 'namespaceSelector', 'podSelector', 'policyTypes', '\\\\bverbs:', '\\\\bapiGroups:', 'subjects:', 'roleRef:',\n  'ingressClassName', 'tls:', 'nginx\\\\.ingress\\\\.kubernetes\\\\.io/(auth|whitelist|allowlist)',\n].join('|'));\nconst MAX_PATHS = 50;\n\nconst r = $input.first().json || {};\nlet cmp = {};\ntry { cmp = $('Compare URL').first().json || {}; } catch (e) {}\nconst out = (relevant, why, changed, files_total) => [{ json: {\n  relevant, why, revision: cmp.revision || null, base: cmp.base || null,\n  changed_paths: changed.slice(0, MAX_PATHS).map(c => c.path),\n  reasons: changed.slice(0, MAX_PATHS).map(c => `${c.path}: ${c.reason}`),\n  files_total,\n} }];\n\nif (Number(r.statusCode) !== 200 || !r.body || typeof r.body !== 'object' || !Array.isArray(r.body.files)) {\n  return out(true, `compare unavailable (HTTP ${r.statusCode || (r.error ? 'error' : '?')}); reviewing to be safe`, [], null);\n}\nconst files = r.body.files.filter(f => f && typeof f.filename === 'string');\nconst changed = [];\nfor (const f of files) {\n  const names = [f.filename, typeof f.previous_filename === 'string' ? f.previous_filename : null].filter(Boolean);\n  const pathHit = names.find(n => PATHS.some(re => re.test(n)));\n  if (pathHit) { changed.push({ path: f.filename, reason: 'path' }); continue; }\n  const yaml = names.some(n => /^clusters\\/.*\\.ya?ml$/.test(n));\n  if (!yaml) continue;\n  if (typeof f.patch !== 'string') { changed.push({ path: f.filename, reason: 'diff too large to inspect' }); continue; }\n  const hit = f.patch.split('\\n').find(l => /^[+-]/.test(l) && !/^(\\+\\+\\+|---)/.test(l) && KEYWORD.test(l));\n  if (hit) changed.push({ path: f.filename, reason: `changed line matches \"${(hit.match(KEYWORD) || [''])[0]}\"` });\n}\nif (files.length >= 300) {\n  return out(true, `${files.length} files changed (GitHub truncates the list at 300); reviewing to be safe`, changed, files.length);\n}\nreturn out(changed.length > 0, changed.length ? `${changed.length} access-control file(s) changed` : 'no access-control change', changed, files.length);\n"
+      }
+    },
+    {
+      "id": "43B10759-0ECC-5408-9B68-98FF3008EEF1",
+      "name": "Relevant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7C16D4FD-06DA-504E-B688-4F5539911DA6",
+              "leftValue": "={{ $json.relevant === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "C638E4BD-1C48-5054-9795-BD7CD358CEE7",
+      "name": "Build Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Build the runner request {agent, event} for sec-researcher (CONTRACT §1) from `Trigger` (and, for a Flux\n// revision, `Path Filter`). Event types pick the agent's behaviour AND its model (the manifest's\n// model.by_event_type: security.sweep runs on Sonnet, the rest on Haiku):\n//   security.flux_revision  data {revision, base, changed_paths, reasons, files_total}  source flux\n//   security.sweep          data {scope, week}                                         source schedule\n//   security.manual         data {ask}                                                 source matt\n// event.data.revision (flux only, 40 hex) is the ONE event field the runner reads: it picks the Flux\n// artifact the checkout fetches. trust is internal for all three (Flux events and the schedule are in-cluster;\n// the form is LAN-only); the repo content the agent reads is still data, and its prompt says so.\nconst AGENT = 'sec-researcher';\nconst t = $('Trigger').first().json;\nlet pf = null;\ntry { pf = $('Path Filter').first().json; } catch (e) { pf = null; }\n\nconst B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';\nlet ms = Date.now(), time = '';\nfor (let i = 0; i < 10; i++) { time = B32[ms % 32] + time; ms = Math.floor(ms / 32); }\nlet rand = '';\nfor (let i = 0; i < 16; i++) rand += B32[Math.floor(Math.random() * 32)];\nconst id = time + rand;\nconst line = s => String(s || '').replace(/[\\u0000-\\u001f\\u007f]+/g, ' ').trim();\n\nlet type, source, subject, data;\nif (t.trigger === 'flux') {\n  if (!pf || !pf.relevant) throw new Error('flux trigger reached Build Event without a relevant Path Filter result');\n  type = 'security.flux_revision'; source = 'flux';\n  subject = `rev:${t.revision.slice(0, 12)}`;\n  data = {\n    revision: t.revision,\n    base: /^[0-9a-f]{40}$/.test(String(pf.base || '')) ? pf.base : null,\n    changed_paths: (pf.changed_paths || []).slice(0, 50).map(p => line(p).slice(0, 300)),\n    reasons: (pf.reasons || []).slice(0, 50).map(p => line(p).slice(0, 400)),\n    files_total: Number.isInteger(pf.files_total) ? pf.files_total : null,\n    why: line(pf.why).slice(0, 300),\n  };\n} else if (t.trigger === 'sweep') {\n  type = 'security.sweep'; source = 'schedule';\n  subject = `sweep:${t.week}`;\n  data = { scope: 'clusters/pi-k3s/', week: t.week };\n} else {\n  type = 'security.manual'; source = 'matt';\n  subject = 'manual';\n  data = { ask: String(t.ask || '').slice(0, 4000) };\n}\n\nconst label = t.trigger === 'flux' ? `Flux revision ${t.revision.slice(0, 7)}` : t.trigger === 'sweep' ? `weekly sweep ${t.week}` : 'manual run';\nreturn [{ json: {\n  agent: AGENT,\n  trigger: t.trigger,\n  label,\n  event: { id, type, source, subject, dedupe_key: t.dedupe_key, trust: 'internal', data },\n} }];\n"
+      }
+    },
+    {
+      "id": "D7632121-FCC4-528E-80F8-BFBF0E2FC830",
+      "name": "Resume Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2310,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Derive an IN-CLUSTER resume URL for the \"Wait for Result\" node and attach it as `callback`.\n//\n// $execution.resumeUrl is \"<WEBHOOK_URL>webhook-waiting/<executionId>?signature=<resumeToken>\".\n// WEBHOOK_URL is the PUBLIC tunnel host, which only passes ^/webhook/inbound-mail.* — so we\n// keep n8n's path + query (the signature IS the per-execution auth; n8n 2.x rejects a resume\n// without it: 401 {\"error\":\"Invalid token\"}) and swap the origin for the webhook tier's\n// in-cluster Service. Both the main and the webhook process serve /webhook-waiting/*\n// (N8N_DISABLE_PRODUCTION_MAIN_PROCESS is unset); waiting executions are looked up in\n// Postgres by id, so no activation/registration is involved and no webhook-tier roll is needed.\nconst CALLBACK_ORIGIN = 'http://n8n-webhook.n8n.svc.cluster.local:5678';\n\nconst resumeUrl = String($execution.resumeUrl || '');\nconst m = resumeUrl.match(/^https?:\\/\\/[^/]+(\\/.*)$/);\nif (!m) throw new Error(`Unexpected $execution.resumeUrl shape: \"${resumeUrl}\"`);\nconst pathAndQuery = m[1];\n\n// Fail now, not 30 minutes from now: the URL must be /webhook-waiting/<this execution>?…signature=…\nconst shape = pathAndQuery.match(/^\\/webhook-waiting\\/([^/?#]+)\\?(?:[^#]*&)?signature=[^&#]+/);\nif (!shape) {\n  throw new Error('resumeUrl is not \"/webhook-waiting/<id>?signature=<token>\" at the root of WEBHOOK_URL — '\n    + 'n8n changed its resume-URL shape or WEBHOOK_URL gained a path; see docs/agent-sandbox-n8n.md');\n}\nif (String(shape[1]) !== String($execution.id)) {\n  throw new Error(`resumeUrl execution id ${shape[1]} != $execution.id ${$execution.id}`);\n}\n\nconst item = $input.first().json;\nreturn [{ json: { ...item, callback: CALLBACK_ORIGIN + pathAndQuery } }];\n"
+      }
+    },
+    {
+      "id": "657B2762-AB06-5195-B1D2-82A19C5F83B7",
+      "name": "Launch Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        0
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "http://agent-runner.agents.svc.cluster.local:8080/runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent: $('Build Event').first().json.agent, event: $('Build Event').first().json.event, callback: $json.callback }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT_agent_runner",
+          "name": "agent-runner"
+        }
+      }
+    },
+    {
+      "id": "A0110CCC-25D2-5E16-84F6-8AFF3070960E",
+      "name": "Launched?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "83202EC6-8D12-5921-926D-66AAFDC56357",
+              "leftValue": "={{ $json.statusCode }}",
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "rightValue": 202
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "F61E0D10-35DD-5C3F-AAF7-DC1849D4D32E",
+      "name": "Wait for Result",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2860,
+        -100
+      ],
+      "webhookId": "F3FAA8C3-BD11-5C5F-A3D0-AD7317022901",
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 80,
+        "resumeUnit": "minutes",
+        "options": {}
+      }
+    },
+    {
+      "id": "9E09760D-EC19-57F6-8AC0-BF418C3142A3",
+      "name": "Callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        -100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "D25CA5A0-6260-5A2C-BDC5-BCFD676B77D8",
+              "leftValue": "={{ !!($json.body && typeof $json.body === 'object' && typeof $json.body.exit_reason === 'string') }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "72B5800B-C557-5398-A79E-EB5563796C61",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// sec-researcher's copy of agent-parse-result.js: the same ledger row, but `plan` outputs keep their STRUCTURE\n// (severity, fingerprint, the seven sections) instead of being flattened to kind/title/body — n8n files issues\n// from those fields. Everything is clipped and type-checked here; Plan Items re-validates before filing.\nconst OUTCOMES = ['done', 'nothing_to_do', 'needs_human', 'failed'];\nconst EXIT_REASONS = ['completed', 'deadline', 'job_failed', 'no_result', 'invalid_result', 'queue_expired'];\nconst SECTIONS = ['found', 'evidence', 'likely_cause', 'proposed_change', 'risk', 'verify', 'rollback'];\n\nconst body = ($input.first().json || {}).body;\nif (!body || typeof body !== 'object') throw new Error('Callback has no JSON body');\nconst str = (v, n) => (typeof v === 'string' ? v : (v === undefined || v === null ? '' : String(v))).slice(0, n);\nconst ts = (v) => {\n  if (v === undefined || v === null || v === '') return null;\n  const d = typeof v === 'number' ? new Date(v < 1e12 ? v * 1000 : v) : new Date(String(v));\n  return isNaN(d.getTime()) ? null : d.toISOString();\n};\nconst run_id = str(body.run_id, 128).trim();\nif (!/^[A-Za-z0-9._:-]{1,128}$/.test(run_id)) throw new Error('Callback run_id missing or malformed');\n\nconst result = (body.result && typeof body.result === 'object') ? body.result : {};\nconst exit_reason = EXIT_REASONS.includes(body.exit_reason) ? body.exit_reason : str(body.exit_reason || 'unknown', 64);\nconst outcome = OUTCOMES.includes(result.outcome) ? result.outcome : 'failed';\nconst obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};\nconst outputs = (Array.isArray(result.outputs) ? result.outputs : [])\n  .filter(o => o && typeof o === 'object')\n  .slice(0, 20)\n  .map(o => {\n    if (o.kind !== 'plan') return { kind: str(o.kind, 64), title: str(o.title, 300), body: str(o.body, 32768) };\n    const fp = obj(o.fingerprint), plan = obj(o.plan);\n    const sections = {};\n    for (const k of SECTIONS) sections[k] = str(plan[k], k === 'evidence' ? 8192 : 4096);\n    return { kind: 'plan', title: str(o.title, 200), severity: str(o.severity, 16),\n             fingerprint: { rule: str(fp.rule, 64), resource: str(fp.resource, 320) }, plan: sections };\n  });\n\nlet ev = null;\ntry { ev = $('Build Event').first().json.event; } catch (e) { ev = null; }\nreturn [{ json: {\n  run_id,\n  agent: str(body.agent, 64),\n  event_id: str(body.event_id || (ev && ev.id), 128) || null,\n  event_type: ev ? str(ev.type, 128) : null,\n  subject: ev ? str(ev.subject, 200) : null,\n  started: ts(body.started),\n  finished: ts(body.finished),\n  exit_reason,\n  outcome,\n  summary: str(result.summary, 2048),\n  outputs,\n} }];\n"
+      }
+    },
+    {
+      "id": "D28C147B-22AD-5943-9A66-396C0E940E61",
+      "name": "Timeout Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// The Wait node resumed on its 80-minute limit, not on a callback. 80 = RUNNER_MAX_QUEUE_WAIT (45m) +\n// sec-researcher's timeout (20m) + the runner's 5m deadline grace + ~10m for polling and callback retries.\n// The Wait's output is its INPUT (the runner's 202), so run_id is known. A late callback can no longer resume\n// this execution (409); the runner keeps its record at GET /runs/<run_id>. No plans are filed for it.\nconst r = $input.first().json || {};\nconst launched = (r.body && typeof r.body === 'object') ? r.body : {};\nlet ev = {}, agent = '';\ntry { const b = $('Build Event').first().json; ev = b.event || {}; agent = b.agent || ''; } catch (e) {}\nconst run_id = String(launched.run_id || '').slice(0, 128);\nif (!run_id) throw new Error('Timed out, and the launch response had no run_id');\nreturn [{ json: {\n  run_id, agent, event_id: ev.id || null, event_type: ev.type || null, subject: ev.subject || null,\n  started: null, finished: new Date().toISOString(), exit_reason: 'callback_timeout', outcome: 'failed',\n  summary: 'No callback from agent-runner within 80 minutes. Check GET /runs/' + run_id\n    + ' on the runner and the Job run-' + run_id + ' in namespace agents. No plans were filed.',\n  outputs: [],\n} }];\n"
+      }
+    },
+    {
+      "id": "D8868FAC-7549-50CE-8372-2D6CC42EA06B",
+      "name": "Refusal Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// The runner did not start the run (non-202, or unreachable via the HTTP node's error output): ONE agent_runs\n// row so it is visible, then the normal tail (one push). No retry: sec-researcher runs are few, a Flux revision\n// is claimed once, and the weekly sweep re-covers anything a refused run missed.\nconst r = $input.first().json || {};\nlet agent = '', ev = {};\ntry { const b = $('Build Event').first().json; agent = b.agent || ''; ev = b.event || {}; } catch (e) {}\nconst code = Number(r.statusCode || 0);\nconst body = (r.body && typeof r.body === 'object') ? r.body : {};\nconst detail = String(typeof r.body === 'string' ? r.body : (body.error || body.detail || body.message || '')).slice(0, 300);\nconst WHY = {\n  200: 'this event id was already launched earlier (unexpected: event ids are fresh per launch)',\n  401: 'runner rejected the bearer token (check the agent-runner credential)',\n  404: 'runner does not know this agent (is the sec-researcher manifest deployed?)',\n  422: 'runner rejected the manifest, event, or callback URL (a runner older than 0.3.0 rejects the checkout/by_event_type keys)',\n  429: 'daily run cap or cluster quota reached',\n  502: 'runner hit a Kubernetes error launching the Job',\n  503: 'runner is paused (RUNNER_PAUSED=true)',\n};\nlet exit_reason, summary;\nif (r.error) {\n  const e = typeof r.error === 'object' ? (r.error.message || JSON.stringify(r.error)) : String(r.error);\n  exit_reason = 'runner_unreachable';\n  summary = `Not started: could not reach agent-runner: ${String(e).slice(0, 300)}`;\n} else if (code === 429 && body.error === 'queue_full') {\n  exit_reason = 'refused_queue_full';\n  summary = `Not started (HTTP 429): runner queue is full${body.detail ? ` - ${String(body.detail).slice(0, 300)}` : ''}`;\n} else {\n  exit_reason = `refused_${code || 'unknown'}`;\n  summary = `Not started (HTTP ${code || '?'}): ${WHY[code] || 'unexpected runner response'}${detail ? ` - ${detail}` : ''}`;\n}\nreturn [{ json: {\n  run_id: `nolaunch-${String(ev.id || Date.now())}`.slice(0, 128),\n  agent, event_id: ev.id || null, event_type: ev.type || null, subject: ev.subject || null,\n  started: null, finished: new Date().toISOString(), exit_reason, outcome: 'failed',\n  summary: summary.slice(0, 2048), outputs: [],\n} }];\n"
+      }
+    },
+    {
+      "id": "FED7BAB0-CAAF-5449-B31B-9CC9B19CB066",
+      "name": "Insert Ledger",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO agent_runs (run_id, agent, event_id, event_type, subject, started, finished, exit_reason, outcome, summary, outputs) SELECT p->>'run_id', p->>'agent', p->>'event_id', p->>'event_type', p->>'subject', (p->>'started')::timestamptz, (p->>'finished')::timestamptz, p->>'exit_reason', p->>'outcome', p->>'summary', COALESCE(p->'outputs', '[]'::jsonb) FROM (SELECT $1::jsonb AS p) AS s ON CONFLICT (run_id) DO NOTHING RETURNING run_id, agent, outcome, exit_reason, summary, outputs;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "7EDD9331-87D1-544E-BAB5-9966B1C4B627",
+      "name": "Plan Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// From the ledger row just written (Insert Ledger ... RETURNING; no row = duplicate callback = nothing runs):\n// take the agent's `plan` outputs, re-validate them, and turn each into the exact issue it would become.\n// Plain code, no model: the issue title/body are built from the structured fields only, and every piece of\n// agent-written text is neutralised (no HTML, links, images, @-mentions, #-references, or a forged marker).\n//\n// THE PLANS REPO. The one place it is named; Issue Pages / Decide read it from this node's output.\nconst PLANS_REPO = 'mtgibbs/homelab-plans';\nconst AGENT = 'sec-researcher';\nconst SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];\nconst SECTIONS = [['found', 'What was found'], ['evidence', 'Evidence'], ['likely_cause', 'Likely cause'],\n  ['proposed_change', 'Proposed change'], ['risk', 'Risk'], ['verify', 'How to verify'], ['rollback', 'How to roll back']];\nconst RULE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;\nconst RESOURCE = /^[a-z0-9][a-z0-9.-]{0,62}\\/[A-Z][A-Za-z0-9]{0,62}\\/[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$/;\nconst SECTION_CAP = 6000, EVIDENCE_CAP = 12000;   // escaped chars; keeps a body well under GitHub's 65536\nif (!/^[A-Za-z0-9-]+\\/[A-Za-z0-9._-]+$/.test(PLANS_REPO)) throw new Error('PLANS_REPO is not owner/repo');\n\nfunction sha256hex(str) {\n  const b = [];                                  // UTF-8 encode\n  for (const ch of str) {\n    let c = ch.codePointAt(0);\n    if (c < 0x80) b.push(c);\n    else if (c < 0x800) b.push(0xc0 | c >> 6, 0x80 | c & 63);\n    else if (c < 0x10000) b.push(0xe0 | c >> 12, 0x80 | c >> 6 & 63, 0x80 | c & 63);\n    else b.push(0xf0 | c >> 18, 0x80 | c >> 12 & 63, 0x80 | c >> 6 & 63, 0x80 | c & 63);\n  }\n  const K = [];\n  for (let n = 2, found = 0; found < 64; n++) {\n    let prime = true;\n    for (let d = 2; d * d <= n; d++) if (n % d === 0) { prime = false; break; }\n    if (prime) { K.push((Math.pow(n, 1 / 3) % 1) * 4294967296 >>> 0); found++; }\n  }\n  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];\n  const bitLen = b.length * 8;\n  b.push(0x80);\n  while (b.length % 64 !== 56) b.push(0);\n  for (let i = 7; i >= 0; i--) b.push(i >= 4 ? 0 : (bitLen >>> (i * 8)) & 255);\n  const r = (x, n) => (x >>> n) | (x << (32 - n));\n  for (let o = 0; o < b.length; o += 64) {\n    const w = new Array(64);\n    for (let i = 0; i < 16; i++) w[i] = (b[o + 4 * i] << 24 | b[o + 4 * i + 1] << 16 | b[o + 4 * i + 2] << 8 | b[o + 4 * i + 3]) >>> 0;\n    for (let i = 16; i < 64; i++) {\n      const s0 = r(w[i - 15], 7) ^ r(w[i - 15], 18) ^ (w[i - 15] >>> 3);\n      const s1 = r(w[i - 2], 17) ^ r(w[i - 2], 19) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let [a, bb, c, d, e, f, g, h] = H;\n    for (let i = 0; i < 64; i++) {\n      const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;\n      const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & bb) ^ (a & c) ^ (bb & c))) >>> 0;\n      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = bb; bb = a; a = (t1 + t2) >>> 0;\n    }\n    const v = [a, bb, c, d, e, f, g, h];\n    for (let i = 0; i < 8; i++) H[i] = (H[i] + v[i]) >>> 0;\n  }\n  return H.map(x => x.toString(16).padStart(8, '0')).join('');\n}\n\nconst ZW = '​';\n// Prose: escape what GitHub would turn into markup that acts (HTML/comments, links, images, code spans,\n// autolinks, mentions, issue references, headings). Formatting like * and _ is left alone: harmless.\nconst prose = (s, cap) => {\n  let t = String(s || '').replace(/\\r\\n?/g, '\\n').replace(/[\\u0000-\\u0008\\u000b-\\u001f\\u007f]/g, '');\n  t = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n    .replace(/([\\\\`\\[\\]])/g, '\\\\$1')\n    .replace(/:\\/\\//g, ':' + ZW + '//').replace(/www\\./gi, m => m.slice(0, 3) + ZW + '.')\n    .replace(/@/g, '@' + ZW).replace(/#/g, '#' + ZW);\n  return t.length > cap ? t.slice(0, cap) + '\\n\\n_[truncated by n8n]_' : t;\n};\n// Evidence: verbatim inside a fence longer than any backtick run in it (nothing in a fence renders), with\n// HTML-comment openers broken so the raw body can never carry a second marker.\nconst fenced = (s, cap) => {\n  let t = String(s || '').replace(/\\r\\n?/g, '\\n').replace(/[\\u0000-\\u0008\\u000b-\\u001f\\u007f]/g, '').replace(/<!--/g, '<!' + ZW + '--');\n  if (t.length > cap) t = t.slice(0, cap) + '\\n[truncated by n8n]';\n  const longest = Math.max(0, ...(t.match(/`+/g) || []).map(x => x.length));\n  const fence = '`'.repeat(Math.max(3, longest + 1));\n  return `${fence}text\\n${t}\\n${fence}`;\n};\n// Titles render as plain text on GitHub, but mentions/references still link: neutralise those, drop <>.\nconst oneLine = (s, n) => String(s || '').replace(/[\\u0000-\\u001f\\u007f]+/g, ' ').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim()\n  .replace(/@/g, '@' + ZW).replace(/#/g, '#' + ZW).slice(0, n);\n\nconst row = $input.first().json || {};\nif (!row.run_id) return [];\nlet outputs = row.outputs;\nif (typeof outputs === 'string') { try { outputs = JSON.parse(outputs); } catch (e) { outputs = []; } }\nlet ev = {}, label = '';\ntry { const b = $('Build Event').first().json; ev = b.event || {}; label = b.label || ''; } catch (e) {}\nconst revision = /^[0-9a-f]{40}$/.test(String((ev.data || {}).revision || '')) ? ev.data.revision : null;\n\nconst plans = [], seen = new Set();\nlet invalid = 0, duplicate = 0;\nfor (const o of Array.isArray(outputs) ? outputs : []) {\n  if (!o || o.kind !== 'plan') continue;\n  const fp = o.fingerprint || {}, p = o.plan || {};\n  const ok = RULE.test(String(fp.rule || '')) && RESOURCE.test(String(fp.resource || '')) && SEVERITIES.includes(o.severity)\n    && typeof o.title === 'string' && o.title.trim() && SECTIONS.every(([k]) => typeof p[k] === 'string' && p[k].trim());\n  if (!ok) { invalid++; continue; }\n  const fingerprint = sha256hex(`${AGENT}|${fp.rule}|${fp.resource}`);\n  if (seen.has(fingerprint)) { duplicate++; continue; }\n  seen.add(fingerprint);\n  const content = [`**Severity:** ${o.severity} · **Rule:** \\`${fp.rule}\\` · **Resource:** \\`${fp.resource}\\``, '',\n    '> Filed by n8n from a sec-researcher run. The text below was written by a model from untrusted inputs (the repo,',\n    '> cluster state): treat it as a proposal and check the evidence. This issue IS the plan; nothing changes until it',\n    '> is approved.', '',\n    ...SECTIONS.flatMap(([k, h]) => [`### ${h}`, k === 'evidence' ? fenced(p[k], EVIDENCE_CAP) : prose(p[k], SECTION_CAP), ''])].join('\\n');\n  const content_hash = sha256hex(content);\n  const body = [`<!-- sec-researcher-fingerprint: ${fingerprint} -->`, `<!-- sec-researcher-content: ${content_hash} -->`,\n    content, '<!-- sec-researcher-footer -->', '---',\n    `Last seen: run \\`${String(row.run_id).replace(/[^A-Za-z0-9._:-]/g, '')}\\` · ${revision ? `revision \\`${revision.slice(0, 12)}\\`` : 'revision n/a'} · ${new Date().toISOString().slice(0, 10)} · ${oneLine(label, 60) || 'n/a'}`,\n    `Fingerprint: \\`${AGENT} | ${fp.rule} | ${fp.resource}\\` (sha256 \\`${fingerprint.slice(0, 16)}…\\`).`,\n    'To accept the risk, close this issue as **not planned** (or add the `accepted-risk` label); later runs then leave it alone.',\n    'Add notes as comments: a re-run that finds different details rewrites this body.'].join('\\n');\n  plans.push({ fingerprint, content_hash, rule: fp.rule, resource: fp.resource, severity: o.severity,\n               title: `[sec][${o.severity}] ${oneLine(o.title, 200)}`.slice(0, 256), body,\n               labels: ['sec-researcher', `severity:${o.severity}`] });\n}\nconst rank = s => SEVERITIES.indexOf(s);\nplans.sort((a, b) => rank(a.severity) - rank(b.severity));   // stable: most severe first, then agent order\n\nreturn [{ json: {\n  plans_repo: PLANS_REPO,\n  run_id: row.run_id, agent: row.agent, outcome: row.outcome, exit_reason: row.exit_reason,\n  summary: String(row.summary || '').slice(0, 2048),\n  revision, plans, invalid, duplicate,\n} }];\n"
+      }
+    },
+    {
+      "id": "06473948-984C-5D69-8E7E-ABE9C3BD3D88",
+      "name": "Has Plans?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "793EC11B-FD96-5341-9F44-3AC4C5A0FFE1",
+              "leftValue": "={{ Array.isArray($json.plans) && $json.plans.length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3D08509E-F4F7-55F0-B454-670DC99E4527",
+      "name": "Issue Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// One item per page of the plans repo's issues (all states, oldest first, 100 per page). `List Issues` fetches\n// each with the github-plans credential; Decide reads every page and refuses to CREATE anything unless the\n// listing is complete (a short page reached) and every page answered 200 — a partial view would mean\n// duplicate issues. 5 pages = 500 issues; past that, Decide reports \"lookup incomplete\" and files nothing new.\nconst PAGES = 5;\nconst repo = $('Plan Items').first().json.plans_repo;\nif (!/^[A-Za-z0-9-]+\\/[A-Za-z0-9._-]+$/.test(String(repo))) throw new Error('bad plans repo');\nreturn Array.from({ length: PAGES }, (_, i) => ({ json: {\n  page: i + 1,\n  url: `https://api.github.com/repos/${repo}/issues?state=all&per_page=100&sort=created&direction=asc&page=${i + 1}`,\n} }));\n"
+      }
+    },
+    {
+      "id": "6E5D8DDD-6299-5BD6-8CD4-2CC16DBE5D30",
+      "name": "List Issues",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        -200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-sec-researcher"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT_github_plans",
+          "name": "github-plans"
+        }
+      }
+    },
+    {
+      "id": "4CD3DE5C-0B30-5E62-B5DE-BA57EC94A775",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// The exit point's decision, in plain code: for each plan (most severe first), find issues in the plans repo\n// whose body STARTS with its fingerprint marker, then\n//   - any match labelled `accepted-risk` (open or closed)   -> skip_accepted (do nothing)\n//   - an open match                                         -> update its body if the content changed, else unchanged\n//   - a match closed as \"not planned\"                       -> skip_accepted\n//   - otherwise (none, or only closed-as-fixed = it came back) -> create, at most MAX_NEW per run;\n//                                                             the rest are not_filed (reported in the push)\n// If the issue listing failed, or was incomplete (5 full pages), nothing is created: a partial view would\n// duplicate issues. Updates of issues that WERE seen still go ahead on an incomplete listing.\n// Input: List Issues responses (one per page, full response, never error). Output: ONE item\n// {actions: [create/update, with method/url/payload for Apply], decisions: [every plan's outcome]}.\nconst MAX_NEW = 5;\nconst pi = $('Plan Items').first().json;\nconst repo = pi.plans_repo;\nif (!/^[A-Za-z0-9-]+\\/[A-Za-z0-9._-]+$/.test(String(repo))) throw new Error('bad plans repo');\nconst API = `https://api.github.com/repos/${repo}/issues`;\nconst FP = /^<!-- sec-researcher-fingerprint: ([0-9a-f]{64}) -->/;\nconst CONTENT = /^<!-- sec-researcher-content: ([0-9a-f]{64}) -->$/m;\n\nconst pages = $input.all().map(i => i.json || {});\nlet lookup = 'complete', issues = [];\nif (!pages.length) lookup = 'failed';\nfor (const p of pages) {\n  if (Number(p.statusCode) !== 200 || !Array.isArray(p.body)) { lookup = 'failed'; break; }\n  issues = issues.concat(p.body);\n}\nif (lookup === 'complete' && !pages.some(p => p.body.length < 100)) lookup = 'incomplete';\nif (lookup === 'failed') issues = [];\nconst lookupError = lookup === 'failed'\n  ? `issue lookup failed (HTTP ${(pages.find(p => Number(p.statusCode) !== 200) || {}).statusCode || 'error'})` : null;\n\nconst byFp = new Map();\nfor (const i of issues) {\n  if (!i || typeof i !== 'object' || i.pull_request || !Number.isInteger(i.number)) continue;\n  const m = String(i.body || '').match(FP);\n  if (!m) continue;\n  const cm = String(i.body || '').match(CONTENT);\n  const rec = { number: i.number, state: i.state, state_reason: i.state_reason || null,\n                labels: (Array.isArray(i.labels) ? i.labels : []).map(l => (typeof l === 'string' ? l : (l && l.name) || '')),\n                content: cm ? cm[1] : null };\n  if (!byFp.has(m[1])) byFp.set(m[1], []);\n  byFp.get(m[1]).push(rec);\n}\n\nconst actions = [], decisions = [];\nlet created = 0;\nfor (const p of pi.plans || []) {\n  const base = { fingerprint: p.fingerprint, rule: p.rule, resource: p.resource, severity: p.severity, title: p.title };\n  if (lookup === 'failed') { decisions.push({ ...base, action: 'not_filed', reason: lookupError }); continue; }\n  const matches = (byFp.get(p.fingerprint) || []).sort((a, b) => a.number - b.number);\n  const labelled = matches.find(m => m.labels.includes('accepted-risk'));\n  if (labelled) { decisions.push({ ...base, action: 'skip_accepted', issue_number: labelled.number }); continue; }\n  const open = matches.find(m => m.state === 'open');\n  if (open) {\n    if (open.content === p.content_hash) { decisions.push({ ...base, action: 'unchanged', issue_number: open.number }); continue; }\n    const d = { ...base, action: 'update', issue_number: open.number };\n    decisions.push(d);\n    actions.push({ ...d, method: 'PATCH', url: `${API}/${open.number}`, payload: { body: p.body } });\n    continue;\n  }\n  const notPlanned = matches.find(m => m.state === 'closed' && m.state_reason === 'not_planned');\n  if (notPlanned) { decisions.push({ ...base, action: 'skip_accepted', issue_number: notPlanned.number }); continue; }\n  if (lookup === 'incomplete') {\n    decisions.push({ ...base, action: 'not_filed', reason: 'issue lookup incomplete (over 500 issues); nothing new filed' });\n    continue;\n  }\n  if (created >= MAX_NEW) { decisions.push({ ...base, action: 'not_filed', reason: `cap of ${MAX_NEW} new issues per run` }); continue; }\n  created++;\n  const fixed = matches.filter(m => m.state === 'closed').map(m => m.number);\n  const body = fixed.length\n    // The footer marker cannot occur in agent text (Plan Items escapes '<' in prose and breaks '<!--' in evidence).\n    ? p.body.replace('\\n<!-- sec-researcher-footer -->\\n', `\\n> Previously closed as fixed: ${fixed.map(n => `#${n}`).join(', ')}. It has come back.\\n\\n<!-- sec-researcher-footer -->\\n`)\n    : p.body;\n  const d = { ...base, action: 'create', previously_fixed: fixed };\n  decisions.push(d);\n  actions.push({ ...d, method: 'POST', url: API, payload: { title: p.title, body, labels: p.labels } });\n}\nreturn [{ json: { lookup, lookup_error: lookupError, issues_seen: issues.length, actions, decisions } }];\n"
+      }
+    },
+    {
+      "id": "4BFE0570-E756-5E25-A96E-3184232D9C4B",
+      "name": "Any Actions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4840,
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7BD446B3-9777-5459-98DC-320755AA8D13",
+              "leftValue": "={{ Array.isArray($json.actions) && $json.actions.length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7BB321AC-0128-5070-A54A-86B6D89CDEAA",
+      "name": "Split Actions",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        5060,
+        -300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "actions",
+        "options": {}
+      }
+    },
+    {
+      "id": "577D0401-66AA-5477-B957-7492ACD87C41",
+      "name": "Apply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-sec-researcher"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ON_IMPORT_github_plans",
+          "name": "github-plans"
+        }
+      }
+    },
+    {
+      "id": "43B025A2-708C-5C74-8FB3-74A172950E86",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// The end of every sec-researcher run that produced a ledger row: ONE ntfy push summarising it, and the\n// filing rows for agent_plan_filings. Reached from three places (exactly one per execution):\n//   Has Plans? false (no plans: a clean run, a failure, a refusal)  — input = Plan Items' item\n//   Any Actions? false (plans, but nothing to create/update)        — input = Decide's item\n//   Apply (one response per create/update, same order as Split Actions)\n// Issue numbers/URLs come only from GitHub's response and are re-validated; agent text only goes in the body.\nconst header = (s, n) => String(s || '').replace(/[^\\x20-\\x7E]+/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\nconst get = (name, all) => { try { return all ? $(name).all().map(i => i.json) : $(name).first().json; } catch (e) { return all ? [] : null; } };\nconst pi = get('Plan Items') || {};\nconst be = get('Build Event') || {};\nconst decide = get('Decide');\nconst sent = get('Split Actions', true);\nconst repo = String(pi.plans_repo || '');\nconst ISSUE_URL = new RegExp(`^https://github\\\\.com/${repo.replace(/[.]/g, '\\\\.')}/issues/(\\\\d+)$`);\n\nconst input = $input.all().map(i => i.json || {});\nconst applied = new Map();   // fingerprint -> {status, number, url}\nif (sent.length && input.length === sent.length && input.every(r => 'statusCode' in r || 'error' in r)) {\n  input.forEach((r, i) => {\n    const a = sent[i], code = Number(r.statusCode || 0), b = (r.body && typeof r.body === 'object') ? r.body : {};\n    const okCode = a.method === 'POST' ? 201 : 200;\n    const m = typeof b.html_url === 'string' ? b.html_url.match(ISSUE_URL) : null;\n    applied.set(a.fingerprint, { ok: code === okCode, status: code || null,\n      number: m && Number.isInteger(b.number) && String(b.number) === m[1] ? b.number : (a.issue_number || null),\n      url: m ? b.html_url : null, error: r.error ? String(r.error.message || r.error).slice(0, 200) : null });\n  });\n}\n\nconst filings = [], counts = { created: [], updated: [], unchanged: [], skip_accepted: [], not_filed: [], failed: [] };\nfor (const d of (decide && decide.decisions) || []) {\n  let action = d.action, number = d.issue_number || null, url = null, status = null, detail = d.reason || null;\n  if (action === 'create' || action === 'update') {\n    const r = applied.get(d.fingerprint);\n    if (!r || !r.ok) { status = r ? r.status : null; detail = r ? (r.error || `HTTP ${r.status}`) : 'not applied'; action = `${action}_failed`; }\n    else { status = r.status; number = r.number; url = r.url; }\n  }\n  if (number && !url) url = `https://github.com/${repo}/issues/${number}`;\n  filings.push({ run_id: pi.run_id, fingerprint: d.fingerprint, rule: d.rule, resource: d.resource, severity: d.severity,\n                 action, issue_number: number, issue_url: url, http_status: status, detail });\n  const key = { create: 'created', update: 'updated', unchanged: 'unchanged', skip_accepted: 'skip_accepted',\n                not_filed: 'not_filed' }[action] || 'failed';\n  counts[key].push({ n: number, title: d.title, sev: d.severity, why: detail });\n}\n\nconst refused = /^refused_|^runner_unreachable$/.test(String(pi.exit_reason || ''));\nconst label = be.label || 'sec-researcher run';\nconst nums = xs => xs.map(x => (x.n ? `#${x.n}` : '?')).join(', ');\nconst lines = [`${refused ? 'Not started' : 'Run'}: ${label}`, String(pi.summary || '(no summary)').slice(0, 1000)];\nconst planned = (pi.plans || []).length;\nif (planned || (decide && decide.decisions && decide.decisions.length)) {\n  lines.push(`Plans: ${counts.created.length} created${counts.created.length ? ` (${nums(counts.created)})` : ''}, `\n    + `${counts.updated.length} updated${counts.updated.length ? ` (${nums(counts.updated)})` : ''}, `\n    + `${counts.unchanged.length} unchanged, ${counts.skip_accepted.length} skipped (accepted risk), `\n    + `${counts.not_filed.length} not filed${counts.failed.length ? `, ${counts.failed.length} FAILED` : ''}.`);\n  for (const x of counts.not_filed.slice(0, 5)) lines.push(`- not filed [${x.sev}] ${String(x.title).slice(0, 120)} (${x.why})`);\n  if (counts.not_filed.length > 5) lines.push(`- …and ${counts.not_filed.length - 5} more not filed (agent_plan_filings)`);\n  for (const x of counts.failed.slice(0, 3)) lines.push(`- FAILED [${x.sev}] ${String(x.title).slice(0, 120)} (${x.why})`);\n}\nif (pi.invalid || pi.duplicate) lines.push(`Dropped by n8n: ${pi.invalid || 0} malformed, ${pi.duplicate || 0} duplicate plan(s).`);\nif (repo && (counts.created.length || counts.updated.length)) lines.push(`https://github.com/${repo}/issues?q=label%3Asec-researcher`);\nlines.push(`run ${pi.run_id || '?'} · ${pi.exit_reason || '?'}`);\n\nconst sevNew = counts.created.map(x => x.sev);\nconst priority = counts.failed.length || pi.outcome === 'failed' ? (refused ? '3' : '4')\n  : sevNew.some(s => s === 'critical' || s === 'high') ? '4' : counts.created.length ? '3' : '2';\nconst tags = counts.failed.length || pi.outcome === 'failed' ? 'warning,lock' : counts.created.length ? 'memo,lock' : 'lock';\nconst title = refused\n  ? `sec-researcher: not started - ${label}`\n  : `sec-researcher: ${pi.outcome || 'failed'} - ${counts.created.length} new, ${counts.updated.length} updated - ${label}`;\n\nreturn [{ json: { title: header(title, 120), message: lines.join('\\n'), tags, priority, filings } }];\n"
+      }
+    },
+    {
+      "id": "2B8EEC08-58E6-55E3-AA3B-4DD99AAB59C0",
+      "name": "Record Filings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5280,
+        -100
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO agent_plan_filings (run_id, fingerprint, rule, resource, severity, action, issue_number, issue_url, http_status, detail) SELECT f->>'run_id', f->>'fingerprint', f->>'rule', f->>'resource', f->>'severity', f->>'action', (f->>'issue_number')::int, f->>'issue_url', (f->>'http_status')::int, f->>'detail' FROM jsonb_array_elements($1::jsonb->'filings') AS f ON CONFLICT (run_id, fingerprint) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify({ filings: $json.filings }) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "5bzmWi2TWDCyypLQ",
+          "name": "intake-db"
+        }
+      }
+    },
+    {
+      "id": "5F71DE5D-DB01-57A1-A485-EC27F8D0604B",
+      "name": "Push",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://ntfy.mtgibbs.dev/agent-runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.message }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "Gw4eOIEmkybwuctT",
+          "name": "ntfy-family"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Flux Webhook": {
+      "main": [
+        [
+          {
+            "node": "Flux Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flux Revision": {
+      "main": [
+        [
+          {
+            "node": "Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Sweep": {
+      "main": [
+        [
+          {
+            "node": "Sweep Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sweep Input": {
+      "main": [
+        [
+          {
+            "node": "Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sec Form": {
+      "main": [
+        [
+          {
+            "node": "Form Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Input": {
+      "main": [
+        [
+          {
+            "node": "Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Ensure Tables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Tables": {
+      "main": [
+        [
+          {
+            "node": "Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Is Flux?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Is Flux?": {
+      "main": [
+        [
+          {
+            "node": "Compare URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare URL": {
+      "main": [
+        [
+          {
+            "node": "Compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare": {
+      "main": [
+        [
+          {
+            "node": "Path Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Path Filter": {
+      "main": [
+        [
+          {
+            "node": "Relevant?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Relevant?": {
+      "main": [
+        [
+          {
+            "node": "Build Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Build Event": {
+      "main": [
+        [
+          {
+            "node": "Resume Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Callback": {
+      "main": [
+        [
+          {
+            "node": "Launch Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Launch Run": {
+      "main": [
+        [
+          {
+            "node": "Launched?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refusal Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Launched?": {
+      "main": [
+        [
+          {
+            "node": "Wait for Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refusal Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Result": {
+      "main": [
+        [
+          {
+            "node": "Callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback?": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Timeout Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Insert Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Timeout Row": {
+      "main": [
+        [
+          {
+            "node": "Insert Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refusal Row": {
+      "main": [
+        [
+          {
+            "node": "Insert Ledger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Ledger": {
+      "main": [
+        [
+          {
+            "node": "Plan Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Items": {
+      "main": [
+        [
+          {
+            "node": "Has Plans?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Plans?": {
+      "main": [
+        [
+          {
+            "node": "Issue Pages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Pages": {
+      "main": [
+        [
+          {
+            "node": "List Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Issues": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Any Actions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Actions?": {
+      "main": [
+        [
+          {
+            "node": "Split Actions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Actions": {
+      "main": [
+        [
+          {
+            "node": "Apply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Record Filings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -12,6 +12,7 @@ resources:
   - external-secret-runner.yaml
   - external-secret-media-investigator.yaml
   - external-secret-ops-investigator.yaml
+  - external-secret-sec-researcher.yaml
   - pvc.yaml
   - deployment.yaml
   - service.yaml
@@ -29,3 +30,4 @@ configMapGenerator:
     files:
       - manifests/media-investigator.yaml
       - manifests/ops-investigator.yaml
+      - manifests/sec-researcher.yaml

@@ -1004,3 +1004,207 @@ def test_callback_prefix_without_trailing_slash_is_dropped():
     cfg = RN.Config.from_env({"RUNNER_API_TOKEN": "t",
                               "RUNNER_CALLBACK_PREFIXES": "http://n8n.n8n.svc,http://ok.svc:5678/"})
     assert cfg.callback_prefixes == ["http://ok.svc:5678/"]
+
+
+# ------------------------------------------------------------------ slice 3: plan results, checkout, models per event
+
+SEC = {
+    "kind": "Agent", "name": "sec-researcher", "purpose": "review access control",
+    "image": "ghcr.io/mtgibbs/agent-runtime:0.2.0", "data_class": "system",
+    "model": {"allow": ["claude-haiku"], "by_event_type": {"security.sweep": ["claude-sonnet", "claude-haiku"]}},
+    "secret": "agent-sec-researcher",
+    "checkout": {"source": "flux-system/flux-system", "include": ["clusters/", "docs/secrets-map.md"]},
+    "outputs": ["plan"], "prompt": "Review.\n",
+    "limits": {"timeout": "20m", "runs_per_day": 6, "max_steps": 40},
+}
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def plan_item(**over):
+    p = {"kind": "plan", "title": "agents namespace allows X", "severity": "medium",
+         "fingerprint": {"rule": "networkpolicy-broad-egress", "resource": "agents/NetworkPolicy/agent-base-egress"},
+         "plan": {"found": "f", "evidence": "clusters/pi-k3s/agents/networkpolicies.yaml:40", "likely_cause": "c",
+                  "proposed_change": "No change needed.", "risk": "r", "verify": "v", "rollback": "rb"}}
+    p.update(over)
+    return p
+
+
+def plan_res(*items):
+    return {"outcome": "needs_human", "summary": "1 finding", "outputs": list(items)}
+
+
+def test_plan_result_valid():
+    st, res, why = parse(encode_result(plan_res(plan_item(), plan_item(severity="info"))), kinds=("plan",))
+    assert st == results.OK and why is None and len(res["outputs"]) == 2
+
+
+@pytest.mark.parametrize("mut, frag", [
+    (lambda p: p.pop("severity"), "exactly"),
+    (lambda p: p.update(severity="urgent"), "severity"),
+    (lambda p: p.update(body="x"), "exactly"),
+    (lambda p: p.update(issue_url="https://github.com/x/y/issues/1"), "exactly"),
+    (lambda p: p["fingerprint"].update(rule="Bad Rule!"), "rule"),
+    (lambda p: p["fingerprint"].update(rule="ab"), "rule"),
+    (lambda p: p["fingerprint"].update(resource="networkpolicy foo"), "resource"),
+    (lambda p: p["fingerprint"].update(resource="agents/networkpolicy/foo"), "resource"),
+    (lambda p: p["fingerprint"].update(extra="x"), "fingerprint"),
+    (lambda p: p["plan"].pop("rollback"), "plan.plan"),
+    (lambda p: p["plan"].update(notes="x"), "plan.plan"),
+    (lambda p: p["plan"].update(risk="   "), "plan.risk"),
+    (lambda p: p["plan"].update(risk=7), "plan.risk"),
+    (lambda p: p["plan"].update(risk="x" * (4 * 1024 + 1)), "plan.risk exceeds"),
+    (lambda p: p["plan"].update(evidence="é" * (4 * 1024 + 1)), "plan.evidence exceeds"),
+    (lambda p: p.update(title="x" * 201), "title"),
+    (lambda p: p.update(title="two\nlines"), "one line"),
+    (lambda p: p.update(title=""), "title"),
+])
+def test_plan_result_invalid_is_rejected(mut, frag):
+    p = plan_item()
+    mut(p)
+    st, res, why = parse(encode_result(plan_res(p)), kinds=("plan",))
+    assert st == results.INVALID and res is None and frag in why, why
+
+
+def test_plan_sizes_at_the_limit_pass():
+    p = plan_item(title="t" * 200)
+    p["plan"]["evidence"] = "e" * (8 * 1024)
+    p["plan"]["risk"] = "r" * (4 * 1024)
+    assert parse(encode_result(plan_res(p)), kinds=("plan",))[0] == results.OK
+
+
+def test_plan_kind_must_be_allowed_and_report_shape_still_enforced():
+    assert parse(encode_result(plan_res(plan_item())), kinds=("report",))[0] == results.INVALID
+    bad = {"outcome": "done", "summary": "s", "outputs": [{"kind": "report", "title": "t"}]}
+    assert parse(encode_result(bad), kinds=("report", "plan"))[0] == results.INVALID
+
+
+def test_invalid_plan_result_forces_failed_callback(env):
+    write_manifest(env, SEC)
+    _, b = submit(env, agent="sec-researcher", ev=event(type="security.manual"))
+    rid = b["run_id"]
+    bad = plan_item()
+    bad["fingerprint"]["resource"] = "../../etc"
+    env.kube.logs[rid] = encode_result(plan_res(bad))
+    env.kube.set_condition(rid, "Complete")
+    assert env.runner.poll_once(rid) is True
+    [(_, p)] = env.posts
+    assert p["exit_reason"] == "invalid_result" and p["result"]["outcome"] == "failed"
+    assert p["result"]["outputs"] == []
+
+
+def test_sec_manifest_valid():
+    assert valid(copy.deepcopy(SEC), stem="sec-researcher") == 1200
+
+
+@pytest.mark.parametrize("mut, frag", [
+    (lambda m: m.update(checkout="flux-system/flux-system"), "checkout must be a mapping"),
+    (lambda m: m["checkout"].update(url="http://evil/x.tar.gz"), "checkout must be a mapping"),
+    (lambda m: m["checkout"].pop("source"), "checkout must be a mapping"),
+    (lambda m: m["checkout"].update(source="http://evil"), "checkout.source"),
+    (lambda m: m["checkout"].update(source="flux-system"), "checkout.source"),
+    (lambda m: m["checkout"].update(include=["../secrets"]), "checkout.include"),
+    (lambda m: m["checkout"].update(include=["/etc"]), "checkout.include"),
+    (lambda m: m["checkout"].update(include=["clusters/../.."]), "checkout.include"),
+    (lambda m: m["checkout"].update(include=[]), "checkout.include"),
+    (lambda m: m["model"].update(by_event_type={"security.sweep": []}), "by_event_type[security.sweep]"),
+    (lambda m: m["model"].update(by_event_type={"Bad Type": ["x"]}), "not an event type"),
+    (lambda m: m["model"].update(by_event_type=["x"]), "by_event_type must be"),
+    (lambda m: m["model"].update(fallback=["x"]), "model must be a mapping"),
+])
+def test_sec_manifest_invalid(mut, frag):
+    m = copy.deepcopy(SEC)
+    mut(m)
+    with pytest.raises(agentspec.ManifestError, match=frag.replace("[", r"\[").replace("]", r"\]")):
+        valid(m, stem="sec-researcher")
+
+
+def test_personal_rule_covers_by_event_type_models():
+    m = copy.deepcopy(MANIFEST)
+    m["data_class"] = "personal"
+    m["model"] = {"allow": ["hot-coder"], "by_event_type": {"x.y": ["claude-sonnet"]}}
+    with pytest.raises(agentspec.ManifestError, match="claude-sonnet"):
+        valid(m)
+
+
+def _sec_job(ev, base=jobspec.DEFAULT_CHECKOUT_BASE_URL):
+    return jobspec.render_job("abc123", copy.deepcopy(SEC), ev, 1200, "agents", "http://litellm:4000",
+                              ["pi5-worker-1"], checkout_base_url=base)
+
+
+def test_model_selected_per_event_type():
+    def models(ev_type):
+        c = _sec_job(event(type=ev_type))["spec"]["template"]["spec"]["containers"][0]
+        man = json.loads({x["name"]: x["value"] for x in c["env"]}["AGENT_MANIFEST"])
+        assert set(man["model"]) == {"allow"}   # the runtime only ever sees the resolved list
+        return man["model"]["allow"]
+    assert models("security.sweep") == ["claude-sonnet", "claude-haiku"]
+    assert models("security.flux_revision") == ["claude-haiku"]
+    assert models("security.manual") == ["claude-haiku"]
+
+
+def test_checkout_renders_init_container_and_readonly_mount():
+    pod = _sec_job(event(type="security.flux_revision", data={"revision": SHA}))["spec"]["template"]["spec"]
+    [init] = pod["initContainers"]
+    [agent] = pod["containers"]
+    assert init["name"] == "checkout" and init["image"] == SEC["image"]
+    assert init["command"] == ["python", "/app/checkout.py"]
+    assert "envFrom" not in init                      # the checkout step holds no credential
+    ienv = {x["name"]: x["value"] for x in init["env"]}
+    base = "http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/"
+    assert ienv["CHECKOUT_URL"] == base + SHA + ".tar.gz"
+    assert ienv["CHECKOUT_FALLBACK_URL"] == base + "latest.tar.gz"
+    assert ienv["CHECKOUT_DEST"] == "/repo/tree" and ienv["CHECKOUT_INFO"] == "/repo/checkout.json"
+    assert json.loads(ienv["CHECKOUT_INCLUDE"]) == ["clusters/", "docs/secrets-map.md"]
+    isc = init["securityContext"]
+    assert isc["readOnlyRootFilesystem"] is True and isc["allowPrivilegeEscalation"] is False
+    assert isc["runAsNonRoot"] is True and isc["capabilities"] == {"drop": ["ALL"]}
+    assert {"name": "repo", "mountPath": "/repo"} in init["volumeMounts"]
+    # the agent container sees the checkout read-only, and only the init container writes it
+    assert {"name": "repo", "mountPath": "/repo", "readOnly": True} in agent["volumeMounts"]
+    aenv = {x["name"]: x["value"] for x in agent["env"]}
+    assert aenv["AGENT_REPO_DIR"] == "/repo/tree" and aenv["AGENT_CHECKOUT_INFO"] == "/repo/checkout.json"
+    assert {"name": "repo", "emptyDir": {"sizeLimit": "256Mi"}} in pod["volumes"]
+
+
+@pytest.mark.parametrize("rev", [None, "", "main", SHA.upper(), SHA[:39], SHA + "0",
+                                 "../../../helmrepository/x/y/latest", "abc?x=1"])
+def test_checkout_url_only_takes_a_well_formed_sha_from_the_event(rev):
+    data = {} if rev is None else {"revision": rev}
+    pod = _sec_job(event(type="security.manual", data=data))["spec"]["template"]["spec"]
+    ienv = {x["name"]: x["value"] for x in pod["initContainers"][0]["env"]}
+    assert ienv["CHECKOUT_URL"].endswith("/gitrepository/flux-system/flux-system/latest.tar.gz")
+    assert ienv["CHECKOUT_FALLBACK_URL"] == ""
+
+
+def test_checkout_host_comes_from_runner_config_not_manifest():
+    pod = _sec_job(event(), base="http://sc.test:9090/")["spec"]["template"]["spec"]
+    ienv = {x["name"]: x["value"] for x in pod["initContainers"][0]["env"]}
+    assert ienv["CHECKOUT_URL"] == "http://sc.test:9090/gitrepository/flux-system/flux-system/latest.tar.gz"
+    assert rmod.Config.from_env({"RUNNER_CHECKOUT_BASE_URL": "http://sc.test:9090"}).checkout_base_url == \
+        "http://sc.test:9090"
+    assert rmod.Config.from_env({}).checkout_base_url == jobspec.DEFAULT_CHECKOUT_BASE_URL
+
+
+def test_manifest_without_checkout_renders_no_init_container(env):
+    pod = rendered(env)["spec"]["template"]["spec"]
+    assert "initContainers" not in pod
+    assert all(v["name"] != "repo" for v in pod["volumes"])
+
+
+def test_runner_launch_passes_checkout_base(env):
+    env.cfg.checkout_base_url = "http://sc.test:9090"
+    write_manifest(env, SEC)
+    submit(env, agent="sec-researcher", ev=event(type="security.sweep"))
+    init = env.kube.created[0]["spec"]["template"]["spec"]["initContainers"][0]
+    assert {x["name"]: x["value"] for x in init["env"]}["CHECKOUT_URL"].startswith("http://sc.test:9090/")
+
+
+def test_repo_manifest_sec_researcher_is_valid():
+    """The manifest in Git loads under the runner's own validator (as the runner would load it)."""
+    mdir = Path(__file__).resolve().parents[2] / "clusters/pi-k3s/agents/manifests"
+    doc, timeout = agentspec.load_manifest(str(mdir), "sec-researcher", ["hot-coder"])
+    assert doc["outputs"] == ["plan"] and doc["data_class"] == "system"
+    assert doc["checkout"]["source"] == "flux-system/flux-system"
+    allm = {m for lst in [doc["model"]["allow"], *doc["model"].get("by_event_type", {}).values()] for m in lst}
+    assert not any("opus" in m for m in allm)
+    assert "connectors" in doc and doc["connectors"]["mcp"][0]["key_env"] == "MCP_HOMELAB_READONLY_KEY"

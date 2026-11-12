@@ -6,11 +6,24 @@ ever executed, interpolated into a command, or used to choose what the runner do
 import base64
 import binascii
 import json
+import re
 
 MARKER = "::agent-result::"
 OUTCOMES = {"done", "nothing_to_do", "needs_human", "failed"}
 RESULT_KEYS = {"outcome", "summary", "outputs"}
-OUTPUT_KEYS = {"kind", "title", "body"}
+OUTPUT_KEYS = {"kind", "title", "body"}          # every kind except `plan`
+# `plan` (CONTRACT §5a): a structured finding. n8n files it as an issue from these fields alone,
+# so every field is shape-checked here and nothing free-form beyond the sections is accepted.
+PLAN_KEYS = {"kind", "title", "severity", "fingerprint", "plan"}
+PLAN_FP_KEYS = {"rule", "resource"}
+PLAN_SECTIONS = ("found", "evidence", "likely_cause", "proposed_change", "risk", "verify", "rollback")
+PLAN_SEVERITIES = ("critical", "high", "medium", "low", "info")
+PLAN_RULE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+# <namespace | "cluster">/<Kind>/<name>, e.g. agents/NetworkPolicy/agent-base-egress
+PLAN_RESOURCE_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}/[A-Z][A-Za-z0-9]{0,62}/[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$")
+PLAN_TITLE_CHARS = 200
+PLAN_SECTION_BYTES = 4 * 1024
+PLAN_EVIDENCE_BYTES = 8 * 1024
 MAX_SUMMARY_CHARS = 2048
 MAX_BODY_BYTES = 32 * 1024
 MAX_TITLE_CHARS = 512
@@ -49,16 +62,56 @@ def validate_result(res, allowed_kinds):
         return f"more than {MAX_OUTPUTS} outputs"
     allowed = set(allowed_kinds)
     for i, o in enumerate(outs):
-        if not isinstance(o, dict) or set(o) != OUTPUT_KEYS:
-            return f"outputs[{i}] must have exactly kind/title/body"
-        if not all(isinstance(o[k], str) for k in OUTPUT_KEYS):
-            return f"outputs[{i}] fields must be strings"
-        if o["kind"] not in allowed:
+        if not isinstance(o, dict):
+            return f"outputs[{i}] must be an object"
+        if o.get("kind") not in allowed:
             return f"outputs[{i}].kind not allowed by the manifest"
-        if len(o["title"]) > MAX_TITLE_CHARS:
-            return f"outputs[{i}].title too long"
-        if len(o["body"].encode("utf-8")) > MAX_BODY_BYTES:
-            return f"outputs[{i}].body exceeds {MAX_BODY_BYTES} bytes"
+        err = validate_plan(o) if o["kind"] == "plan" else _validate_body_output(o)
+        if err:
+            return f"outputs[{i}]: {err}"
+    return None
+
+
+def _validate_body_output(o):
+    if set(o) != OUTPUT_KEYS:
+        return "must have exactly kind/title/body"
+    if not all(isinstance(o[k], str) for k in OUTPUT_KEYS):
+        return "fields must be strings"
+    if len(o["title"]) > MAX_TITLE_CHARS:
+        return "title too long"
+    if len(o["body"].encode("utf-8")) > MAX_BODY_BYTES:
+        return f"body exceeds {MAX_BODY_BYTES} bytes"
+    return None
+
+
+def validate_plan(o):
+    """Error string for a `plan` output, or None. Exact keys, enums, slug/resource patterns, sizes."""
+    if set(o) != PLAN_KEYS:
+        return f"plan must have exactly {sorted(PLAN_KEYS)}"
+    title = o["title"]
+    if not (isinstance(title, str) and title.strip()) or len(title) > PLAN_TITLE_CHARS:
+        return f"plan title must be 1..{PLAN_TITLE_CHARS} chars"
+    if any(ord(c) < 32 for c in title):
+        return "plan title must be one line"
+    if o["severity"] not in PLAN_SEVERITIES:
+        return f"plan severity must be one of {list(PLAN_SEVERITIES)}"
+    fp = o["fingerprint"]
+    if not isinstance(fp, dict) or set(fp) != PLAN_FP_KEYS:
+        return "plan fingerprint must have exactly rule/resource"
+    if not (isinstance(fp["rule"], str) and PLAN_RULE_RE.match(fp["rule"])):
+        return "plan fingerprint.rule must be a lowercase slug (3..64 chars)"
+    if not (isinstance(fp["resource"], str) and PLAN_RESOURCE_RE.match(fp["resource"])):
+        return "plan fingerprint.resource must be <namespace|cluster>/<Kind>/<name>"
+    plan = o["plan"]
+    if not isinstance(plan, dict) or set(plan) != set(PLAN_SECTIONS):
+        return f"plan.plan must have exactly {list(PLAN_SECTIONS)}"
+    for k in PLAN_SECTIONS:
+        v = plan[k]
+        if not (isinstance(v, str) and v.strip()):
+            return f"plan.{k} must be a non-empty string"
+        cap = PLAN_EVIDENCE_BYTES if k == "evidence" else PLAN_SECTION_BYTES
+        if len(v.encode("utf-8")) > cap:
+            return f"plan.{k} exceeds {cap} bytes"
     return None
 
 

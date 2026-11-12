@@ -4,3 +4,4 @@ resources:
   - external-secret.yaml
   - provider.yaml
   - alert-deployments.yaml
+  - n8n-agents.yaml
