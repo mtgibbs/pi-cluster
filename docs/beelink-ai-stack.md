@@ -89,19 +89,30 @@ Tool calls: model emits JSON `tool_calls`. Pi-side caller is responsible for exe
 ### Mode flips (`aimode`) — measured timings (2026-05-24)
 
 `sudo aimode {work|family|status}` toggles between **family** (Dewey + 30B coder, multi-tenant)
-and **work** (Q8 Qwen3-Coder-Next, sole tenant). The `hot-coder` LiteLLM alias is the single
+and **work** (llama-server; Qwen3.8-Flash-Next since 2026-11-11, sole tenant). The `hot-coder` LiteLLM alias is the single
 knob — flipping repoints opencode/`oc`, the Ops pipe, and MCP downstream automatically.
 
-> **Context windows (updated 2026-06-24):** work-mode Q8 runs **256k** (`-c 262144` — the model's
-> native max). Qwen3-Next's hybrid linear-attention KV is cheap (~0.8 GiB per 32k), so 256k sits at
-> only ~86 GiB / 96 GiB VRAM. Family-mode Ollama models stay capped at **32k**
-> (`OLLAMA_CONTEXT_LENGTH`) — the dense 30B's quadratic KV would balloon to ~71 GiB at 256k.
-> `opencode.json` declares `context: 262144` to match work mode, so do coding in `work` and keep
-> family-mode sessions short.
+> **Work-mode model (updated 2026-11-12):** llama-server serves **Qwen3.8-Flash-Next UD-IQ4_XS
+> at 128k** (`-c 131072`), thinking pinned off, with `--load-mode mmap --lazy-mode on` and an 8 GiB
+> host-RAM prompt cache. It replaced Qwen3-Coder-Next Q8 (256k) after the Terminal-Bench bake-off
+> (15/19 vs 8/19; see `docs/model-onboarding.md` §6). It is still served under the alias
+> `qwen3-coder-next-q8`, which is what LiteLLM routes `hot-coder` to, so that name in logs or
+> `/v1/models` does **not** mean the old model. Lazy mode matters: without it the model's 26.8 GiB
+> n-gram tables sit in the ~30 GiB of host RAM and llama-server gets OOM-killed. Speed: ~28 tok/s
+> decode, ~330 tok/s prefill, so a new agent session's first turn (goose sends ~13.5k tokens of
+> system prompt and tool schemas) takes ~40 s; later turns hit the prompt cache and start in under
+> a second. Config lives in `beelink-ansible` (`llama_server_*` vars, `bake/` arms; rollback is
+> `-e @bake/qwen3-coder-next.yml`).
+>
+> **Context windows:** work mode is **128k**. Flash-Next loads and recalls to 256k, but scored worse
+> there (the bigger window only let it grind past task time limits). Family-mode Ollama models stay
+> capped at **32k** (`OLLAMA_CONTEXT_LENGTH`). opencode configs declare `hot-coder` as
+> `context: 131072, output: 32768` to match work mode, so do coding in `work` and keep family-mode
+> sessions short.
 
 | Flip | Wall time | Notes |
 |---|---|---|
-| **→ Work** | **~54s** | evict Ollama → start llama-server → load ~85 GB Q8 → repoint. First Q8 call after = **~0.5s** (already warm). |
+| **→ Work** | **~54s** (Q8, 2026-05-24) | evict Ollama → start llama-server → load the model → repoint. Flash-Next loads in **~2 min** (llama-server restart to healthy, measured 2026-11-11); `hot-coder` returns 503 `Loading model` until then. |
 | **→ Family** | **~9s** | repoint + stop llama-server + warm Dewey's pair. First *coder* call = **~6s** (coder isn't pre-warmed — `MAX_LOADED=3`, Dewey is the priority resident). |
 
 **Per-model heat-up** (Ollama `load_duration`, page-cache-warm):
@@ -111,7 +122,8 @@ knob — flipping repoints opencode/`oc`, the Ops pipe, and MCP downstream autom
 | `qwen3-coder:30b` (Q4) | 25 GB | 6.4s |
 | `qwen3-30b-instruct` | 24 GB | 5.9s |
 | `qwen3-4b-instruct` | 15 GB | 1.9s |
-| Q8 (Qwen3-Coder-Next, llama-server) | 85 GB | ~50s |
+| Q8 (Qwen3-Coder-Next, llama-server; retired 2026-11-11) | 85 GB | ~50s |
+| Qwen3.8-Flash-Next UD-IQ4_XS (llama-server, lazy mode) | 87 GB | ~2 min |
 
 > **Caveat:** these are *page-cache-warm* (GGUFs recently resident). **True-cold** (post-reboot)
 > is disk-bound (~1.7 GB/s observed) — a 25 GB model ≈ ~15s cold, the Q8 toward the 60–120s budget.

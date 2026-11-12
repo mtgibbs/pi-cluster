@@ -133,14 +133,23 @@ Two rules learned the expensive way during the token-bench campaign:
 - **An optimization is a hypothesis until an A/B shows otherwise.** Attach the hardware and the
   configuration to every number you record, or it isn't a measurement.
 
-`harness:scripts/token-bench/` is the only measured harness we own (arms, regex grading, `results.jsonl`).
+**Terminal-Bench-mini Core-19 through opencode** (pass@1, 90 min per task) is now the primary
+measure for the work-mode coder: it scores whether the agent actually finishes real terminal tasks,
+which token-bench can't. First used for the 2026-11 bake-off; the runner and its scripts live on
+the Beelink under `/srv/models/tbm/` (not yet in a repo). Two lessons from it: count **host OOM
+kills** (`journalctl -k | grep "Killed process"`), not container restart counts, which reset when
+the container is recreated; and treat a task that dies on network or setup errors as an
+infrastructure failure to rerun, not a model failure.
+
+`harness:scripts/token-bench/` is the other measured harness we own (arms, regex grading, `results.jsonl`).
 It currently varies *context strategy* with the model held fixed. Inverting that — hold the arm
 fixed, vary the model — would turn it into a proper model-comparison rig. **Future work, deliberately
 not built** (2026-08-11 scoping call); until then §4 is manual and that's fine.
 
 ## 5. Promote or shelf
 
-- **Promote** = repoint a LiteLLM alias. `hot-coder` is the single knob that moves `oc`, the Ops
+- **Promote** = repoint a LiteLLM alias, or, for the work-mode coder, change what llama-server
+  loads underneath the alias it already serves (`beelink-ansible` `llama_server_*` defaults). `hot-coder` is the single knob that moves `oc`, the Ops
   pipeline, and MCP downstream together — that indirection is the whole point, so promotion is one
   change, not a hunt through consumers.
 - **Shelf** = leave it registered but on no allowlist. Costs disk, reaches nobody, easy to revisit.
@@ -170,6 +179,8 @@ Append a row whenever a candidate is decided. Backfilled from `docs/model-eval-2
 | 2026-08-11 | **Colibrì + GLM-5.2** (engine) | Frontier / async | 744B / 40B, disk-streamed experts | **Rejected — not now** | ~0.5 tok/s projected on our drive class; auto-pin wants 37–47 GB against a 96 GB VRAM carve. Triggers to revisit in `docs/research/colibri-moe-disk-streaming.md` |
 | 2026-08-19 | `Qwen3.8-Max` (2.4T-A95B) | Frontier / any | MoE 2.4T / 95B active | **Rejected — step-2 arithmetic** | Smallest published quant is 397 GB (Q1_0), ~3× the box's total RAM; 95B active would cap it near 2 tok/s even if it fit. Same wall as Colibrì, eight days later |
 | 2026-08-19 | `Qwen3.8-27B` | Work-mode coder (candidate) | dense 27.8B / **27.8B active**, hybrid GDN | **Rejected for `hot-coder`; flagged for judge** | Better model, wrong shape — fails gate #3. 17.5 GB/token vs Coder-Next's 3.2 → **~11 tok/s projected** against Coder-Next's **59 measured**. Its SWE-bench Pro 61.7 (vs 44.3) is earned at `reasoning_effort: xhigh`, which we would have to switch off, keeping the slowness and discarding the reason to want it. Cheap KV (hybrid GDN) is not the problem; active params are. **Possible fit: the review-hub judge** — latency-tolerant, quality-bound, thinking-ON is a feature there. Shelf and measure; needs the `review-hub` key allowlist widened and a 3rd `llama-server` against the same 96 GB pool |
+| 2026-11-11 | **Qwen3.8-Flash-Next** UD-IQ4_XS | Work-mode coder | MoE 125B LM + n-gram tables / ~6B active | **Adopted** (replaces Qwen3-Coder-Next Q8) | Terminal-Bench Core-19 via opencode: **15/19**, vs Laguna-S 2.1 (thinking on) 12/19 and Coder-Next 8/19. Coder-Next was fast (2.2 min median per task) but declared tasks done without checking them. Costs: ~2.3× slower on token-bench (fails the old 1.5× rule, accepted), 28 vs 44 tok/s decode. Needs lazy mode (`--load-mode mmap --lazy-mode on`) or it OOM-kills the host. Serves at **128k**: 256k worked but scored at most 12/19. beelink-ansible #50, #51 |
+| 2026-11-11 | Laguna-S 2.1 (Q5_K_M) | Work-mode coder (candidate) | — | **Not adopted** | 12/19 on Terminal-Bench with thinking on, 13.9 min median per task; behind Flash-Next on both axes |
 
 ---
 
