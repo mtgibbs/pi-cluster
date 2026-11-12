@@ -28,7 +28,7 @@
 kind: Agent
 name: sec-researcher
 purpose: "Review the cluster's access control (RBAC, NetworkPolicies, ServiceAccounts, securityContext, secrets wiring, ingress exposure) from the repo Flux applies plus read-only live state, and return structured findings as plans; read-only."
-image: ghcr.io/mtgibbs/agent-runtime:0.2.0
+image: ghcr.io/mtgibbs/agent-runtime:0.2.1
 data_class: system
 model:
   allow: [claude-haiku]
