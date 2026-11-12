@@ -1,6 +1,8 @@
 # Agent sandbox — n8n hands an event to a short-lived, least-privilege agent
 
-**Status:** Draft design, revision 3. Not built. Nothing here is deployed.
+**Status:** Draft design, revision 4. Slices 1–2 are built; slice 3 (`sec-researcher`, plans) is built and not yet
+activated. Revision 4 (2026-11-12): **n8n files plans, not the agent** — the agent returns structured `plan` items and
+holds no GitHub credential; there is no GitHub App until the fixer (§3, §5.1, §5.3, §7, §9).
 **Date:** 2026-11-11
 **Asks of Matt:** the [open questions](#11-open-questions-for-matt) at the end.
 
@@ -131,7 +133,8 @@ it to n8n. A missing or invalid result is a failure, never a silent success.
   "outputs": [
     {"kind": "report", "title": "…", "body_ref": "…"},
     {"kind": "calendar_event", "calendar": "family", "title": "Dentist — Rory", "start": "…", "end": "…"},
-    {"kind": "plan", "issue_url": "…"},
+    {"kind": "plan", "title": "…", "severity": "high", "fingerprint": {"rule": "…", "resource": "ns/Kind/name"},
+     "plan": {"found": "…", "evidence": "…", "likely_cause": "…", "proposed_change": "…", "risk": "…", "verify": "…", "rollback": "…"}},
     {"kind": "pull_request", "url": "…"}
   ]
 }
@@ -139,14 +142,20 @@ it to n8n. A missing or invalid result is a failure, never a silent success.
 
 ## 3. Outcomes — who performs the side effect
 
-This is the rule that keeps an agent inside its responsibility. There are two ways an outcome reaches the world, and
-the agent only ever performs the first.
+This is the rule that keeps an agent inside its responsibility. There are two ways an outcome reaches the world. The
+agent performs the first only when the outcome *is* code (a draft PR); everything else, plans included, is the second.
 
 | | The agent does it | n8n does it |
 |---|---|---|
-| **What** | Writes a *proposal* somewhere a human gate already stands: a plan issue, a draft PR | Applies a *structured result* to a system: a calendar entry, a database row, a notification |
-| **Credential** | A token minted for that run, scoped to that one repo and that one permission | n8n's own credential. **The agent never holds it.** |
-| **Check before it is live** | The plan needs Matt's approval; the PR needs the checks and Matt's merge | n8n validates the result against a schema, then applies it, or asks Matt first (per workflow) |
+| **What** | Writes a *draft PR* where the checks and Matt's merge already stand (the fixer, slice 4) | Applies a *structured result* to a system: a plan issue, a calendar entry, a database row, a notification |
+| **Credential** | A token minted for that run, scoped to that one repo and branch-and-PR only | n8n's own credential. **The agent never holds it.** |
+| **Check before it is live** | The PR needs the checks and Matt's merge | n8n validates the result against a schema, then applies it, or asks Matt first (per workflow) |
+
+**Plans are filed by n8n (decided 2026-11-12).** A researcher or investigator returns `plan` items: structured fields
+(title, severity, fingerprint, the fixed sections of §7), never an issue URL. A deterministic n8n step looks the
+fingerprint up in the plans repo and creates, updates or leaves alone an issue, built from those fields only. So a
+hijacked researcher can at worst propose a wrong plan; it cannot write to GitHub at all, cannot exceed the 5-new cap,
+and cannot reopen a finding Matt closed as accepted risk.
 
 So a calendar assistant never holds calendar access. It returns `calendar_event` items, and the n8n workflow, which is
 deterministic and reviewed, writes them. A hijacked assistant can at worst propose a wrong appointment.
@@ -168,7 +177,7 @@ gets Flux and cluster-read tools. Neither can reach what the other can.
 
 | Agent | Triggered by | Connectors | Outputs |
 |---|---|---|---|
-| `sec-researcher` | A merge touching access-control manifests; a weekly sweep; Matt | Repo read, cluster-read MCP | `plan` |
+| `sec-researcher` | A Flux revision touching access-control paths; a weekly sweep; Matt | Repo read (Flux artifact, read-only), 4 cluster-read MCP tools | `plan` (filed by n8n) |
 | `ops-investigator` | Alertmanager, Flux failures, Uptime Kuma; Matt | Cluster-read MCP, Loki | `plan` or `report` |
 | `media-investigator` | Matt; media alerts | Jellyfin and media read tools, Loki | `report` |
 | `ops-fixer` | A plan Matt approved, and nothing else | One repo, branch and PR only | `pull_request` |
@@ -223,8 +232,14 @@ it knows nothing about specs or gates; jig's build loop becomes one of its clien
   watches it → validates the result → calls back.
 - It is the only identity that can create Jobs, and only in the `agents` namespace.
 - It accepts calls only from n8n (network policy plus a bearer token).
-- It holds the GitHub App key, to mint per-run tokens. That makes it the component to protect: it has no ingress from
-  outside the cluster, no LLM inside it, and no logic beyond the table above.
+- It holds **no GitHub credential**. Plans are filed by n8n (§3); the first agent that needs a GitHub token of its own
+  is the fixer (slice 4), and only then does the runner gain a GitHub App key to mint per-run, branch-and-PR-only
+  tokens. Even without it the runner is the component to protect: it has no ingress from outside the cluster, no LLM
+  inside it, and no logic beyond the table above.
+- *As built (runner 0.3.0):* it also renders two opt-in manifest features: `checkout:` (an init container copies a
+  Flux source artifact into a read-only volume, so a researcher reads the repo with no internet egress) and
+  `model.by_event_type` (a different model list per event type, e.g. Sonnet for the weekly sweep only).
+  `scripts/agentrunner/CONTRACT.md` §2, §4a, §5a.
 - A kill switch: one setting makes it refuse every launch.
 
 ### 5.2 The sandbox
@@ -237,7 +252,7 @@ One Job per run, in an `agents` namespace.
 | Pod | Non-root, read-only root filesystem, all capabilities dropped, default seccomp, pod security `restricted` enforced on the namespace |
 | Workspace | An `emptyDir` with a size limit. Gone when the Job is. |
 | Lifetime | The manifest's timeout as a hard deadline. No automatic retries. Cleaned up an hour after finishing. |
-| Network | Default deny. Allowed: DNS, the model gateway, and exactly the manifest's connectors. Agents that need the internet (GitHub) get public `443` with every private address range blocked, so **no agent can reach the LAN**. |
+| Network | Default deny. Allowed: DNS, the model gateway, and exactly the manifest's connectors. Agents that need the internet (GitHub) get public `443` with every private address range blocked, so **no agent can reach the LAN**. *As built:* a researcher reads the repo with **no** internet egress — its init container fetches the Flux source-controller artifact in-cluster (`:9090`, allowed for named agents only). |
 | Capacity | A namespace quota of 2 concurrent Jobs as the backstop. *As built (runner 0.2.0):* the runner gates itself to 2 Jobs and holds further runs in a bounded FIFO queue (no Job until a slot frees, so the deadline starts at launch); a full queue answers 429 `queue_full`, a run queued 45m ends `queue_expired`. n8n does not retry. See `scripts/agentrunner/CONTRACT.md` §7a. |
 | Placement | The Pi 5 workers. Never the Pi 3 or the master. An agent needs roughly 0.5–1 GiB, so no dedicated node is needed. |
 
@@ -246,7 +261,9 @@ One Job per run, in an `agents` namespace.
 | Credential | How the agent gets it | Scope |
 |---|---|---|
 | Model | A per-agent LiteLLM key, delivered by ExternalSecrets, with a model allowlist and a **daily budget** (5.4) | That agent's models and spend |
-| GitHub | Minted per run by the runner from one GitHub App, narrowed to the manifest | One repo, one permission (issues *or* branch-and-PR), one hour |
+| GitHub (plans) | **Never given to an agent.** n8n holds one Header-Auth credential, `github-plans`: a token with issues read/write on the private plans repo only | n8n's filing step |
+| GitHub (fixes, slice 4) | Minted per run by the runner from one GitHub App, narrowed to the manifest | One repo, branch-and-PR only, one hour |
+| Repo read | No credential: the Flux source-controller artifact, in-cluster HTTP, fetched by the Job's init container | The revision Flux serves, read-only |
 | MCP | A per-role read-only key | Read tools only, enforced by the server |
 | Anything personal (calendar, mail) | **Never.** n8n applies those results. | — |
 
@@ -321,7 +338,7 @@ These hold for every agent, and each is enforced by something other than the age
 The path for anything that changes the cluster or a repo:
 
 ```
-event → investigator or researcher (read-only) → plan issue → Matt approves → ops-fixer → draft PR
+event → investigator or researcher (read-only) → plan items → n8n files the plan issue → Matt approves → ops-fixer → draft PR
       → CI + review-hub checks → Matt merges → Flux
 ```
 
@@ -332,6 +349,13 @@ event → investigator or researcher (read-only) → plan issue → Matt approve
   risk; how to verify; how to roll back.
 - **Research findings carry a fingerprint** (`agent | rule | resource`), so a re-run updates the open issue instead of
   opening a second, and a finding closed as accepted risk stays closed. A run opens at most 5 new issues.
+- **n8n files plans; agents never touch GitHub for them** (revision 4). The filing step is plain code in the n8n
+  workflow: sha256 of the fingerprint as a marker at the top of the issue body; look the marker up among the plans
+  repo's issues; open → refresh the body if the content changed; closed as *not planned* or labelled `accepted-risk` →
+  nothing; none (or only closed as fixed, i.e. it came back) → create, most severe first, at most 5 per run, the rest
+  reported as "not filed" in the run's one ntfy push. A failed or incomplete issue listing files nothing new. Every
+  decision is recorded in `agent_plan_filings`. Issue text is built from the structured fields only, with agent text
+  neutralised (no HTML, links, mentions or references). Details: `docs/agent-sandbox-n8n.md`, "sec-researcher".
 - **The gates do not change.** The drift gate stays in Actions and review-hub's judges stay in review-hub. They react to
   the PR, whoever wrote it. They do not go through n8n or the runner.
 - pi-cluster `main` gets required checks and a required review by Matt before any fixer exists.
@@ -351,8 +375,8 @@ Each slice adds one capability. Nothing that can write to a repo runs until the 
 |---|---|---|
 | **1. The sandbox, driven by hand** | The runner, the `agents` namespace and its policies, the Claude runtime image, the *Run agent* step, the form trigger, the run ledger, and one read-only agent, `media-investigator`, returning a `report` | n8n can hand an event to a sandboxed agent and get a result back. This alone replaces "open a session and ask". |
 | **2. Events in** | The Alertmanager, Flux and Uptime Kuma emitters to n8n (one manifest each; Discord unchanged), dedupe | Investigations start on their own |
-| **3. Plans** | The private plans repo, the GitHub App, `sec-researcher`, finding fingerprints and an eval set of seeded faults | Agents find and write up their own work |
-| **4. Fixes** | Required checks on `main`, the approval path, `ops-fixer` | The full path to a merge Matt makes |
+| **3. Plans** | `sec-researcher` (read-only; repo checkout + 4 MCP tools), the `plan` result kind, n8n's filing step into the private plans repo with finding fingerprints, three triggers (Flux revision, weekly sweep, form). *Not* a GitHub App: n8n files plans (revision 4). The eval set of seeded faults follows. | Agents find and write up their own work |
+| **4. Fixes** | Required checks on `main`, the approval path, the GitHub App (branch-and-PR tokens), `ops-fixer` | The full path to a merge Matt makes |
 | **5. Personal** | `family-assistant`, n8n-applied `calendar_event`, the local-model rule | The same sandbox serving a non-system outcome |
 
 Slice 1 needs no GitHub App, no plans repo and no changes to alerting. Its human-only steps are the Anthropic key in

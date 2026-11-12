@@ -33,6 +33,7 @@ Agent Form (LAN: https://n8n.lab.mtgibbs.dev/form/agent-run)
 | `clusters/pi-k3s/n8n/workflows/agent-run-manual-async.json` | Fallback launcher: same form, callback = `agent-result` webhook, pushes "started". |
 | `clusters/pi-k3s/n8n/workflows/agent-result.json` | Fallback receiver: `POST /webhook/agent-result` (header auth) → ledger → push. |
 | `clusters/pi-k3s/n8n/workflows/agent-alert.json` | Slice 2: Alertmanager webhook → dedupe → ops-investigator → same tail. See [Alert → ops-investigator](#alert--ops-investigator-slice-2). |
+| `clusters/pi-k3s/n8n/workflows/agent-sec-researcher.json` | Slice 3: Flux revision / weekly sweep / form → sec-researcher → **n8n files its plans as issues**. See [sec-researcher](#sec-researcher--plans-filed-by-n8n-slice-3). |
 | `clusters/pi-k3s/n8n/workflows/src/agent-*.js` | Code-node sources (each is byte-identical to the `jsCode` in the JSON, the repo's `src/` convention). |
 
 The push carries **outcome, summary, and report title only**. The report body stays in
@@ -415,3 +416,158 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL" -H "Authorization: Beare
 - `agent-alert.json`: that the Postgres node returns `claimed` as a JS boolean (the IF also accepts `'t'`),
   that the webhook tier serves `/webhook/agent-alert` after the roll, and that a Code node returning no items
   (dropped group) ends the execution as *success*.
+
+## sec-researcher → plans filed by n8n (slice 3)
+
+**Status:** 2026-11-12 — written and unit-tested offline (`node clusters/pi-k3s/n8n/workflows/test/agent-sec-researcher.test.js`),
+**not imported**. One workflow, three triggers, one exit point. The agent (`clusters/pi-k3s/agents/manifests/sec-researcher.yaml`)
+is read-only and returns structured `plan` items (CONTRACT §5a); **this workflow, not the agent, writes to GitHub**,
+with its own `github-plans` credential, from those fields only. No model is involved after the agent's result.
+
+```
+Flux Webhook  POST /webhook/agent-sec-revision, Header Auth (agent-alert-token, reused) ─→ Flux Revision  (info + Kustomization + 40-hex sha, else silent end)
+Weekly Sweep  Schedule, cron "0 6 * * 0" (the ONE named sweep, design §10) ──────────────→ Sweep Input    (key per ISO week)
+Sec Form      LAN form /form/agent-sec-run ──────────────────────────────────────────────→ Form Input     (fresh key per submission)
+  → Trigger (re-validates; the merge point) → Ensure Tables (+ agent_plan_filings) → Claim (agent_dedupe; returns the previous flux revision)
+  → Claimed?  false → end
+  → Is Flux?  yes → Compare URL → Compare (GET api.github.com, public repo, NO token) → Path Filter → Relevant?  no → end
+  → Build Event (security.flux_revision | security.sweep | security.manual) → Resume Callback → Launch Run → Launched?
+      → Wait for Result (80 min) → Callback? → Parse Result (keeps plan structure) / Timeout Row ┐
+      (not launched) → Refusal Row ─────────────────────────────────────────────────────────────┴→ Insert Ledger (agent_runs)
+  → Plan Items (re-validate, fingerprint, issue title/body) → Has Plans?
+      yes → Issue Pages (5) → List Issues (github-plans) → Decide → Any Actions?
+              yes → Split Actions → Apply (POST/PATCH, github-plans) → Summarize
+              no  → Summarize
+      no  → Summarize
+  → Summarize → Record Filings (agent_plan_filings) + Push (ntfy agent-runs, ONE per run)
+```
+
+### Triggers and dedupe
+
+| Trigger | Event | Claim key (in `agent_dedupe`) | Hold |
+|---|---|---|---|
+| Flux applies a revision (notification-controller `Provider` `n8n-agents` + `Alert` `sec-researcher-revisions`, `clusters/pi-k3s/flux-notifications/n8n-agents.yaml`) | `security.flux_revision`, `data {revision, base, changed_paths, reasons}` | `sec-researcher:flux-rev:<sha>` | a year — once per revision, however many Kustomizations report it |
+| Weekly sweep, Sunday 06:00 (n8n timezone) | `security.sweep` | `sec-researcher:sweep:<YYYY-Www>` | 6 days |
+| Form | `security.manual`, `data {ask}` | `sec-researcher:manual:<ulid>` | 1 h (never collides) |
+
+**Flux auth (fails closed).** notification-controller sends `Authorization: Bearer <token>` from Secret
+`flux-system/n8n-agent-flux-webhook`, built by an ExternalSecret from **`pi-cluster/n8n-agent-alert-webhook/token`** —
+reused, not minted: it is the existing "in-cluster sender → n8n agent webhook" identity (Alertmanager holds it for
+`agent-alert`), and the receiving credential is the same n8n `agent-alert-token`. Whoever holds it can start
+read-only agent runs, bounded by dedupe and `runs_per_day`; that is true for both senders, so one identity per role.
+It is deliberately not `n8n/webhook-token` (held at the public edge). No header → 403; no Secret → the Provider is not
+Ready and sends nothing.
+
+**Path filter (deterministic, `src/agent-sec-path-filter.js`).** Once per revision, GitHub's public compare API
+(`/repos/mtgibbs/pi-cluster/compare/<previous seen>...<sha>`, or `/commits/<sha>` the first time; unauthenticated,
+60 requests/h is ample at one per revision) lists the changed files. Relevant when a file *path* is access-control
+shaped (rbac/role/serviceaccount/networkpolicy/external-secret/secretstore/ingress/namespace/pod-security YAML; the
+`agents`, `harness-fleet`, `flux-system`, `flux-notifications`, `external-secrets*`, `cloudflare-tunnel`,
+`tailscale*`, `ingress`, `cert-manager-config` directories; `docs/secrets-overlay.yaml`), or when an added/removed line
+of a YAML file under `clusters/` carries an access-control keyword (`kind: Role…`, `securityContext`, `privileged`,
+`host*`, `capabilities`, `automountServiceAccountToken`, `serviceAccountName`, `secretKeyRef`/`secretRef`/`envFrom`/
+`remoteRef`, `ipBlock`/`namespaceSelector`/`podSelector`, `verbs:`, `subjects:`, …). An image-tag bump is not.
+It **fails toward review**: a non-200 answer, a list of ≥ 300 files, or a YAML patch GitHub omitted all count as
+relevant (bounded by `runs_per_day: 6`). Why GitHub and not the cluster: the repo is public, the call needs no
+credential, and n8n already has internet egress; the alternative (diffing two source-controller artifacts inside
+n8n) needs a tar reader in a Code node and a policy hole from n8n to source-controller. Known gap: a refused run
+(cap, pause) is not retried for that revision — the next relevant revision compares from it, and the weekly sweep
+covers the whole tree.
+
+**Model per trigger.** The manifest's `model.by_event_type` gives `security.sweep` `[claude-sonnet, claude-haiku]`;
+every other type uses `allow: [claude-haiku]`. The runner resolves it per event (CONTRACT §2/§4), so n8n chooses the
+model only by choosing the event type.
+
+### The exit point (`src/agent-sec-plan-items.js`, `agent-sec-decide.js`, `agent-sec-summarize.js`)
+
+- **The plans repo** is the constant `PLANS_REPO = 'mtgibbs/homelab-plans'` at the top of `agent-sec-plan-items.js`;
+  `Issue Pages` and `Decide` take it from that node's output. Change it there only, then regenerate the JSON.
+- **Fingerprint**: `sha256("sec-researcher|<rule>|<resource>")`, written as the **first line** of the issue body,
+  `<!-- sec-researcher-fingerprint: <hex> -->`, plus a content hash on line 2. Only a marker at the very start counts,
+  and agent text cannot produce one (prose has `<` escaped; evidence has `<!--` broken).
+- **Lookup**: `GET /repos/<PLANS_REPO>/issues?state=all&per_page=100&sort=created&direction=asc&page=1..5` (PRs
+  ignored). If any page fails, nothing is filed and the push says so; if all 5 pages are full (> 500 issues),
+  nothing *new* is filed (updates still are).
+- **Decision per plan, most severe first**: labelled `accepted-risk` (any state) → **skip**; open → **update** the body
+  (PATCH `body` only — never title, state or labels) when the content hash differs, else **unchanged** (no call);
+  closed as *not planned* → **skip**; otherwise (none, or only closed as *completed*, i.e. it came back — the new
+  issue links the old one) → **create** with labels `sec-researcher`, `severity:<s>`, at most **5** per run; the
+  rest are **not filed** and listed in the push.
+- **Issue text** comes from the structured fields only: `[sec][<severity>] <title>`; severity/rule/resource line; a
+  "written by a model from untrusted inputs" note; the seven sections; a footer with run id, revision and how to
+  accept the risk. Agent prose is neutralised (HTML escaped; brackets, backslashes and backticks escaped; `@` and `#` broken with a zero-width
+  space so there are no mentions or cross-references; `://` and `www.` broken so nothing autolinks); evidence goes
+  verbatim inside a fence longer than any backtick run in it. Bodies stay under GitHub's 65,536-char limit.
+- **Ledger**: `agent_runs` as for every agent (plan items stored in `outputs`), plus one row per plan per run in
+  `agent_plan_filings (run_id, fingerprint, rule, resource, severity, action, issue_number, issue_url, http_status,
+  detail)`; `action` ∈ create, update, unchanged, skip_accepted, not_filed, create_failed, update_failed. Issue
+  numbers/URLs come from GitHub's response and are re-validated against `https://github.com/<PLANS_REPO>/issues/<n>`.
+- **Push**: one per run, `sec-researcher: <outcome> - <N> new, <M> updated - <trigger>`; body: the agent's summary,
+  the counts, up to 5 "not filed" titles with the reason, failures. Priority 4 for a new high/critical or a failure,
+  3 for other new issues, 2 otherwise. A refused launch is one `sec-researcher: not started - …` push.
+
+```sql
+-- what happened to each finding
+SELECT created_at, run_id, action, severity, rule, resource, issue_url, detail
+FROM agent_plan_filings ORDER BY created_at DESC LIMIT 20;
+```
+
+### Must exist before activation
+
+| What | Where | Notes |
+|---|---|---|
+| Private repo **`mtgibbs/homelab-plans`** | GitHub | Issues enabled. Not created by this PR. Until it exists, `List Issues` gets 404 and every run reports "not filed: issue lookup failed (HTTP 404)". |
+| Credential **`github-plans`** | n8n, Header Auth | Name `Authorization`, value `Bearer <token>`; token = fine-grained PAT, **Issues read/write on `mtgibbs/homelab-plans` only**. Keep the source of truth in 1Password (e.g. `pi-cluster/github-plans/token`). Set the credential's allowed domains to `api.github.com`. Placeholder id `REPLACE_ON_IMPORT_github_plans`. |
+| Credential **`agent-alert-token`** | n8n | Exists from slice 2 (same value Flux now sends). Placeholder `REPLACE_ON_IMPORT_agent_alert_token`. |
+| Credential **`agent-runner`** | n8n | Exists. Placeholder `REPLACE_ON_IMPORT_agent_runner`. |
+| `intake-db`, `ntfy-family` | n8n | Exist; ids kept. |
+| Tables `agent_runs`, `agent_dedupe`, `agent_plan_filings` | n8n Postgres | Created by `Ensure Tables`. |
+| Runner ≥ 0.3.0, runtime 0.2.0, manifest `sec-researcher`, LiteLLM key `agent-sec-researcher` | cluster | `clusters/pi-k3s/agents/README.md` checklist. An older runner answers 422 → a "not started" push. |
+
+### Import (manual rollout, in order)
+
+1. **Create the private repo** `mtgibbs/homelab-plans` (GitHub UI or `gh repo create mtgibbs/homelab-plans --private`).
+2. **Mint the GitHub token** (fine-grained, that one repo, Issues: read and write) and **store it in 1Password**.
+3. **Mint the LiteLLM key** `agent-sec-researcher` (`[claude-haiku, claude-sonnet]`, $3/day) into
+   `homelab-agent/agent-sec-researcher/litellm-key` — before merging (the `agents` Kustomization waits on it).
+4. **Merge** this PR; let CI push the images and Flux roll the runner (agents README, step 5).
+5. **Create the n8n credential** `github-plans` (Header Auth; value read from 1Password into a variable, never typed
+   inline): `POST /api/v1/credentials` `{"name":"github-plans","type":"httpHeaderAuth","data":{"name":"Authorization","value":"Bearer …"}}`.
+6. **Import the workflow**: patch the three `REPLACE_ON_IMPORT_*` ids in `agent-sec-researcher.json`,
+   `POST /api/v1/workflows`, then `POST /api/v1/workflows/<id>/activate`.
+7. **Roll the webhook tier** so `/webhook/agent-sec-revision` is registered there (bump `n8n.mtgibbs.dev/restarted-at`
+   in `n8n/webhook.yaml`, PR, reconcile — the publish dance). Until then Flux's POSTs get 404 (notification-controller
+   logs a failed send; nothing else is affected). The form and the schedule run on main and work right after step 6.
+
+### Test plan
+
+1. **Form** (`https://n8n.lab.mtgibbs.dev/form/agent-sec-run`, focus "the agents namespace NetworkPolicies"): one
+   execution waiting → success, one `agent_runs` row, `agent_plan_filings` rows, issues in `homelab-plans` with the
+   marker on line 1, one push.
+2. **Re-run the same focus**: rows say `unchanged` or `update`; no new issues for the same findings.
+3. **Accepted risk**: close one issue as *not planned* (or add `accepted-risk`), re-run: `skip_accepted`, the issue
+   stays closed and unedited.
+4. **Cap**: a broad manual focus that yields > 5 findings: exactly 5 created, the rest listed as "not filed" in the
+   push and `not_filed` in the table.
+5. **Flux, not relevant**: merge an image-tag-only PR. Expect one `agent-sec-researcher` execution per Kustomization
+   event, all but the first ending at `Claimed?`, the first ending at `Relevant?` (false); no run.
+6. **Flux, relevant**: merge a PR touching a `networkpolicies.yaml`. Expect exactly one run, event
+   `security.flux_revision` with that file in `data.changed_paths`, and the checkout init container log
+   `"served": "<sha>.tar.gz"`.
+7. **Auth**: POST `/webhook/agent-sec-revision` without the header, or with `Bearer wrong` → 403, no execution.
+8. **Lookup failure**: temporarily revoke the token → the push says "not filed: issue lookup failed (HTTP 401)",
+   nothing is created.
+9. **Weekly sweep**: run the workflow's schedule node by hand once; a second manual fire the same week ends at
+   `Claimed?`. The sweep's run uses Sonnet (`model_reply` log lines in the Job show `claude-sonnet`).
+
+### Verify against the live n8n (can't be settled offline)
+
+- That HTTP Request v4.2 accepts an expression for `method` (`Apply` uses `={{ $json.method }}`), and that
+  `List Issues` returns one output per page item with `fullResponse` (array body intact).
+- That `$('Split Actions').all()` in Summarize lines up with Apply's outputs (both in item order).
+- That notification-controller's event metadata carries `revision` as `main@sha1:<sha>` (the parser also accepts the
+  prefixed key and a bare sha; anything else is ignored silently — check an execution's input if Flux runs never
+  start).
+- That Kustomizations emit an info event per applied revision often enough (the Alert covers `*`; dedupe handles
+  the fan-out).
+
