@@ -553,7 +553,8 @@ FROM agent_plan_filings ORDER BY created_at DESC LIMIT 20;
    event, all but the first ending at `Claimed?`, the first ending at `Relevant?` (false); no run.
 6. **Flux, relevant**: merge a PR touching a `networkpolicies.yaml`. Expect exactly one run, event
    `security.flux_revision` with that file in `data.changed_paths`, and the checkout init container log
-   `"served": "<sha>.tar.gz"`.
+   `"served": "<sha>.tar.gz"`. `checkout_attempt` lines before it with `outcome: "error"` mean the pod's first
+   connections were refused and retried (agent-runtime ≥ 0.2.1); more than a couple on every run is worth a look.
 7. **Auth**: POST `/webhook/agent-sec-revision` without the header, or with `Bearer wrong` → 403, no execution.
 8. **Lookup failure**: temporarily revoke the token → the push says "not filed: issue lookup failed (HTTP 401)",
    nothing is created.

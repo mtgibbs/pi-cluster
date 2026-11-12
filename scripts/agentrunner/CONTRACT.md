@@ -109,6 +109,13 @@ repo as an artifact (a `.tar.gz` of the tree at one revision) and serves it over
   links, devices skipped), member names that are absolute or contain `..`, NUL or `\` skipped, ≤ 10,000 files,
   ≤ 128 MiB unpacked, ≤ 8 MiB per file, `include` prefixes applied. It **always exits 0** and writes
   `checkout.json` `{"ok": true|false, "requested", "served", "sha256", "files", …, "error"}`.
+- **Retry (runtime ≥ 0.2.1):** connection-level failures (refused, reset, timeout, DNS) are retried with backoff
+  (0.5 s doubling, capped at 8 s) inside one `CHECKOUT_RETRY_BUDGET` (default 45 s) shared by the sha fetch and the
+  fallback — a new pod's first connection can be refused while kube-router is still programming its rules. A clean
+  404 on the sha is never retried; it goes straight to `latest.tar.gz`. Each attempt logs `"event":
+  "checkout_attempt"` (`kind` sha|latest, `attempt`, `outcome`, `error` class). On give-up the error reads `could not
+  fetch the <sha|latest> artifact: <ErrorClass> after <n> attempts` — no URL or host. `CHECKOUT_TIMEOUT` (default
+  15 s) is per socket operation.
 - The runtime reads `checkout.json`: `ok: false` (or a missing file) is a `failed` Result, "repository checkout
   failed: …". Otherwise it offers the model `repo__list_files`, `repo__read_file`, `repo__search` (§6) and tells it
   which artifact it got (and, when `served != requested`, that it is reading a newer revision).

@@ -6,9 +6,11 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import sys
 import tarfile
 import threading
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -179,6 +181,112 @@ def test_checkout_failures_never_crash(tmp_path, monkeypatch, art):
     (tmp_path / "c").mkdir()
     _, info = run_checkout(tmp_path / "c", monkeypatch, "file:///etc/passwd")
     assert info["ok"] is False and "http" in info["error"]
+
+
+# -- checkout: retry on connection-level failures -------------------------------------------------
+class FakeClock:
+    """Replaces checkout's _clock/_sleep: sleeping advances time instantly and is recorded."""
+
+    def __init__(self):
+        self.now, self.sleeps = 1000.0, []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, s):
+        self.sleeps.append(s)
+        self.now += s
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = FakeClock()
+    monkeypatch.setattr(CO, "_clock", c.clock)
+    monkeypatch.setattr(CO, "_sleep", c.sleep)
+    return c
+
+
+def refuse_first(monkeypatch, n):
+    """The first `n` opens fail exactly as a kube-router REJECT does (URLError wrapping
+    ConnectionRefusedError); later opens reach the real server."""
+    real, calls = CO.OPENER.open, []
+
+    def fake(req, *a, **kw):
+        calls.append(req.full_url)
+        if len(calls) <= n:
+            raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+        return real(req, *a, **kw)
+    monkeypatch.setattr(CO.OPENER, "open", fake)
+    return calls
+
+
+def closed_port_url(path):
+    """A loopback URL nothing listens on: a real connection refusal."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return f"http://127.0.0.1:{port}{path}"
+
+
+def test_checkout_retries_a_refused_connection_then_succeeds(tmp_path, monkeypatch, art, clock, capsys):
+    # Uses the module's default retry budget on purpose: with CHECKOUT_RETRY_BUDGET=0 this goes red.
+    srv = art({f"/g/{SHA}.tar.gz": make_tar(REPO)})
+    calls = refuse_first(monkeypatch, 2)
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
+    assert info["ok"] is True, info
+    assert info["served"] == f"{SHA}.tar.gz" and info["files"] == 4
+    assert len(calls) == 3 and clock.sleeps == [0.5, 1.0]
+    attempts = [json.loads(l) for l in capsys.readouterr().out.splitlines()
+                if '"checkout_attempt"' in l]
+    assert [(a["kind"], a["attempt"], a["outcome"]) for a in attempts] == [
+        ("sha", 1, "error"), ("sha", 2, "error"), ("sha", 3, "ok")]
+    assert attempts[0]["error"] == "ConnectionRefusedError"
+
+
+def test_checkout_gives_up_after_the_budget_with_a_useful_message(tmp_path, monkeypatch, clock):
+    monkeypatch.setattr(CO, "RETRY_BUDGET", 30.0)
+    url = closed_port_url(f"/g/{SHA}.tar.gz")
+    _, info = run_checkout(tmp_path, monkeypatch, url, url.replace(f"{SHA}.tar.gz", "latest.tar.gz"))
+    assert info["ok"] is False
+    err = info["error"]
+    assert err.startswith("could not fetch the sha artifact: ConnectionRefusedError after "), err
+    attempts = int(err.split(" after ")[1].split()[0])
+    # 0.5+1+2+4+8+8+6.5 = 30: seven sleeps, eight attempts, never a sleep past the budget.
+    assert attempts == len(clock.sleeps) + 1 == 8
+    assert sum(clock.sleeps) == pytest.approx(30.0) and max(clock.sleeps) <= CO.RETRY_MAX_DELAY
+    assert "127.0.0.1" not in err and "http" not in err      # no URL or host in the message
+
+
+def test_checkout_404_on_sha_falls_back_at_once_without_retrying(tmp_path, monkeypatch, art, clock):
+    srv = art({"/g/latest.tar.gz": make_tar(REPO)})
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
+    assert info["ok"] and info["served"] == "latest.tar.gz"
+    assert srv.paths == [f"/g/{SHA}.tar.gz", "/g/latest.tar.gz"] and clock.sleeps == []
+
+
+def test_checkout_retries_the_fallback_too(tmp_path, monkeypatch, art, clock):
+    srv = art({"/g/latest.tar.gz": make_tar(REPO)})
+    real, calls = CO.OPENER.open, []
+
+    def fake(req, *a, **kw):      # sha: clean 404; latest: refused once, then served
+        calls.append(req.full_url.rsplit("/", 1)[1])
+        if calls.count("latest.tar.gz") == 1 and calls[-1] == "latest.tar.gz":
+            raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+        return real(req, *a, **kw)
+    monkeypatch.setattr(CO.OPENER, "open", fake)
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
+    assert info["ok"] and info["served"] == "latest.tar.gz"
+    assert calls == [f"{SHA}.tar.gz", "latest.tar.gz", "latest.tar.gz"] and clock.sleeps == [0.5]
+
+
+def test_checkout_does_not_retry_non_connection_errors(tmp_path, monkeypatch, art, clock):
+    srv = art({"/junk.tar.gz": b"not a tarball"})
+    _, info = run_checkout(tmp_path, monkeypatch, srv.base + "/missing.tar.gz")
+    assert info["ok"] is False and "404" in info["error"] and clock.sleeps == []
+    (tmp_path / "b").mkdir()
+    _, info = run_checkout(tmp_path / "b", monkeypatch, srv.base + "/junk.tar.gz")
+    assert info["ok"] is False and "gzip tar" in info["error"] and clock.sleeps == []
 
 
 # -- repo tools: confinement ---------------------------------------------------------------------
