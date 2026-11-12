@@ -78,6 +78,11 @@ spec:
               value: "https://ai.lab.mtgibbs.dev/v1"
             - name: RUNNER_NODE_HOSTNAMES
               value: "pi5-worker-1,pi5-worker-2"
+            # Where a manifest's `checkout:` is fetched from (CONTRACT §4a): Flux source-controller's
+            # artifact server. The manifest names only the GitRepository; the host is fixed here.
+            # networkpolicies.yaml (3b + 5) allows exactly this path, for the listed agents only.
+            - name: RUNNER_CHECKOUT_BASE_URL
+              value: "http://source-controller.flux-system.svc.cluster.local."
             # Burst handling (CONTRACT §3/§7). At most MAX_CONCURRENT agent Jobs exist at once; further
             # runs get 202 "queued" and no Job until a slot frees, so a run's 15m deadline starts at Job
             # creation, not at accept. MAX_CONCURRENT MUST stay = resourcequota.yaml `pods` - 1 (the

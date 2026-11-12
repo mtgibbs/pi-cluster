@@ -180,7 +180,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - creds: `agent-runner`  _(→ secrets-map.md)_
   - storage: `agent-runner-ledger`
   - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
-  - calls: → `default`, → `mcp-homelab`, → `n8n`
+  - calls: → `default`, → `flux-system`, → `mcp-homelab`, → `n8n`
 
 ### atlas  ·  Flux: `atlas` (after: `ingress`, `cert-manager-config`)
 - **Deployment/atlas** — `nginx`
@@ -229,6 +229,7 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - ingress: `board.lab.mtgibbs.dev`
 
 ### flux-notifications  ·  Flux: `flux-notifications` (after: `external-secrets-config`)
+  - calls: → `n8n`
 
 ### harness  ·  Flux: `harness` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)
 - **Deployment/harness-coordinator** — `ghcr.io/mtgibbs/harness-coordinator` 🔒priv
