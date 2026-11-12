@@ -60,7 +60,9 @@ missing 1Password item turns the whole `agents` Kustomization red — do step 2 
    - `agents/agent-sec-researcher` and `flux-system/n8n-agent-flux-webhook` are `SecretSynced`; Provider
      `n8n-agents` and Alert `sec-researcher-revisions` are Ready.
    - **Checkout path (untested live):** a sec-researcher Job's `checkout` init container logs `"event": "checkout",
-     "ok": true`. If it fails with a connection error, kube-router is dropping agents → source-controller:9090: check
+     "ok": true`. Runtime ≥ 0.2.1 retries connection errors for ~45 s (`checkout_attempt` lines show each try), so a
+     brief refusal while kube-router programs a new pod's rules is absorbed; if it still fails with
+     `… after <n> attempts`, kube-router is blocking agents → source-controller:9090: check
      NetworkPolicies `agents/agent-checkout-egress` and `flux-system/allow-agent-checkout`. **Positive control:** a
      throwaway pod in `agents` labelled `app.kubernetes.io/part-of: agent-sandbox, agent: sec-researcher` can
      `wget http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/latest.tar.gz`;

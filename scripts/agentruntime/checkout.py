@@ -11,11 +11,18 @@ The archive is untrusted input. Extraction is done by hand, never tarfile.extrac
 - the download, the unpacked total, each file and the file count are capped;
 - CHECKOUT_INCLUDE (a JSON list of path prefixes) limits what is unpacked.
 
+Connection-level failures (refused, reset, timeout, DNS) are retried with capped exponential backoff
+inside one CHECKOUT_RETRY_BUDGET (seconds, default 45) shared by the revision fetch and the fallback:
+a brand-new pod's first connection can be refused for a moment while the NetworkPolicy engine
+(kube-router, which REJECTs) is still programming rules for it. A clean HTTP 404 on the revision is
+never retried — it goes straight to the latest.tar.gz fallback. Every attempt is logged to stdout.
+
 It ALWAYS exits 0 and writes CHECKOUT_INFO ({"ok": true|false, ...}). The agent runtime reads that file
 and, when ok is false, emits a `failed` Result naming the reason — a clearer failure than an init
 container crash, which would leave the agent container's log (where the runner looks) empty.
 """
 import hashlib
+import http.client
 import json
 import os
 import posixpath
@@ -34,8 +41,15 @@ MAX_DOWNLOAD = int(os.environ.get("CHECKOUT_MAX_BYTES", str(32 * 1024 * 1024)))
 MAX_EXTRACT = int(os.environ.get("CHECKOUT_MAX_EXTRACT_BYTES", str(128 * 1024 * 1024)))
 MAX_FILES = int(os.environ.get("CHECKOUT_MAX_FILES", "10000"))
 MAX_FILE = int(os.environ.get("CHECKOUT_MAX_FILE_BYTES", str(8 * 1024 * 1024)))
-TIMEOUT = float(os.environ.get("CHECKOUT_TIMEOUT", "60"))
+TIMEOUT = float(os.environ.get("CHECKOUT_TIMEOUT", "15"))   # per socket operation, not per download
+RETRY_BUDGET = float(os.environ.get("CHECKOUT_RETRY_BUDGET", "45"))  # seconds; 0 = a single attempt
+RETRY_FIRST_DELAY = 0.5
+RETRY_MAX_DELAY = 8.0
 CHUNK = 64 * 1024
+
+# Injectable for tests: no real sleeping there.
+_clock = time.monotonic
+_sleep = time.sleep
 
 
 class CheckoutError(Exception):
@@ -46,6 +60,24 @@ class NotFound(CheckoutError):
     pass
 
 
+class Transient(CheckoutError):
+    """A connection-level failure worth retrying. `cls` is the underlying error class name only —
+    never a message, URL or body."""
+
+    def __init__(self, cls):
+        super().__init__(f"connection failed: {cls}")
+        self.cls = cls
+
+
+def _error_class(e):
+    """The most specific class name: URLError wraps the real cause (ConnectionRefusedError, gaierror,
+    timeout…) in .reason, and that is what tells a refusal from a DNS failure."""
+    reason = getattr(e, "reason", None)
+    if isinstance(e, urllib.error.URLError) and isinstance(reason, BaseException):
+        return type(reason).__name__
+    return type(e).__name__
+
+
 def _safe_url(url):
     p = urllib.parse.urlparse(url)
     if p.scheme not in ("http", "https") or not p.hostname:
@@ -54,30 +86,77 @@ def _safe_url(url):
 
 
 def download(url, dest_file):
-    """Stream `url` into `dest_file` (≤ MAX_DOWNLOAD bytes). Returns (bytes, sha256 hex)."""
+    """Stream `url` into `dest_file` (≤ MAX_DOWNLOAD bytes). Returns (bytes, sha256 hex).
+    Raises NotFound on 404, Transient on a connection-level failure, CheckoutError otherwise."""
     req = urllib.request.Request(_safe_url(url), method="GET")
     h = hashlib.sha256()
     n = 0
     try:
-        with OPENER.open(req, timeout=TIMEOUT) as resp, open(dest_file, "wb") as out:
-            while True:
-                buf = resp.read(CHUNK)
-                if not buf:
-                    break
-                n += len(buf)
-                if n > MAX_DOWNLOAD:
-                    raise CheckoutError(f"artifact is larger than {MAX_DOWNLOAD} bytes")
-                h.update(buf)
-                out.write(buf)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            raise NotFound("artifact not found (HTTP 404)") from None
-        raise CheckoutError(f"artifact server answered HTTP {e.code}") from None
-    except (urllib.error.URLError, OSError) as e:
-        if isinstance(e, CheckoutError):
+        out = open(dest_file, "wb")    # truncates: a retry never appends to a partial download
+    except OSError as e:
+        raise CheckoutError(f"could not write the artifact: {type(e).__name__}") from None
+    with out:
+        try:
+            with OPENER.open(req, timeout=TIMEOUT) as resp:
+                while True:
+                    buf = resp.read(CHUNK)
+                    if not buf:
+                        break
+                    n += len(buf)
+                    if n > MAX_DOWNLOAD:
+                        raise CheckoutError(f"artifact is larger than {MAX_DOWNLOAD} bytes")
+                    h.update(buf)
+                    try:
+                        out.write(buf)
+                    except OSError as e:
+                        raise CheckoutError(f"could not write the artifact: {type(e).__name__}") from None
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise NotFound("artifact not found (HTTP 404)") from None
+            raise CheckoutError(f"artifact server answered HTTP {e.code}") from None
+        except CheckoutError:
             raise
-        raise CheckoutError(f"could not fetch the artifact: {type(e).__name__}") from None
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+            # Refused / reset / timed out / DNS / dropped mid-stream: nothing came back that says the
+            # artifact is absent, so this is retryable. (HTTPError, a URLError subclass, is above.)
+            raise Transient(_error_class(e)) from None
     return n, h.hexdigest()
+
+
+def url_kind(url):
+    """'latest' for the latest.tar.gz fallback, 'sha' for a pinned revision — for logs and errors."""
+    return "latest" if served_name(url) == "latest.tar.gz" else "sha"
+
+
+def fetch(url, dest_file, deadline):
+    """download() with bounded retry on Transient errors until `deadline` (a _clock() value). At least
+    one attempt is always made. NotFound and every other CheckoutError are raised at once."""
+    kind = url_kind(url)
+    attempt = 0
+    delay = RETRY_FIRST_DELAY
+    while True:
+        attempt += 1
+        try:
+            size, digest = download(url, dest_file)
+        except Transient as e:
+            remaining = deadline - _clock()
+            retry = remaining > 0
+            log("checkout_attempt", kind=kind, attempt=attempt, outcome="error", error=e.cls,
+                retry_in=round(min(delay, remaining), 2) if retry else None)
+            if not retry:
+                raise CheckoutError(f"could not fetch the {kind} artifact: {e.cls} after {attempt} "
+                                    f"attempt{'s' if attempt != 1 else ''}") from None
+            _sleep(min(delay, remaining))
+            delay = min(delay * 2, RETRY_MAX_DELAY)
+            continue
+        except NotFound:
+            log("checkout_attempt", kind=kind, attempt=attempt, outcome="not_found")
+            raise
+        except CheckoutError:
+            log("checkout_attempt", kind=kind, attempt=attempt, outcome="failed")
+            raise
+        log("checkout_attempt", kind=kind, attempt=attempt, outcome="ok", bytes=size)
+        return size, digest
 
 
 def member_path(name):
@@ -204,14 +283,19 @@ def run():
         os.makedirs(tmpdir, exist_ok=True)
         archive = os.path.join(tmpdir, "artifact.tar.gz")
         used = url
+        deadline = _clock() + max(RETRY_BUDGET, 0.0)
         try:
-            size, digest = download(url, archive)
+            size, digest = fetch(url, archive, deadline)
         except NotFound:
             if not fallback:
-                raise
+                raise CheckoutError(f"{url_kind(url)} artifact not found (HTTP 404)") from None
             log("checkout_fallback", requested=served_name(url), fallback=served_name(fallback))
             used = fallback
-            size, digest = download(fallback, archive)
+            try:
+                size, digest = fetch(fallback, archive, deadline)
+            except NotFound:
+                raise CheckoutError("latest artifact not found (HTTP 404) after the sha artifact "
+                                    "was not found either") from None
         stats = extract(archive, dest, prefixes)
         try:
             os.unlink(archive)
