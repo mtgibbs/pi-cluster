@@ -37,6 +37,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -60,11 +61,14 @@ LITELLM_BASE_DEFAULT = "https://ai.lab.mtgibbs.dev/v1"
 LITELLM_KEY_ENV = "TRIGGERABLE_JUDGE_LITELLM_KEY"
 MODEL_DEFAULT = "hot-coder"
 TEMPERATURE = float(os.environ.get("LITELLM_TEMPERATURE", "0.4"))
-# Verdict + brief reasoning is small; 2000 is a generous default. Capped lower
-# via env for fast eval sweeps (a rambling model otherwise generates to the cap,
-# and a trickling response never trips urlopen's read timeout — see the gauntlet
-# hang). Production can set a tighter bound to cap worst-case per-call latency.
-MAX_TOKENS = int(os.environ.get("LITELLM_MAX_TOKENS", "2000"))
+# Verdict + brief reasoning is usually small, but Qwen3.8-Flash-Next reasons at
+# length before the verdict block: the 2026-11-12 reps=5 sweep saw 11/80
+# triggerable-judge replies cut off at 2000 (each an errored vote, i.e. a false
+# block under any-fail-wins). 4096 clears every reply seen (max ~8.1k chars).
+# Capped lower via env for fast eval sweeps (a rambling model otherwise generates
+# to the cap, and a trickling response never trips urlopen's read timeout — see
+# the gauntlet hang).
+MAX_TOKENS = int(os.environ.get("LITELLM_MAX_TOKENS", "4096"))
 
 sys.path.insert(0, str(LINT_DIR))
 from cronjob_parse import (  # noqa: E402
@@ -205,13 +209,40 @@ def run_model(prompt, timeout, raw_path, backend, model):
     return run_oc(prompt, timeout, raw_path, model)
 
 
+_FENCE = re.compile(r"^```[A-Za-z]*\s*\n(.*)\n```$", re.S)
+
+
+def verdict_body(text):
+    """The JSON text of a reply's verdict, or None when there is none.
+
+    The contract asks for the JSON between BEGIN/END markers, and the last marker
+    pair wins (the model may echo the instructions). Fallback: a reply that is
+    NOTHING BUT one JSON object (optionally in a ``` fence) is that verdict with
+    the markers dropped — Flash-Next does this on ~1 in 18 short replies. The
+    fallback only fires when the whole reply is the object, never a JSON blob
+    picked out of prose (which could be an echoed example)."""
+    text = text or ""
+    if BEGIN in text and END in text:
+        return text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
+    bare = text.strip()
+    m = _FENCE.match(bare)
+    if m:
+        bare = m.group(1).strip()
+    if bare.startswith("{") and bare.endswith("}"):
+        try:
+            if isinstance(json.loads(bare), dict):
+                return bare
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
 def parse_verdict(text):
-    """Extract the JSON verdict between the markers. Returns a result dict."""
-    if BEGIN not in text or END not in text:
+    """Extract the JSON verdict (see verdict_body). Returns a result dict."""
+    body = verdict_body(text)
+    if body is None:
         return {"verdict": "error", "criteria": [],
                 "findings": [no_markers_reason(text)], "ok": False}
-    # last marker pair wins (model may echo the instructions)
-    body = text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
     try:
         data = json.loads(body)
     except json.JSONDecodeError as e:

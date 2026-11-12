@@ -26,7 +26,7 @@ deployment harness:
   per-repo installation tokens minted from the webhook payload's `installation.id`. No
   per-repo credential storage.
 - **LLM backend** — Beelink LiteLLM at `https://ai.lab.mtgibbs.dev/v1`, model `hot-coder`,
-  `JUDGE_REPEAT=5`, `LITELLM_MAX_TOKENS=2000`, `LITELLM_TEMPERATURE=0.4`.
+  `JUDGE_REPEAT=5`, `LITELLM_MAX_TOKENS=4096`, `LITELLM_TEMPERATURE=0.4`.
 - **Deployment** — `clusters/pi-k3s/review-hub/` Flux manifests; Flux image-automation
   auto-bumps the GHCR image; current version: `0.5.0`.
 

@@ -47,9 +47,9 @@ def build_prompt(changes):
 
 
 def parse(text):
-    if BEGIN not in text or END not in text:
+    body = tj.verdict_body(text)
+    if body is None:
         return {"verdict": "error", "findings": [tj.no_markers_reason(text)]}
-    body = text.rsplit(BEGIN, 1)[1].rsplit(END, 1)[0].strip()
     try:
         data = json.loads(body)
     except json.JSONDecodeError as e:

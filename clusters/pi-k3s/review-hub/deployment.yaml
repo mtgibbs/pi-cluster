@@ -70,8 +70,13 @@ spec:
               value: "hot-coder"
             - name: JUDGE_REPEAT
               value: "5"
+            # Flash-Next reasons at length before the verdict: 2000 tokens truncated
+            # 11/80 triggerable-judge votes in the 2026-11-12 reps=5 sweep (each a
+            # false block). 4096 + a longer timeout so the longer replies can finish.
             - name: JUDGE_TIMEOUT
-              value: "240"
+              value: "360"
+            - name: LITELLM_MAX_TOKENS
+              value: "4096"
           resources:
             requests:
               cpu: 50m
