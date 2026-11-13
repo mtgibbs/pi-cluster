@@ -211,6 +211,40 @@ class Runner:
         return 404, {"error": "not found"}
 
     # ---------------------------------------------------------------- admission
+    def resolve_checkout(self, manifest, event):
+        """The commit sha of the artifact source-controller serves right now for the manifest's
+        checkout.source — read from that GitRepository's .status.artifact (RBAC: `get` on that one
+        object, agents/rbac.yaml). Returns (sha | None, problem | None, transient):
+        - a manifest without `checkout:` → (None, None, False);
+        - sha read → (sha, None, False);
+        - not read, but the event names its own revision → (None, None, False): the Job fetches that
+          artifact with no fallback (degraded, logged);
+        - not read and the event names none (manual / scheduled run) → (None, problem, transient):
+          nothing could be fetched, so the run is refused instead of launching a checkout that 404s.
+          `transient` is True for a transport failure (no HTTP answer), False when the API answered.
+        Only the 40-hex sha is ever used; the object itself is not logged or stored."""
+        if not manifest.get("checkout"):
+            return None, None, False
+        src = manifest["checkout"]["source"]
+        ns, name = src.split("/", 1)
+        transient = False
+        try:
+            sha = jobspec.artifact_sha(self.kube.get_gitrepository(ns, name))
+            why = None if sha else "GitRepository has no stored artifact"
+        except KubeError as e:
+            sha, why = None, f"kubernetes API error {e.status}"
+        except Exception as e:  # noqa: BLE001 — transport failure talking to the API
+            sha, why, transient = None, f"kubernetes API unreachable ({type(e).__name__})", True
+        has_rev = jobspec.event_revision(event) is not None
+        if sha:
+            jlog("checkout_resolved", source=src, revision=sha)
+            return sha, None, False
+        jlog("checkout_unresolved", source=src, reason=why, event_revision=has_rev)
+        if has_rev:
+            return None, None, False
+        return None, (f"no repository revision to check out: could not read the current Flux artifact "
+                      f"of {src} ({why}) and the event names no revision"), transient
+
     def submit(self, req):
         if not isinstance(req, dict):
             return 422, {"error": "body must be an object"}
@@ -271,9 +305,14 @@ class Runner:
                      event_type=event["type"], subject=event["subject"], position=position)
                 return 202, {"run_id": run_id, "status": "queued", "position": position}
 
+            checkout_sha, problem, _ = self.resolve_checkout(manifest, event)
+            if problem:
+                jlog("rejected", agent=agent, event_id=event["id"], reason="checkout_unresolved")
+                return 502, {"error": problem}
             job = jobspec.render_job(run_id, manifest, event, timeout_s, self.cfg.namespace,
                                      self.cfg.litellm_base_url, self.cfg.node_hostnames,
-                                     checkout_base_url=self.cfg.checkout_base_url)
+                                     checkout_base_url=self.cfg.checkout_base_url,
+                                     checkout_sha=checkout_sha)
             # Ledger first: a crash between this line and the create is re-adopted on restart
             # (Job 404 -> job_failed), never silently lost or launched twice.
             self.ledger.append(
@@ -345,10 +384,19 @@ class Runner:
         except (agentspec.AgentNotFound, agentspec.ManifestError) as e:
             jlog("start_failed", run_id=rid, agent=agent, reason="manifest")
             return "failed", f"agent manifest no longer loads: {str(e)[:300] or 'not found'}"
+        # Resolved at Job creation, not at accept: a queued run reads whatever Flux serves when it starts.
+        checkout_sha, problem, transient = self.resolve_checkout(manifest, event)
+        if problem:
+            if transient:
+                jlog("start_deferred", run_id=rid, agent=agent, reason="checkout_unresolved")
+                return "retry", None
+            jlog("start_failed", run_id=rid, agent=agent, reason="checkout_unresolved")
+            return "failed", problem
         now = self.now()
         job = jobspec.render_job(rid, manifest, event, timeout_s, self.cfg.namespace,
                                  self.cfg.litellm_base_url, self.cfg.node_hostnames,
-                                     checkout_base_url=self.cfg.checkout_base_url)
+                                 checkout_base_url=self.cfg.checkout_base_url,
+                                 checkout_sha=checkout_sha)
         # `started` is set HERE, at Job creation: the run's deadline counts from now, not accept.
         self.ledger.append("launch", rid, started=utc_iso(now), timeout_s=timeout_s,
                            job=jobspec.job_name(rid), allowed_outputs=list(manifest["outputs"]))

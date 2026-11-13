@@ -26,6 +26,8 @@ CHECKOUT_VOLUME_LIMIT = "256Mi"
 CHECKOUT_COMMAND = ["python", "/app/checkout.py"]
 DEFAULT_CHECKOUT_BASE_URL = "http://source-controller.flux-system.svc.cluster.local."
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# A Flux artifact revision: "main@sha1:<sha>" (source-controller v1), "<branch>/<sha>" (pre-v1), or a bare sha.
+ARTIFACT_REVISION_RE = re.compile(r"(?:^|[@:/])([0-9a-f]{40})$")
 
 
 def job_name(run_id):
@@ -44,23 +46,50 @@ def effective_manifest(manifest, event):
     return eff
 
 
-def checkout_urls(manifest, event, base_url):
-    """(primary, fallback) artifact URLs. Flux source-controller serves a GitRepository's artifact
-    at /gitrepository/<ns>/<name>/<commit sha>.tar.gz and keeps a latest.tar.gz symlink to the
-    newest one. A run whose event names a revision (event.data.revision, 40 hex chars) asks for
-    exactly that artifact and falls back to latest when it has already been garbage-collected;
-    the checkout records which one it got. Anything else in the event is never put in the URL."""
+def event_revision(event):
+    """event.data.revision when it is exactly 40 lowercase hex characters, else None."""
+    rev = ((event or {}).get("data") or {}).get("revision")
+    return rev if isinstance(rev, str) and SHA_RE.match(rev) else None
+
+
+def artifact_sha(gitrepository):
+    """The commit sha of the artifact a Flux GitRepository object currently serves
+    (.status.artifact.revision), or None. source-controller names that artifact `<sha>.tar.gz`."""
+    if not isinstance(gitrepository, dict):
+        return None
+    art = (gitrepository.get("status") or {}).get("artifact") or {}
+    rev = art.get("revision") if isinstance(art, dict) else None
+    m = ARTIFACT_REVISION_RE.search(rev) if isinstance(rev, str) else None
+    return m.group(1) if m else None
+
+
+def checkout_urls(manifest, event, base_url, current_sha=None):
+    """(primary, fallback) artifact URLs. Flux source-controller serves a GitRepository's artifact at
+    /gitrepository/<ns>/<name>/<commit sha>.tar.gz — and ONLY by sha: there is no latest.tar.gz (the
+    v1 API dropped that symlink; source-controller ≥ v1.0 deletes it) and old artifacts are
+    garbage-collected soon after a newer one is stored. `current_sha` is the revision the runner read from
+    the GitRepository's .status.artifact just before rendering (None if it could not).
+
+    - The event names a revision (event.data.revision, 40 hex): primary is exactly that artifact, fallback
+      the current one when it differs (the event's may already be garbage-collected).
+    - It does not (manual / scheduled runs): primary is the current artifact, no fallback.
+    Returns ("", "") when there is nothing to fetch; the caller refuses the run rather than launch a
+    checkout that cannot succeed. Nothing else from the event is ever put in a URL."""
     ns, name = manifest["checkout"]["source"].split("/", 1)
     root = f"{base_url.rstrip('/')}/gitrepository/{ns}/{name}/"
-    latest = root + "latest.tar.gz"
-    rev = ((event or {}).get("data") or {}).get("revision")
-    if isinstance(rev, str) and SHA_RE.match(rev):
-        return root + f"{rev}.tar.gz", latest
-    return latest, ""
+    cur = current_sha if isinstance(current_sha, str) and SHA_RE.match(current_sha) else None
+    rev = event_revision(event)
+    if rev:
+        return root + f"{rev}.tar.gz", (root + f"{cur}.tar.gz" if cur and cur != rev else "")
+    if cur:
+        return root + f"{cur}.tar.gz", ""
+    return "", ""
 
 
 def render_job(run_id, manifest, event, timeout_s, namespace, litellm_base_url, node_hostnames=(),
-               checkout_base_url=DEFAULT_CHECKOUT_BASE_URL):
+               checkout_base_url=DEFAULT_CHECKOUT_BASE_URL, checkout_sha=None):
+    """The Job for one run. `checkout_sha`: the artifact revision source-controller currently serves for
+    the manifest's checkout.source (see checkout_urls); unused without `checkout:`."""
     agent = manifest["name"]
     lbl = labels(agent, run_id)
     eff = effective_manifest(manifest, event)
@@ -83,7 +112,9 @@ def render_job(run_id, manifest, event, timeout_s, namespace, litellm_base_url, 
     volumes = [{"name": "work", "emptyDir": {"sizeLimit": "1Gi"}}]
     init_containers = []
     if manifest.get("checkout"):
-        primary, fallback = checkout_urls(manifest, event, checkout_base_url)
+        primary, fallback = checkout_urls(manifest, event, checkout_base_url, checkout_sha)
+        if not primary:
+            raise ValueError("render_job: no checkout artifact to fetch (resolve it first)")
         env.append({"name": "AGENT_REPO_DIR", "value": CHECKOUT_TREE})
         env.append({"name": "AGENT_CHECKOUT_INFO", "value": CHECKOUT_INFO})
         volumes.append({"name": "repo", "emptyDir": {"sizeLimit": CHECKOUT_VOLUME_LIMIT}})

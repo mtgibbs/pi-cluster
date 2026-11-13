@@ -101,10 +101,22 @@ repo as an artifact (a `.tar.gz` of the tree at one revision) and serves it over
   `CHECKOUT_DEST=/repo/tree`, `CHECKOUT_INFO=/repo/checkout.json`, `CHECKOUT_INCLUDE` (JSON list), `HOME`, `TMPDIR`.
 - The agent container mounts `repo` at `/repo` **read-only** and gets `AGENT_REPO_DIR=/repo/tree`,
   `AGENT_CHECKOUT_INFO=/repo/checkout.json`.
-- URLs: `<RUNNER_CHECKOUT_BASE_URL>/gitrepository/<ns>/<name>/<file>`. `<file>` is `<sha>.tar.gz` when
-  `event.data.revision` is exactly 40 lowercase hex characters (then `CHECKOUT_FALLBACK_URL` is `latest.tar.gz`, used
-  on a 404 because source-controller garbage-collects old artifacts), else `latest.tar.gz` with no fallback. No other
-  event field reaches the URL, and the manifest cannot choose the host.
+- URLs: `<RUNNER_CHECKOUT_BASE_URL>/gitrepository/<ns>/<name>/<sha>.tar.gz`. source-controller serves an artifact
+  **only by commit sha** — there is no `latest.tar.gz` (the v1 API dropped that symlink and source-controller ≥ v1.0
+  deletes it; until runner 0.4.0 every run without a revision 404'd on it) — and garbage-collects an old artifact
+  soon after a newer one is stored. So **at Job creation** (accept, or when a queued run starts) the runner reads
+  the GitRepository `<ns>/<name>` (`.status.artifact.revision`, e.g. `main@sha1:<sha>`; RBAC: `get` on that one
+  object, `clusters/pi-k3s/agents/rbac.yaml`) to learn the *current* sha:
+  - `event.data.revision` is exactly 40 lowercase hex characters → `CHECKOUT_URL` is that sha, `CHECKOUT_FALLBACK_URL`
+    the current sha when it differs (else empty). If the GitRepository could not be read the run still launches,
+    with no fallback (logged `checkout_unresolved`).
+  - no such revision (manual form, weekly sweep) → `CHECKOUT_URL` is the current sha, no fallback. If the
+    GitRepository could not be read (403/404/no artifact) the run is **refused before the ledger**: `POST /runs`
+    answers 502 `{"error": "no repository revision to check out: … (<why>) and the event names no revision"}` (no
+    run record, the daily cap is not spent); a queued run fails with that summary (`job_failed`), or stays queued
+    on a transport error.
+  No other event field reaches the URL, only a validated 40-hex sha comes from the API, and the manifest cannot
+  choose the host. The agent pod itself never talks to the Kubernetes API.
 - `checkout.py` downloads (≤ 32 MiB), then unpacks **by hand**: regular files and directories only (symlinks, hard
   links, devices skipped), member names that are absolute or contain `..`, NUL or `\` skipped, ≤ 10,000 files,
   ≤ 128 MiB unpacked, ≤ 8 MiB per file, `include` prefixes applied. It **always exits 0** and writes
@@ -112,9 +124,11 @@ repo as an artifact (a `.tar.gz` of the tree at one revision) and serves it over
 - **Retry (runtime ≥ 0.2.1):** connection-level failures (refused, reset, timeout, DNS) are retried with backoff
   (0.5 s doubling, capped at 8 s) inside one `CHECKOUT_RETRY_BUDGET` (default 45 s) shared by the sha fetch and the
   fallback — a new pod's first connection can be refused while kube-router is still programming its rules. A clean
-  404 on the sha is never retried; it goes straight to `latest.tar.gz`. Each attempt logs `"event":
-  "checkout_attempt"` (`kind` sha|latest, `attempt`, `outcome`, `error` class). On give-up the error reads `could not
-  fetch the <sha|latest> artifact: <ErrorClass> after <n> attempts` — no URL or host. `CHECKOUT_TIMEOUT` (default
+  404 is never retried; it goes straight to the fallback, if any. Each attempt logs `"event":
+  "checkout_attempt"` (`kind` requested|fallback — runtime 0.2.1 said sha|latest, `attempt`, `outcome`, `error`
+  class). On give-up the error reads `could not fetch the <requested|fallback> artifact: <ErrorClass> after <n>
+  attempts` — no URL or host. A 404 reads `artifact <sha>.tar.gz not found (HTTP 404)`, or with a fallback
+  `neither artifact <sha>.tar.gz nor the fallback <sha>.tar.gz was found (HTTP 404)` (runtime ≥ 0.2.2). `CHECKOUT_TIMEOUT` (default
   15 s) is per socket operation.
 - The runtime reads `checkout.json`: `ok: false` (or a missing file) is a `failed` Result, "repository checkout
   failed: …". Otherwise it offers the model `repo__list_files`, `repo__read_file`, `repo__search` (§6) and tells it

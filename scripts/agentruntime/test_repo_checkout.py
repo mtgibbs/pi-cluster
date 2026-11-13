@@ -30,6 +30,7 @@ RUNNER = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(RUNNER)
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
+CUR = "89abcdef0123456789abcdef0123456789abcdef"   # the current artifact (the runner-resolved fallback)
 
 
 # -- helpers -------------------------------------------------------------------------------------
@@ -115,17 +116,33 @@ REPO = [("clusters/", "dir", None), ("clusters/pi-k3s/", "dir", None),
 def test_checkout_fetches_exact_revision_and_unpacks(tmp_path, monkeypatch, art):
     srv = art({f"/gitrepository/flux-system/flux-system/{SHA}.tar.gz": make_tar(REPO)})
     root = f"{srv.base}/gitrepository/flux-system/flux-system/"
-    dest, info = run_checkout(tmp_path, monkeypatch, root + f"{SHA}.tar.gz", root + "latest.tar.gz")
+    dest, info = run_checkout(tmp_path, monkeypatch, root + f"{SHA}.tar.gz", root + f"{CUR}.tar.gz")
     assert info["ok"] is True and info["served"] == f"{SHA}.tar.gz" and info["requested"] == f"{SHA}.tar.gz"
     assert info["files"] == 4 and len(info["sha256"]) == 64
     assert (dest / "clusters/pi-k3s/agents/rbac.yaml").read_text().startswith("kind: Role")
     assert srv.paths == [f"/gitrepository/flux-system/flux-system/{SHA}.tar.gz"]
 
 
-def test_checkout_falls_back_to_latest_and_says_so(tmp_path, monkeypatch, art):
-    srv = art({"/g/latest.tar.gz": make_tar(REPO)})
-    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
-    assert info["ok"] and info["requested"] == f"{SHA}.tar.gz" and info["served"] == "latest.tar.gz"
+def test_checkout_falls_back_to_current_and_says_so(tmp_path, monkeypatch, art):
+    srv = art({f"/g/{CUR}.tar.gz": make_tar(REPO)})
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/{CUR}.tar.gz")
+    assert info["ok"] and info["requested"] == f"{SHA}.tar.gz" and info["served"] == f"{CUR}.tar.gz"
+
+
+def test_checkout_404_without_fallback_names_the_artifact(tmp_path, monkeypatch, art, clock):
+    srv = art({})
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{CUR}.tar.gz")
+    assert info["ok"] is False and info["error"] == f"artifact {CUR}.tar.gz not found (HTTP 404)"
+    assert "latest" not in info["error"] and "http" not in info["error"] and clock.sleeps == []
+
+
+def test_checkout_404_on_both_names_both(tmp_path, monkeypatch, art, clock, capsys):
+    srv = art({})
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/{CUR}.tar.gz")
+    assert info["ok"] is False
+    assert info["error"] == f"neither artifact {SHA}.tar.gz nor the fallback {CUR}.tar.gz was found (HTTP 404)"
+    attempts = [json.loads(l) for l in capsys.readouterr().out.splitlines() if '"checkout_attempt"' in l]
+    assert [(a["kind"], a["outcome"]) for a in attempts] == [("requested", "not_found"), ("fallback", "not_found")]
 
 
 def test_checkout_include_filters(tmp_path, monkeypatch, art):
@@ -233,24 +250,24 @@ def test_checkout_retries_a_refused_connection_then_succeeds(tmp_path, monkeypat
     # Uses the module's default retry budget on purpose: with CHECKOUT_RETRY_BUDGET=0 this goes red.
     srv = art({f"/g/{SHA}.tar.gz": make_tar(REPO)})
     calls = refuse_first(monkeypatch, 2)
-    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/{CUR}.tar.gz")
     assert info["ok"] is True, info
     assert info["served"] == f"{SHA}.tar.gz" and info["files"] == 4
     assert len(calls) == 3 and clock.sleeps == [0.5, 1.0]
     attempts = [json.loads(l) for l in capsys.readouterr().out.splitlines()
                 if '"checkout_attempt"' in l]
     assert [(a["kind"], a["attempt"], a["outcome"]) for a in attempts] == [
-        ("sha", 1, "error"), ("sha", 2, "error"), ("sha", 3, "ok")]
+        ("requested", 1, "error"), ("requested", 2, "error"), ("requested", 3, "ok")]
     assert attempts[0]["error"] == "ConnectionRefusedError"
 
 
 def test_checkout_gives_up_after_the_budget_with_a_useful_message(tmp_path, monkeypatch, clock):
     monkeypatch.setattr(CO, "RETRY_BUDGET", 30.0)
     url = closed_port_url(f"/g/{SHA}.tar.gz")
-    _, info = run_checkout(tmp_path, monkeypatch, url, url.replace(f"{SHA}.tar.gz", "latest.tar.gz"))
+    _, info = run_checkout(tmp_path, monkeypatch, url, url.replace(f"{SHA}.tar.gz", f"{CUR}.tar.gz"))
     assert info["ok"] is False
     err = info["error"]
-    assert err.startswith("could not fetch the sha artifact: ConnectionRefusedError after "), err
+    assert err.startswith("could not fetch the requested artifact: ConnectionRefusedError after "), err
     attempts = int(err.split(" after ")[1].split()[0])
     # 0.5+1+2+4+8+8+6.5 = 30: seven sleeps, eight attempts, never a sleep past the budget.
     assert attempts == len(clock.sleeps) + 1 == 8
@@ -259,25 +276,25 @@ def test_checkout_gives_up_after_the_budget_with_a_useful_message(tmp_path, monk
 
 
 def test_checkout_404_on_sha_falls_back_at_once_without_retrying(tmp_path, monkeypatch, art, clock):
-    srv = art({"/g/latest.tar.gz": make_tar(REPO)})
-    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
-    assert info["ok"] and info["served"] == "latest.tar.gz"
-    assert srv.paths == [f"/g/{SHA}.tar.gz", "/g/latest.tar.gz"] and clock.sleeps == []
+    srv = art({f"/g/{CUR}.tar.gz": make_tar(REPO)})
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/{CUR}.tar.gz")
+    assert info["ok"] and info["served"] == f"{CUR}.tar.gz"
+    assert srv.paths == [f"/g/{SHA}.tar.gz", f"/g/{CUR}.tar.gz"] and clock.sleeps == []
 
 
 def test_checkout_retries_the_fallback_too(tmp_path, monkeypatch, art, clock):
-    srv = art({"/g/latest.tar.gz": make_tar(REPO)})
+    srv = art({f"/g/{CUR}.tar.gz": make_tar(REPO)})
     real, calls = CO.OPENER.open, []
 
-    def fake(req, *a, **kw):      # sha: clean 404; latest: refused once, then served
+    def fake(req, *a, **kw):      # requested: clean 404; fallback: refused once, then served
         calls.append(req.full_url.rsplit("/", 1)[1])
-        if calls.count("latest.tar.gz") == 1 and calls[-1] == "latest.tar.gz":
+        if calls.count(f"{CUR}.tar.gz") == 1 and calls[-1] == f"{CUR}.tar.gz":
             raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
         return real(req, *a, **kw)
     monkeypatch.setattr(CO.OPENER, "open", fake)
-    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/latest.tar.gz")
-    assert info["ok"] and info["served"] == "latest.tar.gz"
-    assert calls == [f"{SHA}.tar.gz", "latest.tar.gz", "latest.tar.gz"] and clock.sleeps == [0.5]
+    _, info = run_checkout(tmp_path, monkeypatch, f"{srv.base}/g/{SHA}.tar.gz", f"{srv.base}/g/{CUR}.tar.gz")
+    assert info["ok"] and info["served"] == f"{CUR}.tar.gz"
+    assert calls == [f"{SHA}.tar.gz", f"{CUR}.tar.gz", f"{CUR}.tar.gz"] and clock.sleeps == [0.5]
 
 
 def test_checkout_does_not_retry_non_connection_errors(tmp_path, monkeypatch, art, clock):
@@ -417,7 +434,7 @@ def test_agent_reads_repo_and_submits_plan(servers, repo):
 def test_revision_fallback_is_told_to_the_model(servers, repo):
     mcp = servers(FakeMCP, TOOLS)
     llm = servers(FakeLLM, [submit(outcome="nothing_to_do", summary="none", outputs=[])])
-    run_agent(sec_manifest(mcp.url), llm, event=SEC_EVENT, extra_env=checkout_env(repo, served="latest.tar.gz"))
+    run_agent(sec_manifest(mcp.url), llm, event=SEC_EVENT, extra_env=checkout_env(repo, served=f"{CUR}.tar.gz"))
     assert "no longer serves" in llm.requests[0]["json"]["messages"][1]["content"]
 
 

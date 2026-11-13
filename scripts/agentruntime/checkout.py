@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """checkout — the init container of an agent Job whose manifest has `checkout:` (CONTRACT §4a).
 
-Fetches a Flux source-controller artifact (a .tar.gz of the Git tree at one revision) over in-cluster
-HTTP and unpacks it into CHECKOUT_DEST, which the agent container then mounts READ-ONLY. It holds no
+Fetches a Flux source-controller artifact (a .tar.gz of the Git tree at one revision, always named
+`<commit sha>.tar.gz` — source-controller serves no `latest.tar.gz`) over in-cluster HTTP and unpacks it
+into CHECKOUT_DEST, which the agent container then mounts READ-ONLY. It holds no
 credential: the artifact server is unauthenticated, and only this pod's NetworkPolicy reaches it.
 
 The archive is untrusted input. Extraction is done by hand, never tarfile.extractall:
@@ -15,7 +16,9 @@ Connection-level failures (refused, reset, timeout, DNS) are retried with capped
 inside one CHECKOUT_RETRY_BUDGET (seconds, default 45) shared by the revision fetch and the fallback:
 a brand-new pod's first connection can be refused for a moment while the NetworkPolicy engine
 (kube-router, which REJECTs) is still programming rules for it. A clean HTTP 404 on the revision is
-never retried — it goes straight to the latest.tar.gz fallback. Every attempt is logged to stdout.
+never retried — it goes straight to CHECKOUT_FALLBACK_URL (the GitRepository's current artifact, which the
+runner resolved when it rendered the Job), if there is one. Every attempt is logged to stdout with
+kind "requested" or "fallback".
 
 It ALWAYS exits 0 and writes CHECKOUT_INFO ({"ok": true|false, ...}). The agent runtime reads that file
 and, when ok is false, emits a `failed` Result naming the reason — a clearer failure than an init
@@ -123,15 +126,10 @@ def download(url, dest_file):
     return n, h.hexdigest()
 
 
-def url_kind(url):
-    """'latest' for the latest.tar.gz fallback, 'sha' for a pinned revision — for logs and errors."""
-    return "latest" if served_name(url) == "latest.tar.gz" else "sha"
-
-
-def fetch(url, dest_file, deadline):
+def fetch(url, dest_file, deadline, kind="requested"):
     """download() with bounded retry on Transient errors until `deadline` (a _clock() value). At least
-    one attempt is always made. NotFound and every other CheckoutError are raised at once."""
-    kind = url_kind(url)
+    one attempt is always made. NotFound and every other CheckoutError are raised at once. `kind`
+    ("requested" | "fallback") labels logs and errors."""
     attempt = 0
     delay = RETRY_FIRST_DELAY
     while True:
@@ -285,17 +283,17 @@ def run():
         used = url
         deadline = _clock() + max(RETRY_BUDGET, 0.0)
         try:
-            size, digest = fetch(url, archive, deadline)
+            size, digest = fetch(url, archive, deadline, "requested")
         except NotFound:
             if not fallback:
-                raise CheckoutError(f"{url_kind(url)} artifact not found (HTTP 404)") from None
+                raise CheckoutError(f"artifact {served_name(url)} not found (HTTP 404)") from None
             log("checkout_fallback", requested=served_name(url), fallback=served_name(fallback))
             used = fallback
             try:
-                size, digest = fetch(fallback, archive, deadline)
+                size, digest = fetch(fallback, archive, deadline, "fallback")
             except NotFound:
-                raise CheckoutError("latest artifact not found (HTTP 404) after the sha artifact "
-                                    "was not found either") from None
+                raise CheckoutError(f"neither artifact {served_name(url)} nor the fallback "
+                                    f"{served_name(fallback)} was found (HTTP 404)") from None
         stats = extract(archive, dest, prefixes)
         try:
             os.unlink(archive)

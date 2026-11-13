@@ -40,3 +40,41 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: agent-runner
+---
+# The ONE read outside the agents namespace: the runner GETs the GitRepository `flux-system` to learn which
+# artifact source-controller serves right now (.status.artifact.revision → `<sha>.tar.gz`), so a run with
+# no revision in its event (manual form, weekly sweep) can still be given a checkout, and a Flux-triggered
+# run whose own artifact was already garbage-collected has a fallback. source-controller serves artifacts
+# only by sha — there is no `latest.tar.gz` (CONTRACT §4a).
+#
+# `get` on one named object: no list/watch (cannot enumerate other sources), no Secrets, nothing writable.
+# The status it reads is not sensitive (a commit sha and an in-cluster URL). The agent pods themselves
+# still get NO API access (agent-run SA, automountServiceAccountToken: false) — the runner resolves the sha
+# and only the 40-hex string reaches the Job, in the artifact URL.
+#
+# Add a resourceName here only alongside a manifest whose `checkout.source` names it; a source not listed
+# answers 403 and the runner refuses runs that have no revision of their own (it logs checkout_unresolved).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-runner-checkout-source
+  namespace: flux-system
+rules:
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    resourceNames: ["flux-system"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-runner-checkout-source
+  namespace: flux-system
+subjects:
+  - kind: ServiceAccount
+    name: agent-runner
+    namespace: agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-runner-checkout-source

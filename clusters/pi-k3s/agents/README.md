@@ -65,16 +65,21 @@ missing 1Password item turns the whole `agents` Kustomization red — do step 2 
      `… after <n> attempts`, kube-router is blocking agents → source-controller:9090: check
      NetworkPolicies `agents/agent-checkout-egress` and `flux-system/allow-agent-checkout`. **Positive control:** a
      throwaway pod in `agents` labelled `app.kubernetes.io/part-of: agent-sandbox, agent: sec-researcher` can
-     `wget http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/latest.tar.gz`;
-     the same pod labelled `agent: media-investigator` cannot. Confirm `latest.tar.gz` exists (source-controller keeps
-     the symlink; if a Flux upgrade drops it, every run without an exact revision fails "artifact not found").
+     `wget http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/<sha>.tar.gz`
+     (`<sha>` = the GitRepository's current `.status.artifact.revision`);
+     the same pod labelled `agent: media-investigator` cannot. There is **no `latest.tar.gz`** — source-controller
+     serves artifacts only by sha (2026-11-13: a manual run on runner 0.3.0 failed "latest artifact not found (HTTP
+     404)"). Runner ≥ 0.4.0 reads the current sha from the GitRepository (Role `flux-system/agent-runner-checkout-source`);
+     a manual run refused with "no repository revision to check out … (kubernetes API error 403)" means that Role or
+     its binding is missing.
    - Submit the form (`/form/agent-sec-run`) with a narrow focus: a push `sec-researcher: …` arrives, and either
      issues appear in `homelab-plans` or the push says why not.
    - Re-run the same focus: the existing issues show `unchanged`/`updated`, no duplicates. Close one as *not
      planned*; the next run reports it `skipped (accepted risk)`.
-   - Merge a harmless PR that only bumps an image tag: n8n gets the Flux events, `Path Filter` says "no
-     access-control change", no run. Merge one that touches a `networkpolicies.yaml`: one run, once (not once per
-     Kustomization).
+   - Merge a harmless PR that only bumps an image tag: n8n gets ONE Flux event (GitRepository `NewArtifact`),
+     `Path Filter` says "no access-control change", no run. Merge one that touches a `networkpolicies.yaml`: one
+     run. Between merges the `agent-sec-researcher` execution list stays quiet (the first Alert matched every
+     Kustomization reconcile: ~250 executions/hour, all dropped at `Claim`).
    - **Negative:** POST to `/webhook/agent-sec-revision` without the bearer → 403.
 
 ## Activation checklist for `ops-investigator` (slice 2, human-only, in order)
