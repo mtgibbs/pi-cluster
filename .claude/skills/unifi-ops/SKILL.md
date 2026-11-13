@@ -73,6 +73,28 @@ go-unifi-mcp runs in **lazy mode** — tools are loaded on demand via three meta
 - Firewall rule changes can lock you out of the network — double-check before applying
 - Consider exporting current config before making changes
 
+## DHCP Fixed-IP Reservations (network `Default`, `192.168.1.0/24`)
+
+Set on the UDM (client → `use_fixedip` + `fixed_ip`), so this table is their only record. Set/read
+via `update_user` / `get_user` (the client record `_id`, not the MAC). DHCP pool is
+**`.100–.254`**; leases 24h.
+
+**De-facto layout** (never formally decided — recorded from what is configured):
+| Band | Use |
+| :--- | :--- |
+| `.48–.63` | **Infra only** — cluster nodes + NASes. This is `fw-dns-infra`; a client here bypasses the DNS lockdown. Never put a client/IoT device here. |
+| `.70–.75` | Other servers/appliances (beelink `.70`, Brother printer `.75`) |
+| `.80–.87` | Computers / docks |
+| `.90–.92` | Family iPhones |
+| `.100–.254` | DHCP pool — the LG TV's reservation sits here (see below) |
+
+| IP | Name | MAC | Notes |
+| :--- | :--- | :--- | :--- |
+| `.158` | LG C9 TV | `20:17:42:d2:f7:6c` | LG OLED65C9AUA, wired. Added 2026-11-07. **Kept its existing DHCP address on purpose** so the Pi-hole history for the telemetry audit stays continuous under one client IP. Inside the pool — fine for UniFi (reservation is by MAC), but it breaks the below-`.100` convention; move it if/when an IoT VLAN or IoT band is set up. |
+
+Other reservations live on the controller (`list_user` with `filter: {"use_fixedip": true}`) —
+infra ones are covered by the `fw-dns-infra` rows above. Add new non-infra rows here when created.
+
 ## DNS Lockdown Runbook (force all DNS through Pi-hole)
 
 **Purpose:** block client devices (kids/IoT) from bypassing Pi-hole via public resolvers or DoT,
