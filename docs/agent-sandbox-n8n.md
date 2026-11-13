@@ -425,7 +425,7 @@ is read-only and returns structured `plan` items (CONTRACT §5a); **this workflo
 with its own `github-plans` credential, from those fields only. No model is involved after the agent's result.
 
 ```
-Flux Webhook  POST /webhook/agent-sec-revision, Header Auth (agent-alert-token, reused) ─→ Flux Revision  (info + Kustomization + 40-hex sha, else silent end)
+Flux Webhook  POST /webhook/agent-sec-revision, Header Auth (agent-alert-token, reused) ─→ Flux Revision  (info + GitRepository|Kustomization + 40-hex sha, else silent end)
 Weekly Sweep  Schedule, cron "0 6 * * 0" (the ONE named sweep, design §10) ──────────────→ Sweep Input    (key per ISO week)
 Sec Form      LAN form /form/agent-sec-run ──────────────────────────────────────────────→ Form Input     (fresh key per submission)
   → Trigger (re-validates; the merge point) → Ensure Tables (+ agent_plan_filings) → Claim (agent_dedupe; returns the previous flux revision)
@@ -446,7 +446,7 @@ Sec Form      LAN form /form/agent-sec-run ────────────�
 
 | Trigger | Event | Claim key (in `agent_dedupe`) | Hold |
 |---|---|---|---|
-| Flux applies a revision (notification-controller `Provider` `n8n-agents` + `Alert` `sec-researcher-revisions`, `clusters/pi-k3s/flux-notifications/n8n-agents.yaml`) | `security.flux_revision`, `data {revision, base, changed_paths, reasons}` | `sec-researcher:flux-rev:<sha>` | a year — once per revision, however many Kustomizations report it |
+| Flux stores a new revision (source-controller `NewArtifact` for GitRepository `flux-system`, forwarded by notification-controller `Provider` `n8n-agents` + `Alert` `sec-researcher-revisions`, `clusters/pi-k3s/flux-notifications/n8n-agents.yaml`) | `security.flux_revision`, `data {revision, base, changed_paths, reasons}` | `sec-researcher:flux-rev:<sha>` | a year — once per revision, however many events report it |
 | Weekly sweep, Sunday 06:00 (n8n timezone) | `security.sweep` | `sec-researcher:sweep:<YYYY-Www>` | 6 days |
 | Form | `security.manual`, `data {ask}` | `sec-researcher:manual:<ulid>` | 1 h (never collides) |
 
@@ -522,7 +522,7 @@ FROM agent_plan_filings ORDER BY created_at DESC LIMIT 20;
 | Credential **`agent-runner`** | n8n | Exists. Placeholder `REPLACE_ON_IMPORT_agent_runner`. |
 | `intake-db`, `ntfy-family` | n8n | Exist; ids kept. |
 | Tables `agent_runs`, `agent_dedupe`, `agent_plan_filings` | n8n Postgres | Created by `Ensure Tables`. |
-| Runner ≥ 0.3.0, runtime 0.2.0, manifest `sec-researcher`, LiteLLM key `agent-sec-researcher` | cluster | `clusters/pi-k3s/agents/README.md` checklist. An older runner answers 422 → a "not started" push. |
+| Runner ≥ 0.4.0 (+ Role `flux-system/agent-runner-checkout-source`), runtime ≥ 0.2.1, manifest `sec-researcher`, LiteLLM key `agent-sec-researcher` | cluster | `clusters/pi-k3s/agents/README.md` checklist. A runner < 0.3.0 answers 422 → a "not started" push; runner 0.3.0 launches form/sweep runs that fail "latest artifact not found (HTTP 404)". |
 
 ### Import (manual rollout, in order)
 
@@ -549,8 +549,9 @@ FROM agent_plan_filings ORDER BY created_at DESC LIMIT 20;
    stays closed and unedited.
 4. **Cap**: a broad manual focus that yields > 5 findings: exactly 5 created, the rest listed as "not filed" in the
    push and `not_filed` in the table.
-5. **Flux, not relevant**: merge an image-tag-only PR. Expect one `agent-sec-researcher` execution per Kustomization
-   event, all but the first ending at `Claimed?`, the first ending at `Relevant?` (false); no run.
+5. **Flux, not relevant**: merge an image-tag-only PR. Expect ONE `agent-sec-researcher` execution (the
+   GitRepository's `NewArtifact` event; a failure-recovery `Succeeded` event for the same sha would end at
+   `Claimed?`), ending at `Relevant?` (false); no run. With no merges, no executions at all.
 6. **Flux, relevant**: merge a PR touching a `networkpolicies.yaml`. Expect exactly one run, event
    `security.flux_revision` with that file in `data.changed_paths`, and the checkout init container log
    `"served": "<sha>.tar.gz"`. `checkout_attempt` lines before it with `outcome: "error"` mean the pod's first
@@ -566,9 +567,22 @@ FROM agent_plan_filings ORDER BY created_at DESC LIMIT 20;
 - That HTTP Request v4.2 accepts an expression for `method` (`Apply` uses `={{ $json.method }}`), and that
   `List Issues` returns one output per page item with `fullResponse` (array body intact).
 - That `$('Split Actions').all()` in Summarize lines up with Apply's outputs (both in item order).
-- That notification-controller's event metadata carries `revision` as `main@sha1:<sha>` (the parser also accepts the
-  prefixed key and a bare sha; anything else is ignored silently — check an execution's input if Flux runs never
-  start).
-- That Kustomizations emit an info event per applied revision often enough (the Alert covers `*`; dedupe handles
-  the fan-out).
+- That the GitRepository event arrives as read from source (source-controller v1.7.4 `notify()`, notification-controller
+  v1.7.5 `combineEventMetadata`): `involvedObject.kind: GitRepository`, `severity: info`, `reason: NewArtifact`,
+  `message: "stored artifact for commit '…'"`, `metadata.revision: main@sha1:<sha>` (group prefix trimmed). The
+  parser also accepts the prefixed key, a bare sha and the old Kustomization shape; anything else is ignored
+  silently — check an execution's input if Flux runs never start.
+
+**Why the Alert watches the GitRepository, not Kustomizations (fixed 2026-11-13).** The first Alert matched
+`Kustomization *`. kustomize-controller emits `ReconciliationSucceeded` ("Reconciliation finished in …, next run in
+10m0s") on every reconcile, changed or not: 42 Kustomizations ≈ 250 POSTs/hour, 707 executions in under 3 h, every
+one dropped at `Claim`. source-controller emits an info event for a GitRepository only on a new artifact (or on
+recovery from a failure), so the Alert now names `GitRepository flux-system` with `inclusionList: ["^stored artifact
+for commit"]` (which also keeps fetch-failure error events out). The per-sha `Claim` stays as defence in depth.
+
+**Checkout revision for form/sweep runs.** These events carry no revision. The runner (≥ 0.4.0) reads the sha
+source-controller currently serves from the GitRepository and checks that out; source-controller has no
+`latest.tar.gz` (a form run on runner 0.3.0 failed "latest artifact not found (HTTP 404)"). n8n passes nothing
+extra. If the runner cannot read it, the launch answers 502 "no repository revision to check out …" and the push
+says "not started" with that text (`scripts/agentrunner/CONTRACT.md` §4a).
 

@@ -1,8 +1,10 @@
 """Minimal Kubernetes REST client for the agent runner (stdlib urllib, in-pod SA token + CA).
 
 Deliberately narrow: create/get/delete Jobs, list Pods by label, read a Pod's log — all in one
-namespace. There is no generic GET, so this client cannot be pointed at Secrets (the runner never
-reads them; the agent's Secret is only ever *referenced* by name in the Job's envFrom).
+namespace — plus one read outside it: GET a Flux GitRepository, to learn which artifact source-controller
+serves for a manifest's `checkout.source` (RBAC allows exactly that one object, see agents/rbac.yaml).
+There is no generic GET, so this client cannot be pointed at Secrets (the runner never reads them; the
+agent's Secret is only ever *referenced* by name in the Job's envFrom).
 """
 import json
 import os
@@ -106,3 +108,10 @@ class KubeClient:
         pod_q = urllib.parse.quote(pod, safe="")
         return self._request("GET", f"/api/v1/namespaces/{ns}/pods/{pod_q}/log",
                              query=q or None, text=True)
+
+    def get_gitrepository(self, namespace, name):
+        """A Flux source.toolkit.fluxcd.io/v1 GitRepository (its .status.artifact names the served
+        tarball). Raises KubeError (403 when RBAC does not cover it, 404 when absent)."""
+        ns = urllib.parse.quote(namespace, safe="")
+        n = urllib.parse.quote(name, safe="")
+        return self._request("GET", f"/apis/source.toolkit.fluxcd.io/v1/namespaces/{ns}/gitrepositories/{n}")

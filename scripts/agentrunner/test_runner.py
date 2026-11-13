@@ -64,6 +64,9 @@ GOOD = {"outcome": "done", "summary": "found it",
         "outputs": [{"kind": "report", "title": "Hang", "body": "# details"}]}
 
 
+CUR_SHA = "89abcdef0123456789abcdef0123456789abcdef"   # what source-controller serves "now"
+
+
 class FakeKube:
     def __init__(self):
         self.jobs = {}
@@ -73,6 +76,10 @@ class FakeKube:
         self.logs = {}       # run_id -> log text
         self.no_pods = set()
         self.get_calls = 0
+        # Flux GitRepository read by the runner for `checkout:` manifests (status.artifact.revision).
+        self.gitrepo_revision = "main@sha1:" + CUR_SHA
+        self.gitrepo_error = None
+        self.gitrepo_calls = []
 
     def create_job(self, job):
         if self.create_error:
@@ -84,6 +91,13 @@ class FakeKube:
     def get_job(self, name):
         self.get_calls += 1
         return self.jobs.get(name)
+
+    def get_gitrepository(self, namespace, name):
+        self.gitrepo_calls.append((namespace, name))
+        if self.gitrepo_error:
+            raise self.gitrepo_error
+        art = {"revision": self.gitrepo_revision} if self.gitrepo_revision else None
+        return {"kind": "GitRepository", "status": {"artifact": art} if art else {}}
 
     def delete_job(self, name):
         self.deleted.append(name)
@@ -1126,9 +1140,13 @@ def test_personal_rule_covers_by_event_type_models():
         valid(m)
 
 
-def _sec_job(ev, base=jobspec.DEFAULT_CHECKOUT_BASE_URL):
+def _sec_job(ev, base=jobspec.DEFAULT_CHECKOUT_BASE_URL, current=CUR_SHA):
     return jobspec.render_job("abc123", copy.deepcopy(SEC), ev, 1200, "agents", "http://litellm:4000",
-                              ["pi5-worker-1"], checkout_base_url=base)
+                              ["pi5-worker-1"], checkout_base_url=base, checkout_sha=current)
+
+
+def _ienv(job):
+    return {x["name"]: x["value"] for x in job["spec"]["template"]["spec"]["initContainers"][0]["env"]}
 
 
 def test_model_selected_per_event_type():
@@ -1152,7 +1170,7 @@ def test_checkout_renders_init_container_and_readonly_mount():
     ienv = {x["name"]: x["value"] for x in init["env"]}
     base = "http://source-controller.flux-system.svc.cluster.local./gitrepository/flux-system/flux-system/"
     assert ienv["CHECKOUT_URL"] == base + SHA + ".tar.gz"
-    assert ienv["CHECKOUT_FALLBACK_URL"] == base + "latest.tar.gz"
+    assert ienv["CHECKOUT_FALLBACK_URL"] == base + CUR_SHA + ".tar.gz"   # the current artifact, never latest.tar.gz
     assert ienv["CHECKOUT_DEST"] == "/repo/tree" and ienv["CHECKOUT_INFO"] == "/repo/checkout.json"
     assert json.loads(ienv["CHECKOUT_INCLUDE"]) == ["clusters/", "docs/secrets-map.md"]
     isc = init["securityContext"]
@@ -1170,16 +1188,54 @@ def test_checkout_renders_init_container_and_readonly_mount():
                                  "../../../helmrepository/x/y/latest", "abc?x=1"])
 def test_checkout_url_only_takes_a_well_formed_sha_from_the_event(rev):
     data = {} if rev is None else {"revision": rev}
-    pod = _sec_job(event(type="security.manual", data=data))["spec"]["template"]["spec"]
-    ienv = {x["name"]: x["value"] for x in pod["initContainers"][0]["env"]}
-    assert ienv["CHECKOUT_URL"].endswith("/gitrepository/flux-system/flux-system/latest.tar.gz")
+    ienv = _ienv(_sec_job(event(type="security.manual", data=data)))
+    assert ienv["CHECKOUT_URL"] == ("http://source-controller.flux-system.svc.cluster.local./gitrepository/"
+                                    f"flux-system/flux-system/{CUR_SHA}.tar.gz")
     assert ienv["CHECKOUT_FALLBACK_URL"] == ""
 
 
+def test_checkout_never_asks_for_latest_tar_gz():
+    """source-controller ≥ v1.0 serves no latest.tar.gz (2026-11-13: a manual run 404'd on it)."""
+    for ev in (event(type="security.manual"), event(type="security.flux_revision", data={"revision": SHA})):
+        for cur in (CUR_SHA, None):
+            if cur is None and "revision" not in ev["data"]:
+                continue
+            assert "latest" not in json.dumps(_ienv(_sec_job(ev, current=cur)))
+
+
+def test_checkout_event_sha_equal_to_current_has_no_fallback():
+    ienv = _ienv(_sec_job(event(type="security.flux_revision", data={"revision": CUR_SHA})))
+    assert ienv["CHECKOUT_URL"].endswith(f"/{CUR_SHA}.tar.gz") and ienv["CHECKOUT_FALLBACK_URL"] == ""
+
+
+def test_checkout_event_sha_without_current_has_no_fallback():
+    ienv = _ienv(_sec_job(event(type="security.flux_revision", data={"revision": SHA}), current=None))
+    assert ienv["CHECKOUT_URL"].endswith(f"/{SHA}.tar.gz") and ienv["CHECKOUT_FALLBACK_URL"] == ""
+
+
+@pytest.mark.parametrize("cur", [None, "", "main", CUR_SHA.upper(), "../x"])
+def test_render_refuses_a_checkout_with_nothing_to_fetch(cur):
+    with pytest.raises(ValueError, match="no checkout artifact"):
+        _sec_job(event(type="security.manual"), current=cur)
+
+
+@pytest.mark.parametrize("obj,want", [
+    ({"status": {"artifact": {"revision": f"main@sha1:{CUR_SHA}"}}}, CUR_SHA),
+    ({"status": {"artifact": {"revision": f"main/{CUR_SHA}"}}}, CUR_SHA),        # pre-v1 form
+    ({"status": {"artifact": {"revision": CUR_SHA}}}, CUR_SHA),
+    ({"status": {"artifact": {"revision": f"main@sha1:{CUR_SHA}x"}}}, None),
+    ({"status": {"artifact": {"revision": f"main@sha1:{CUR_SHA.upper()}"}}}, None),
+    ({"status": {"artifact": {"revision": "main@sha256:" + "a" * 64}}}, None),
+    ({"status": {"artifact": {}}}, None), ({"status": {}}, None), ({}, None), (None, None), ([], None),
+    ({"status": {"artifact": "x"}}, None),
+])
+def test_artifact_sha_parses_gitrepository_status(obj, want):
+    assert jobspec.artifact_sha(obj) == want
+
+
 def test_checkout_host_comes_from_runner_config_not_manifest():
-    pod = _sec_job(event(), base="http://sc.test:9090/")["spec"]["template"]["spec"]
-    ienv = {x["name"]: x["value"] for x in pod["initContainers"][0]["env"]}
-    assert ienv["CHECKOUT_URL"] == "http://sc.test:9090/gitrepository/flux-system/flux-system/latest.tar.gz"
+    ienv = _ienv(_sec_job(event(), base="http://sc.test:9090/"))
+    assert ienv["CHECKOUT_URL"] == f"http://sc.test:9090/gitrepository/flux-system/flux-system/{CUR_SHA}.tar.gz"
     assert rmod.Config.from_env({"RUNNER_CHECKOUT_BASE_URL": "http://sc.test:9090"}).checkout_base_url == \
         "http://sc.test:9090"
     assert rmod.Config.from_env({}).checkout_base_url == jobspec.DEFAULT_CHECKOUT_BASE_URL
@@ -1199,6 +1255,96 @@ def test_runner_launch_passes_checkout_base(env):
     assert {x["name"]: x["value"] for x in init["env"]}["CHECKOUT_URL"].startswith("http://sc.test:9090/")
 
 
+def test_runner_resolves_current_artifact_for_a_run_without_revision(env, capsys):
+    write_manifest(env, SEC)
+    s, b = submit(env, agent="sec-researcher", ev=event(type="security.manual", data={"ask": "x"}))
+    assert s == 202 and b["status"] == "launched"
+    assert env.kube.gitrepo_calls == [("flux-system", "flux-system")]   # the manifest's checkout.source
+    ienv = _ienv(env.kube.created[0])
+    assert ienv["CHECKOUT_URL"].endswith(f"/gitrepository/flux-system/flux-system/{CUR_SHA}.tar.gz")
+    assert ienv["CHECKOUT_FALLBACK_URL"] == ""
+    assert '"event":"checkout_resolved"' in capsys.readouterr().out
+
+
+def test_runner_flux_run_falls_back_to_current_artifact(env):
+    write_manifest(env, SEC)
+    submit(env, agent="sec-researcher", ev=event(type="security.flux_revision", data={"revision": SHA}))
+    ienv = _ienv(env.kube.created[0])
+    assert ienv["CHECKOUT_URL"].endswith(f"/{SHA}.tar.gz")
+    assert ienv["CHECKOUT_FALLBACK_URL"].endswith(f"/{CUR_SHA}.tar.gz")
+
+
+@pytest.mark.parametrize("err", [KubeError(403, "forbidden"), KubeError(404, "not found"), OSError("down")])
+def test_runner_flux_run_still_launches_when_gitrepository_unreadable(env, err):
+    env.kube.gitrepo_error = err
+    write_manifest(env, SEC)
+    s, _ = submit(env, agent="sec-researcher", ev=event(type="security.flux_revision", data={"revision": SHA}))
+    assert s == 202
+    ienv = _ienv(env.kube.created[0])
+    assert ienv["CHECKOUT_URL"].endswith(f"/{SHA}.tar.gz") and ienv["CHECKOUT_FALLBACK_URL"] == ""
+
+
+@pytest.mark.parametrize("err,detail", [(KubeError(403, "forbidden"), "kubernetes API error 403"),
+                                        (OSError("down"), "kubernetes API unreachable (OSError)"),
+                                        (None, "GitRepository has no stored artifact")])
+def test_runner_refuses_a_run_with_nothing_to_check_out(env, err, detail):
+    env.kube.gitrepo_error = err
+    if err is None:
+        env.kube.gitrepo_revision = None
+    write_manifest(env, SEC)
+    s, b = submit(env, agent="sec-researcher", ev=event(type="security.manual"))
+    assert s == 502 and env.kube.created == []
+    assert b["error"].startswith("no repository revision to check out") and detail in b["error"]
+    assert "flux-system/flux-system" in b["error"]
+    # refused before the ledger: no run record, the daily cap is not spent, a retry is not a replay
+    assert Ledger(env.cfg.ledger_path).count_on_day("sec-researcher", "2026-11-11") == 0
+    env.kube.gitrepo_error, env.kube.gitrepo_revision = None, "main@sha1:" + CUR_SHA
+    assert submit(env, agent="sec-researcher", ev=event(type="security.manual"))[0] == 202
+
+
+def test_manifest_without_checkout_never_reads_gitrepository(env):
+    submit(env)
+    assert env.kube.created and env.kube.gitrepo_calls == []
+
+
+def _sec_queue(env):
+    d = copy.deepcopy(SEC)
+    d["limits"]["runs_per_day"] = 50
+    write_manifest(env, d)
+    out = [submit(env, agent="sec-researcher", ev=event(f"q{i}", type="security.manual"))[1] for i in range(3)]
+    assert [b["status"] for b in out] == ["launched", "launched", "queued"]
+    return out
+
+
+def test_queued_run_resolves_checkout_when_it_starts(env):
+    bodies = _sec_queue(env)
+    later = "fedcba9876543210fedcba9876543210fedcba98"
+    env.kube.gitrepo_revision = "main@sha1:" + later         # Flux moved on while it waited
+    finish(env, bodies[0]["run_id"])
+    assert ids(env) == [bodies[0]["run_id"], bodies[1]["run_id"], bodies[2]["run_id"]]
+    assert _ienv(env.kube.created[2])["CHECKOUT_URL"].endswith(f"/{later}.tar.gz")
+
+
+def test_queued_run_stays_queued_on_api_transport_failure(env):
+    bodies = _sec_queue(env)
+    env.kube.gitrepo_error = OSError("blip")
+    finish(env, bodies[0]["run_id"])
+    assert len(env.kube.created) == 2 and list(env.runner.queue) == [bodies[2]["run_id"]]
+    env.kube.gitrepo_error = None
+    env.runner.pump()
+    assert len(env.kube.created) == 3 and list(env.runner.queue) == []
+
+
+def test_queued_run_fails_when_gitrepository_is_forbidden(env):
+    bodies = _sec_queue(env)
+    env.kube.gitrepo_error = KubeError(403, "forbidden")
+    finish(env, bodies[0]["run_id"])
+    p = env.posts[-1][1]
+    assert p["run_id"] == bodies[2]["run_id"] and p["exit_reason"] == "job_failed"
+    assert "no repository revision to check out" in p["result"]["summary"]
+    assert len(env.kube.created) == 2 and list(env.runner.queue) == []
+
+
 def test_repo_manifest_sec_researcher_is_valid():
     """The manifest in Git loads under the runner's own validator (as the runner would load it)."""
     mdir = Path(__file__).resolve().parents[2] / "clusters/pi-k3s/agents/manifests"
@@ -1208,3 +1354,16 @@ def test_repo_manifest_sec_researcher_is_valid():
     allm = {m for lst in [doc["model"]["allow"], *doc["model"].get("by_event_type", {}).values()] for m in lst}
     assert not any("opus" in m for m in allm)
     assert "connectors" in doc and doc["connectors"]["mcp"][0]["key_env"] == "MCP_HOMELAB_READONLY_KEY"
+
+
+def test_kubeapi_get_gitrepository_path(tmp_path, monkeypatch):
+    import kubeapi
+    (tmp_path / "token").write_text("t")
+    monkeypatch.setattr(kubeapi.ssl, "create_default_context", lambda cafile=None: None)
+    kc = kubeapi.KubeClient("agents", sa_dir=str(tmp_path))
+    seen = []
+    monkeypatch.setattr(kc, "_request", lambda method, path, **kw: seen.append((method, path)) or {})
+    kc.get_gitrepository("flux-system", "flux-system")
+    kc.get_gitrepository("a/b", "../c")
+    assert seen == [("GET", "/apis/source.toolkit.fluxcd.io/v1/namespaces/flux-system/gitrepositories/flux-system"),
+                    ("GET", "/apis/source.toolkit.fluxcd.io/v1/namespaces/a%2Fb/gitrepositories/..%2Fc")]

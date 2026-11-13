@@ -35,6 +35,23 @@ const ok = name => { n++; console.log('ok', name); };
   for (const bad of ['main@sha1:abc', `main@sha1:${SHA1}x`, `main@sha1:${SHA1.toUpperCase()}`, `../${SHA1}/x`, '', null])
     assert.deepStrictEqual(run('agent-sec-flux-input.js', ev({ metadata: { revision: bad } })), [], String(bad));
   assert.strictEqual(one('agent-sec-flux-input.js', ev().body).revision, SHA1);   // bare payload
+  // The Alert's current source: source-controller's NewArtifact event for GitRepository flux-system, as
+  // notification-controller v1.7 POSTs it (eventv1.Event; group prefix trimmed from the metadata keys).
+  const gr = (o = {}) => ({ headers: {}, body: {
+    involvedObject: { kind: 'GitRepository', namespace: 'flux-system', name: 'flux-system',
+      apiVersion: 'source.toolkit.fluxcd.io/v1', uid: 'u', resourceVersion: '1' },
+    severity: 'info', timestamp: '2026-11-13T00:00:00Z', reason: 'NewArtifact',
+    message: "stored artifact for commit 'fix(agents): x'", reportingController: 'source-controller', reportingInstance: 'sc-0',
+    metadata: { revision: `main@sha1:${SHA1}`, digest: `sha256:${'a'.repeat(64)}` }, ...o } });
+  assert.deepStrictEqual(one('agent-sec-flux-input.js', gr()), t);   // same trigger record, same dedupe key as the old shape
+  assert.strictEqual(one('agent-sec-flux-input.js', gr({ metadata: { 'source.toolkit.fluxcd.io/revision': `main@sha1:${SHA1}` } })).revision, SHA1);
+  assert.strictEqual(one('agent-sec-flux-input.js', gr({ reason: 'Succeeded' })).revision, SHA1);   // failure-recovery event
+  assert.deepStrictEqual(run('agent-sec-flux-input.js', gr({ severity: 'error', reason: 'GitOperationFailed', metadata: {} })), []);
+  assert.deepStrictEqual(run('agent-sec-flux-input.js', gr({ metadata: { digest: `sha256:${'a'.repeat(64)}` } })), []);   // no revision
+  // a prefix belonging to the OTHER kind is not read (only the involved object's own group is trimmed)
+  assert.deepStrictEqual(run('agent-sec-flux-input.js', gr({ metadata: { 'kustomize.toolkit.fluxcd.io/revision': `main@sha1:${SHA1}` } })), []);
+  assert.deepStrictEqual(run('agent-sec-flux-input.js', gr({ involvedObject: { kind: 'OCIRepository' } })), []);
+  assert.deepStrictEqual(run('agent-sec-flux-input.js', gr({ involvedObject: { kind: 'constructor' } })), []);
   // Trigger re-validates the merge point
   assert.strictEqual(one('agent-sec-trigger.js', t).dedupe_key, t.dedupe_key);
   assert.throws(() => run('agent-sec-trigger.js', { ...t, dedupe_key: "x'; DROP TABLE agent_dedupe;--" }), /malformed/);

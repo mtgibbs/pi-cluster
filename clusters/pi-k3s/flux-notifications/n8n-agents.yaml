@@ -1,11 +1,16 @@
-# Flux → n8n: "the cluster applied a new revision" → the sec-researcher workflow
+# Flux → n8n: "Flux has a new revision of the repo" → the sec-researcher workflow
 # (clusters/pi-k3s/n8n/workflows/agent-sec-researcher.json, docs/agent-sandbox-n8n.md "sec-researcher").
 #
-# Event-driven, not polling: kustomize-controller emits an event when a Kustomization applies a
-# revision; notification-controller forwards it here. Every Kustomization emits its own event for the
-# same revision, so n8n dedupes on the commit sha (atomic claim in its `agent_dedupe` table) and, once per
-# revision, asks GitHub's public compare API which files changed. Only a revision that touched
-# access-control paths starts a run.
+# Event-driven, not polling: source-controller emits ONE `NewArtifact` event when the GitRepository
+# `flux-system` stores an artifact for a new commit ("stored artifact for commit '…'", metadata.revision
+# "main@sha1:<sha>"); notification-controller forwards it here. n8n still dedupes on the commit sha (atomic
+# claim in its `agent_dedupe` table) as defence in depth and, once per revision, asks GitHub's public compare
+# API which files changed. Only a revision that touched access-control paths starts a run. The artifact the
+# agent's checkout downloads exists the moment this event fires.
+#
+# Why not Kustomization events (the first version): kustomize-controller emits `ReconciliationSucceeded` on
+# EVERY reconcile, changed or not — 42 Kustomizations × every 10 min ≈ 250 POSTs/hour, each one an n8n
+# execution that the dedupe then dropped (2026-11-12/13: 707 executions in under 3 h, zero runs).
 #
 # Auth (fails closed): notification-controller sends `Authorization: Bearer <token>` from the Secret
 # below; n8n's Webhook node checks it with its Header Auth credential and answers 403 without it. No
@@ -64,13 +69,15 @@ metadata:
 spec:
   providerRef:
     name: n8n-agents
-  # info = successful applies (they carry the revision). Error events also pass this filter; n8n
-  # ignores anything that is not severity info with a commit sha in its metadata.
+  # source-controller only emits an info event for a GitRepository on a NEW artifact (`NewArtifact`) or on
+  # recovery from a failure (`Succeeded`, same revision — n8n's dedupe absorbs it); a no-op reconcile emits
+  # nothing (source-controller v1.7 gitrepository_controller.go notify()). `eventSeverity: info` also passes
+  # error events (fetch failures, which repeat every interval while GitHub is unreachable): the inclusion
+  # list keeps only the "stored artifact" message, so those never reach n8n.
   eventSeverity: info
   eventSources:
-    - kind: Kustomization
-      name: '*'
-  exclusionList:
-    - ".*waiting.*socket.*"
-    - ".*Dependencies do not meet ready condition.*"
-    - ".*[Hh]ealth check failed.*"
+    - kind: GitRepository
+      name: flux-system
+      namespace: flux-system
+  inclusionList:
+    - "^stored artifact for commit"

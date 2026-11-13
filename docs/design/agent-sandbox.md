@@ -239,7 +239,10 @@ it knows nothing about specs or gates; jig's build loop becomes one of its clien
 - *As built (runner 0.3.0):* it also renders two opt-in manifest features: `checkout:` (an init container copies a
   Flux source artifact into a read-only volume, so a researcher reads the repo with no internet egress) and
   `model.by_event_type` (a different model list per event type, e.g. Sonnet for the weekly sweep only).
-  `scripts/agentrunner/CONTRACT.md` §2, §4a, §5a.
+  `scripts/agentrunner/CONTRACT.md` §2, §4a, §5a. *Runner 0.4.0:* source-controller serves artifacts only by
+  commit sha (no `latest.tar.gz`), so the runner reads which sha the GitRepository serves (`get` on that one
+  object, its only permission outside `agents`) and puts it in the Job's artifact URL; the agent pod still has
+  no API access.
 - A kill switch: one setting makes it refuse every launch.
 
 ### 5.2 The sandbox
