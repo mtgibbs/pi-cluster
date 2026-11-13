@@ -30,7 +30,7 @@ Each horizon is sized to fit a single working session unless flagged otherwise.
 
 | Item | Why | Status |
 |---|---|---|
-| Adults' OWUI: master key → scoped virtual key | Least privilege; tiny risk reduction now, big help when we add more services | ✅ Done 2026-05-21 (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults`; all models, no admin). Master key now only used by litellm-internal + ops sidecar. |
+| Adults' OWUI: master key → scoped virtual key | Least privilege; tiny risk reduction now, big help when we add more services | ✅ Done 2026-05-21 (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults`; no admin; local models only since 2026-11-11, was all models). Master key now only used by litellm-internal + ops sidecar. |
 | Wire `local-llm-mcp` into Claude Code (`.mcp.json`) | Token savings + cluster reference tools available in sessions | ✅ Done (kiwix-mcp intentionally NOT wired — context cost) |
 
 > **Deferred:**
