@@ -18,7 +18,7 @@
 kind: Agent
 name: ops-investigator
 purpose: "Triage an Alertmanager alert group: find the most likely cause from read-only cluster evidence and propose (never apply) a fix; returns a report."
-image: ghcr.io/mtgibbs/agent-runtime:0.1.0
+image: ghcr.io/mtgibbs/agent-runtime:0.3.0
 data_class: system
 model:
   allow: [hot-coder, claude-haiku]
