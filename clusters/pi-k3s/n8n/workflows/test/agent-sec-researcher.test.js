@@ -190,6 +190,23 @@ const items = (outputs, o) => one('agent-sec-plan-items.js', LEDGER(outputs, o),
   ok('plan items');
 }
 
+// ---------------------------------------------------------------- plan items: closed rule vocabulary (CONTRACT §5b)
+{
+  // a slug-shaped rule outside the vocabulary is invalid (it would fingerprint a duplicate issue next run)
+  const pi = items([PLAN({ fingerprint: { rule: 'agent-runner-drift', resource: 'agents/Deployment/agent-runner' } }),
+    PLAN({ fingerprint: { rule: 'networkpolicy-no-default-deny', resource: 'cluster/Namespace/media' } }), PLAN()]);
+  assert.strictEqual(pi.invalid, 2); assert.strictEqual(pi.plans.length, 1);
+  // the rules issues were filed under stay valid, and issue 1's fingerprint is reproduced exactly
+  const filed = items([PLAN({ severity: 'info', fingerprint: { rule: 'secret-shared-across-roles', resource: 'agents/ExternalSecret/agent-sec-researcher' } }),
+    PLAN({ fingerprint: { rule: 'rbac-escalation-verbs', resource: 'agents/Role/agent-runner' } }),
+    PLAN({ fingerprint: { rule: 'psa-not-enforced', resource: 'cluster/Namespace/agents' } })]);
+  assert.strictEqual(filed.invalid, 0); assert.strictEqual(filed.plans.length, 3);
+  const issue1 = filed.plans.find(p => p.rule === 'secret-shared-across-roles');
+  assert.strictEqual(issue1.fingerprint, sha('sec-researcher|secret-shared-across-roles|agents/ExternalSecret/agent-sec-researcher'));
+  assert.ok(issue1.fingerprint.startsWith('8e54af265623b53a'), 'issue 1 fingerprint (homelab-plans) unchanged');
+  ok('plan items: rule vocabulary');
+}
+
 // ---------------------------------------------------------------- issue pages + decide
 const PI = plans => items(plans);
 const issue = (number, fp, o = {}) => ({ number, state: 'open', state_reason: null, labels: [], html_url: `https://github.com/mtgibbs/homelab-plans/issues/${number}`,
@@ -202,10 +219,12 @@ const decide = (pi, pages) => one('agent-sec-decide.js', pages, { 'Plan Items': 
   assert.strictEqual(pages[0].url, 'https://api.github.com/repos/mtgibbs/homelab-plans/issues?state=all&per_page=100&sort=created&direction=asc&page=1');
   assert.throws(() => run('agent-sec-issue-pages.js', {}, { 'Plan Items': { plans_repo: 'evil.com/x/../y' } }), /bad plans repo/);
 
-  const mk = (rule, sev) => PLAN({ severity: sev, fingerprint: { rule, resource: `agents/Role/${rule}` } });
+  // one valid rule (the vocabulary is closed); the test's key is the Role's name, so it lives in `resource`
+  const key = x => x.resource.split('/')[2];
+  const mk = (name, sev) => PLAN({ severity: sev, fingerprint: { rule: 'rbac-wildcard', resource: `agents/Role/${name}` } });
   const pi = PI([mk('r-open', 'high'), mk('r-same', 'high'), mk('r-notplanned', 'medium'), mk('r-label', 'medium'),
     mk('r-fixed', 'low'), mk('r-new', 'critical'), mk('r-pr', 'info')]);
-  const fp = Object.fromEntries(pi.plans.map(p => [p.rule, p]));
+  const fp = Object.fromEntries(pi.plans.map(p => [key(p), p]));
   const list = [
     issue(1, fp['r-open'].fingerprint),
     issue(2, fp['r-same'].fingerprint, { content: fp['r-same'].content_hash }),
@@ -216,7 +235,7 @@ const decide = (pi, pages) => one('agent-sec-decide.js', pages, { 'Plan Items': 
     issue(7, 'f'.repeat(64), { body: `notes\n<!-- sec-researcher-fingerprint: ${fp['r-new'].fingerprint} -->` }),  // marker not at the start: ignored
   ];
   const d = decide(pi, [page(list), page([])]);
-  const act = Object.fromEntries(d.decisions.map(x => [x.rule, x]));
+  const act = Object.fromEntries(d.decisions.map(x => [key(x), x]));
   assert.strictEqual(d.lookup, 'complete');
   assert.strictEqual(act['r-open'].action, 'update'); assert.strictEqual(act['r-open'].issue_number, 1);
   assert.strictEqual(act['r-same'].action, 'unchanged');
@@ -224,10 +243,10 @@ const decide = (pi, pages) => one('agent-sec-decide.js', pages, { 'Plan Items': 
   assert.strictEqual(act['r-label'].action, 'skip_accepted');
   assert.strictEqual(act['r-fixed'].action, 'create'); assert.deepStrictEqual(act['r-fixed'].previously_fixed, [5]);
   assert.strictEqual(act['r-new'].action, 'create'); assert.strictEqual(act['r-pr'].action, 'create');
-  const upd = d.actions.find(a => a.rule === 'r-open');
+  const upd = d.actions.find(a => key(a) === 'r-open');
   assert.strictEqual(upd.method, 'PATCH'); assert.strictEqual(upd.url, 'https://api.github.com/repos/mtgibbs/homelab-plans/issues/1');
   assert.deepStrictEqual(Object.keys(upd.payload), ['body']);                    // never touches title/state/labels
-  const cr = d.actions.find(a => a.rule === 'r-fixed');
+  const cr = d.actions.find(a => key(a) === 'r-fixed');
   assert.strictEqual(cr.method, 'POST'); assert.strictEqual(cr.url, 'https://api.github.com/repos/mtgibbs/homelab-plans/issues');
   assert.ok(cr.payload.body.includes('Previously closed as fixed: #5'));
   assert.ok(cr.payload.body.indexOf('Previously closed') < cr.payload.body.indexOf('<!-- sec-researcher-footer -->'));
@@ -287,7 +306,7 @@ const decide = (pi, pages) => one('agent-sec-decide.js', pages, { 'Plan Items': 
   assert.strictEqual(bad.filings[1].issue_url, 'https://github.com/mtgibbs/homelab-plans/issues/4');
   assert.ok(bad.message.includes('1 FAILED')); assert.strictEqual(bad.priority, '4');
   // capped findings are listed as not filed
-  const seven = PI(Array.from({ length: 7 }, (_, i) => PLAN({ title: `finding ${i}`, fingerprint: { rule: `rule-${i}`, resource: 'agents/Role/x' } })));
+  const seven = PI(Array.from({ length: 7 }, (_, i) => PLAN({ title: `finding ${i}`, fingerprint: { rule: 'rbac-wildcard', resource: `agents/Role/x${i}` } })));
   const d7 = decide(seven, [page([])]);
   const s7 = one('agent-sec-summarize.js', d7.actions.map((a, i) => ({ statusCode: 201, body: { number: 20 + i, html_url: `https://github.com/mtgibbs/homelab-plans/issues/${20 + i}` } })),
     { 'Plan Items': seven, 'Build Event': BE, Decide: d7, 'Split Actions': d7.actions });

@@ -352,6 +352,11 @@ event → investigator or researcher (read-only) → plan items → n8n files th
   risk; how to verify; how to roll back.
 - **Research findings carry a fingerprint** (`agent | rule | resource`), so a re-run updates the open issue instead of
   opening a second, and a finding closed as accepted risk stays closed. A run opens at most 5 new issues.
+  The identity only holds if it is stable, so `rule` is a closed vocabulary, `resource` a canonical
+  `<namespace>/<Kind>/<name>`, every finding must be a plan, and a plan needs cited evidence (file:line or a live
+  tool result) — enforced by the runtime with one corrective re-prompt, then settled deterministically, and
+  re-checked by n8n (`scripts/agentrunner/CONTRACT.md` §5b; added after the 2026-11-13 Haiku runs lost findings and
+  filed a rollout in progress under an unrelated rule).
 - **n8n files plans; agents never touch GitHub for them** (revision 4). The filing step is plain code in the n8n
   workflow: sha256 of the fingerprint as a marker at the top of the issue body; look the marker up among the plans
   repo's issues; open → refresh the body if the content changed; closed as *not planned* or labelled `accepted-risk` →

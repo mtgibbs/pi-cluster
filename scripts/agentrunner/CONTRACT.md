@@ -1,4 +1,4 @@
-# Agent sandbox — contracts (slice 1; burst handling in runner 0.2.0; plans, repo checkout and per-event models in runner 0.3.0 / runtime 0.2.0)
+# Agent sandbox — contracts (slice 1; burst handling in runner 0.2.0; plans, repo checkout and per-event models in runner 0.3.0 / runtime 0.2.0; plan discipline in runtime 0.3.0)
 
 Design: `docs/design/agent-sandbox.md` (PR #258). Four parts: n8n decides *when*, the **runner** decides *how*,
 the **agent runtime** image decides *what*, existing gates decide *whether*. These contracts are what the parts
@@ -167,6 +167,34 @@ A structured finding. It carries **no** issue URL: the agent holds no GitHub cre
 - n8n's identity for a finding is `sha256("<agent>|<rule>|<resource>")`.
 - The runtime offers this schema to the model, bounces a malformed plan back to it, and at emit truncates oversize
   sections and drops a plan it cannot repair (saying so in the summary), so the runner should never have to reject.
+
+### 5b. Plan discipline (runtime 0.3.0)
+
+The 2026-11-13 sec-researcher runs on Haiku lost findings (`needs_human`, "1 low and 1 info" in the summary, zero
+plans: nothing filed), filed a rollout in progress as a finding, and used a rule unrelated to the finding — which
+breaks dedupe, since rule + resource *is* the identity. So the runtime enforces these for any agent whose `outputs`
+include `plan`, deterministically, not by prompt wording:
+
+- **Closed rule vocabulary.** `fingerprint.rule` must be a key of `PLAN_RULES` in `scripts/agentruntime/result.py`
+  (offered to the model as the schema's `enum`, each with its meaning). Some rules fix the resource's Kind (e.g.
+  `psa-not-enforced` and `netpol-no-default-deny` → `cluster/Namespace/<ns>`; `rbac-*` → Role/ClusterRole/
+  (Cluster)RoleBinding; `pod-*` → a workload). Names are only ever added: one an issue was filed under must stay.
+  The manifest prompt and n8n's Plan Items node list the same names (`test_plan_discipline.py` fails on drift), and
+  n8n marks a plan with any other rule invalid (not filed).
+- **Canonical resource.** On top of the §5a pattern: a known Kind in its exact spelling (`NetworkPolicy`, not
+  `Networkpolicy`); cluster-scoped Kinds under `cluster/`, namespaced Kinds never under `cluster/`.
+- **Evidence bar.** `plan.evidence` cites a file path *with* a line number, or names one of the agent's allowlisted
+  MCP tools (bare or `<connector>__<tool>`). A title calling itself inference/speculative/unverified is not a plan.
+- **Every finding is a plan** (agents whose only output kind is `plan`): a summary that counts findings
+  (`1 low`, `2 findings`) must match the plans returned; `needs_human` with no plan must ask a question (`?`).
+- **One corrective re-prompt.** The first `submit_result` that breaks any of the above is answered with the list of
+  problems (shape errors keep their own bounce, as before). After that the runtime settles it: plans still breaking
+  a rule are dropped (named in the summary), the outcome is **derived** — any plan above `info` → `needs_human`, only
+  `info` → `done`, none → `nothing_to_do` (`needs_human` if something was dropped, the summary still counts findings
+  that are not plans, or it keeps a stated question) — and an inconsistent summary is annotated `[agent-runtime: …]`.
+  `failed` is left alone. Cost: at most one extra model call per run.
+- The runner does **not** check the vocabulary (it would reject the whole Result, losing the valid plans too); it
+  keeps the §5a pattern check. The runtime settles, n8n re-checks.
 
 ## 6. Agent runtime (image `agent-runtime`)
 

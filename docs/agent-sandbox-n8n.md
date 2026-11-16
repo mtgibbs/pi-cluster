@@ -482,6 +482,14 @@ model only by choosing the event type.
 
 - **The plans repo** is the constant `PLANS_REPO = 'mtgibbs/homelab-plans'` at the top of `agent-sec-plan-items.js`;
   `Issue Pages` and `Decide` take it from that node's output. Change it there only, then regenerate the JSON.
+- **The workflow JSON is generated** from `src/agent-sec-*.js` by
+  `python3 clusters/pi-k3s/n8n/workflows/test/gen_agent_sec_researcher.py` (deterministic ids; no-op on unchanged
+  sources); then run `node clusters/pi-k3s/n8n/workflows/test/agent-sec-researcher.test.js`, which checks every Code
+  node's `jsCode` equals its src file. Never hand-edit `agent-sec-researcher.json`; re-import it into n8n after a change.
+- **Re-validation**: a plan is counted `invalid` (not filed, reported in the push as "malformed") unless its shape
+  matches CONTRACT §5a **and** its `rule` is in the closed vocabulary (`RULES` in `agent-sec-plan-items.js`, the same
+  names as the runtime's `PLAN_RULES`, CONTRACT §5b). A new rule name goes into the runtime, the manifest prompt and
+  this node together; a name an issue was filed under is never removed.
 - **Fingerprint**: `sha256("sec-researcher|<rule>|<resource>")`, written as the **first line** of the issue body,
   `<!-- sec-researcher-fingerprint: <hex> -->`, plus a content hash on line 2. Only a marker at the very start counts,
   and agent text cannot produce one (prose has `<` escaped; evidence has `<!--` broken).
