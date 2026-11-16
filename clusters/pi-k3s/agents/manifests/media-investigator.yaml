@@ -14,7 +14,7 @@
 kind: Agent
 name: media-investigator
 purpose: "Find out why a media client (Jellyfin via Infuse/Apple TV, etc.) hung or failed to play, from server-side evidence; read-only; returns a report."
-image: ghcr.io/mtgibbs/agent-runtime:0.1.0
+image: ghcr.io/mtgibbs/agent-runtime:0.3.0
 data_class: system
 model:
   allow: [hot-coder, claude-haiku]
