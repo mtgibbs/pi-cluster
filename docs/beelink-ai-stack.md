@@ -28,7 +28,7 @@ This document captures the architecture, decisions, and phased plan for adding a
 - Ollama / llama.cpp serving local models
 - LiteLLM proxy behind Caddy at `https://ai.lab.mtgibbs.dev` (OpenAI-compatible front door)
 - **Postgres 16** (`litellm_db` named volume) — backs LiteLLM virtual key storage; required for `/key/generate` and per-client model allowlists. Password in 1Password (`litellm-postgres/password`).
-- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). `OPENAI_API_KEYS` uses a scoped LiteLLM virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — all models, no admin) as of 2026-05-21. The master key is no longer exposed to the UI.
+- Open WebUI for adults at `https://chat.lab.mtgibbs.dev` (behind Caddy). `OPENAI_API_KEYS` uses a scoped LiteLLM virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — explicit list of the local models only, no Claude, no admin; restricted 2026-11-11, was all models) as of 2026-05-21. The master key is no longer exposed to the UI.
 - **Pipelines** sidecar (`ghcr.io/open-webui/pipelines:main`) — OpenAI-compatible API at `:9099`; holds `dewey-pipeline.py`
 - **Open WebUI Dewey** at `https://dewey.lab.mtgibbs.dev` — separate auth, separate SQLite at `/srv/dewey-data/`, talks ONLY to Pipelines (`ENABLE_OLLAMA_API=false`). Model: `qwen3.5:9b` via scoped LiteLLM virtual key. CARL and Dewey are siblings: CARL handles school/Canvas reminders, Dewey handles open-ended learning with kiwix reference grounding.
 - Caddy (locally built with xcaddy + Cloudflare DNS plugin) for TLS termination; Authelia deferred
@@ -237,7 +237,7 @@ The model-driven tool loop above proved fragile on qwen3.5:9b (text-format tool 
 - `2886d5f` beelink-ansible: feat(50-ai-stack): tune Ollama for multi-user + pre-warm
 - `677ca5c` beelink-ansible: feat(dewey): add Pipelines sidecar + Open WebUI Dewey instance
 
-**Resolved 2026-05-21 (H1):** adults' `chat.lab.mtgibbs.dev` now authenticates to LiteLLM with a scoped virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — all models, no admin), verified `200` on `/v1/models` + `401` on `/key/generate`. The master key is now used only by litellm-internal + the ops sidecar bearer.
+**Resolved 2026-05-21 (H1):** adults' `chat.lab.mtgibbs.dev` now authenticates to LiteLLM with a scoped virtual key (`op://pi-cluster/openwebui/litellm-key`, alias `openwebui-adults` — explicit list of the local models only, no Claude, no admin; restricted 2026-11-11, was all models), verified `200` on `/v1/models` + `401` on `/key/generate`. The master key is now used only by litellm-internal + the ops sidecar bearer.
 
 ### Phase 3: n8n + Email Air-Gap (n8n already deployed, needs refinement)
 

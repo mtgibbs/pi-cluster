@@ -110,7 +110,9 @@ After deploy, browse `https://n8n.lab.mtgibbs.dev` (LAN only) → create the own
 ```bash
 MK=$(op read op://pi-cluster/litellm-master-key)   # field credential/password
 curl -s -X POST https://ai.lab.mtgibbs.dev/key/generate -H "Authorization: Bearer $MK" \
-  -d '{"key_alias":"n8n-intake"}' | jq -r .key      # → store n8n-automation/litellm-key
+  -d '{"key_alias":"n8n-intake","models":["<local-model>"]}' | jq -r .key   # → store n8n-automation/litellm-key
+# ALWAYS pass an explicit local-model list: a key minted with no `models` is unrestricted and can reach claude-*.
+# (n8n-intake was restricted to local models only on 2026-11-11.)
 ```
 
 ### I. n8n credentials + workflow (via n8n REST API, key from G)
