@@ -25,13 +25,206 @@ PLAN_SECTION_BYTES = 4 * 1024
 PLAN_EVIDENCE_BYTES = 8 * 1024
 PLAN_SECTION_HELP = {
     "found": "what was found, in plain words",
-    "evidence": "file paths with line excerpts and/or tool results that show it",
+    "evidence": "file path:line with the quoted lines, and/or the live tool name + field/value that shows it "
+                "(required: a plan without one is dropped)",
     "likely_cause": "why it is this way (label inference as inference)",
     "proposed_change": "the manifest/file change to make, or exactly 'No change needed.' with the reason",
     "risk": "what could break if the change is made, and the risk of leaving it",
     "verify": "how a human checks the fix worked (a deny you have never seen deny proves nothing)",
     "rollback": "how to undo the change",
 }
+
+
+# -- plan discipline (runtime >= 0.3.0, CONTRACT §5b) ---------------------------------------------
+# The fingerprint (rule + resource) is n8n's identity for a finding, so `rule` comes from this CLOSED
+# vocabulary and each rule names the Kind(s) its resource may be. Every rule name ever filed stays here
+# (homelab-plans issues carry them): renaming or removing one orphans the open issue it fingerprints.
+# The manifest prompt and n8n's Plan Items node list the same names (test_repo_checkout.py checks).
+RBAC_KINDS = ("Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding")
+WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "HelmRelease")
+PLAN_RULES = {  # rule -> (what it means, Kinds its resource may be; None = any Kind)
+    "rbac-wildcard": ("a Role/ClusterRole grants * verbs, resources or apiGroups", RBAC_KINDS),
+    "rbac-secrets-read": ("get/list/watch on secrets beyond what the workload needs", RBAC_KINDS),
+    "rbac-escalation-verbs": ("escalate, bind or impersonate verbs", RBAC_KINDS),
+    "rbac-cluster-admin": ("a binding to cluster-admin or an equivalent", RBAC_KINDS),
+    "rbac-broad-subject": ("a binding to a broad subject (all SAs of a namespace, system:authenticated, ...)",
+                           RBAC_KINDS),
+    "rbac-workload-create": ("create/patch of pods, jobs or workloads (they can mount any Secret in the namespace)",
+                             RBAC_KINDS),
+    "rbac-pod-exec": ("pods/exec, pods/attach or pods/portforward", RBAC_KINDS),
+    "sa-token-automount": ("an API token is mounted into a workload that never calls the API",
+                           ("ServiceAccount",) + WORKLOAD_KINDS),
+    "sa-shared": ("one ServiceAccount (or `default`) used by unrelated workloads", ("ServiceAccount",) + WORKLOAD_KINDS),
+    "netpol-no-default-deny": ("a namespace without a default-deny policy (resource: cluster/Namespace/<ns>)",
+                               ("Namespace",)),
+    "netpol-broad-egress": ("an egress rule broader than its stated purpose", ("NetworkPolicy",)),
+    "netpol-broad-ingress": ("an ingress rule broader than its stated purpose", ("NetworkPolicy",)),
+    "netpol-lan-egress": ("egress to the home LAN that the workload does not need", ("NetworkPolicy",)),
+    "netpol-api-egress": ("egress to the Kubernetes API that the workload does not need", ("NetworkPolicy",)),
+    "pod-privileged": ("privileged: true", WORKLOAD_KINDS),
+    "pod-host-namespace": ("hostNetwork, hostPID or hostIPC", WORKLOAD_KINDS),
+    "pod-hostpath": ("a hostPath volume", WORKLOAD_KINDS),
+    "pod-host-port": ("a hostPort", WORKLOAD_KINDS),
+    "pod-runs-as-root": ("runs as uid 0 or without runAsNonRoot", WORKLOAD_KINDS),
+    "pod-privilege-escalation": ("allowPrivilegeEscalation not false", WORKLOAD_KINDS),
+    "pod-added-capabilities": ("capabilities added, or ALL not dropped", WORKLOAD_KINDS),
+    "pod-writable-rootfs": ("readOnlyRootFilesystem not true", WORKLOAD_KINDS),
+    "pod-no-seccomp": ("no seccomp profile", WORKLOAD_KINDS),
+    "psa-not-enforced": ("a namespace without a Pod Security enforce label (resource: cluster/Namespace/<ns>)",
+                         ("Namespace",)),
+    "image-mutable-tag": ("an image by :latest or no tag (whoever pushes the tag runs code); NOT version lag",
+                          WORKLOAD_KINDS),
+    "secret-inline-value": ("a secret value committed to Git (cite the path, never the value)", None),
+    "secret-tier-too-high": ("an ExternalSecret pulls a more powerful credential than the workload needs", None),
+    "secret-shared-across-roles": ("one credential used by several roles/workloads", None),
+    "ingress-public-no-auth": ("reachable from outside the LAN without auth", None),
+    "ingress-no-tls": ("exposed without TLS", None),
+    "ingress-unexpected-exposure": ("exposed further than its purpose needs", None),
+    "service-lan-exposure": ("a LoadBalancer/NodePort Service exposing something to the LAN that need not be",
+                             ("Service", "HelmRelease")),
+}
+CLUSTER_SCOPED_KINDS = ("ClusterRole", "ClusterRoleBinding", "Namespace", "ClusterSecretStore",
+                        "ClusterExternalSecret", "ClusterIssuer", "PersistentVolume", "StorageClass",
+                        "CustomResourceDefinition", "PriorityClass", "IngressClass", "Node",
+                        "ValidatingWebhookConfiguration", "MutatingWebhookConfiguration")
+NAMESPACED_KINDS = ("Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "Pod", "Service",
+                    "Ingress", "IngressRoute", "Middleware", "NetworkPolicy", "Role", "RoleBinding",
+                    "ServiceAccount", "Secret", "ConfigMap", "ExternalSecret", "SecretStore", "HelmRelease",
+                    "Kustomization", "GitRepository", "HelmRepository", "OCIRepository", "PersistentVolumeClaim",
+                    "ResourceQuota", "LimitRange", "PodDisruptionBudget", "Certificate")
+_KIND_SPELLING = {k.lower(): k for k in CLUSTER_SCOPED_KINDS + NAMESPACED_KINDS}
+# Evidence must point at something checkable: a file path WITH a line number, or a live tool result.
+_FILE_LINE_RE = re.compile(
+    r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.(?:ya?ml|md|json|js|py|sh|conf|toml|txt)"
+    r"(?::\s*L?\d+|#L\d+|,?\s*\(?\s*(?:lines?|L|l\.)\s*\d+)", re.I)
+# A title that labels itself inference is not a finding (it belongs in the summary as an open question).
+_INFERENCE_RE = re.compile(r"\b(inference|inferred|speculative|speculation|unverified|hypothetical)\b", re.I)
+_NUM = r"(\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_SEV_COUNT_RE = re.compile(_NUM + r"\s+(critical|high|medium|low|info(?:rmational)?)\b", re.I)
+_FINDING_COUNT_RE = re.compile(_NUM + r"\s+(?:[a-z-]+\s+)?(?:findings?|issues?|problems?)\b", re.I)
+
+
+def _n(word):
+    return int(word) if word.isdigit() else _WORDS[word.lower()]
+
+
+def summary_claims(summary):
+    """What a summary says about findings: ({severity: count}, largest 'N findings' count). Zeros are no claim."""
+    sev = {}
+    for m in re.finditer(r"\b" + _SEV_COUNT_RE.pattern, summary or "", re.I):
+        n, s = _n(m.group(1)), m.group(2).lower()
+        s = "info" if s.startswith("info") else s
+        if n:
+            sev[s] = sev.get(s, 0) + n
+    total = max([_n(m.group(1)) for m in re.finditer(r"\b" + _FINDING_COUNT_RE.pattern, summary or "", re.I)]
+                or [0])
+    return sev, total
+
+
+def plan_semantic_problems(o, tool_names=()):
+    """Problems with one shape-valid plan that make it unfit to file: an unknown rule, a resource whose Kind
+    the rule does not allow or whose scope is wrong, evidence that cites neither a file:line nor a live tool
+    result, or a title that calls itself inference."""
+    problems = []
+    rule, resource = o["fingerprint"]["rule"], o["fingerprint"]["resource"]
+    ns, kind, _ = resource.split("/", 2)
+    if rule not in PLAN_RULES:
+        problems.append(f"fingerprint.rule {rule!r} is not in the rule vocabulary (see the submit_result schema); "
+                        "if no rule fits, it is not a finding for this agent")
+    canon = _KIND_SPELLING.get(kind.lower())
+    if canon and canon != kind:
+        problems.append(f"fingerprint.resource Kind must be spelled {canon!r}")
+    kind = canon or kind
+    if kind in CLUSTER_SCOPED_KINDS and ns != "cluster":
+        problems.append(f"fingerprint.resource: {kind} is cluster-scoped, write cluster/{kind}/<name>")
+    if kind in NAMESPACED_KINDS and ns == "cluster":
+        problems.append(f"fingerprint.resource: {kind} is namespaced, write <namespace>/{kind}/<name>")
+    allowed = (PLAN_RULES.get(rule) or (None, None))[1]
+    if allowed and kind not in allowed:
+        problems.append(f"fingerprint.rule {rule} applies to {'/'.join(allowed)}, not {kind}: name the object "
+                        "the fix changes, or pick the rule that matches it")
+    ev = o["plan"]["evidence"]
+    if not (_FILE_LINE_RE.search(ev) or any(t and t in ev for t in tool_names)):
+        problems.append("plan.evidence must cite a file path with a line number (path:line) or the live tool "
+                        "result that shows it (tool name + field); inference alone belongs in the summary as "
+                        "an open question, not in a plan")
+    if _INFERENCE_RE.search(o["title"]):
+        problems.append("title says the finding is inference: a plan needs concrete evidence; drop it and "
+                        "ask the open question in the summary instead")
+    return problems
+
+
+def _plans_only(allowed_kinds):
+    return set(allowed_kinds) == {"plan"}
+
+
+def review_submission(args, allowed_kinds, tool_names=()):
+    """Discipline problems with a shape-valid submission from a plan agent ([] = fine). These get ONE
+    corrective re-prompt; enforce_discipline() then settles whatever is still wrong, deterministically."""
+    if "plan" not in allowed_kinds:
+        return []
+    problems = []
+    plans = [o for o in args.get("outputs") or [] if o.get("kind") == "plan"]
+    for i, o in enumerate(args.get("outputs") or []):
+        if o.get("kind") == "plan":
+            problems.extend(f"outputs[{i}]: {p}" for p in plan_semantic_problems(o, tool_names))
+    if not _plans_only(allowed_kinds) or args.get("outcome") == "failed":
+        return problems
+    sev, total = summary_claims(args.get("summary"))
+    have = {}
+    for o in plans:
+        have[o["severity"]] = have.get(o["severity"], 0) + 1
+    if not plans and (sev or total):
+        problems.append("the summary reports findings but outputs has no plan: every finding must be a plan "
+                        "output (with evidence), and the summary may only count the plans you return")
+    elif plans and (any(have.get(s, 0) != n for s, n in sev.items()) or total > len(plans)):
+        problems.append(f"the summary's finding counts do not match the {len(plans)} plan(s) returned "
+                        f"({', '.join(f'{v} {k}' for k, v in have.items())}): every finding must be a plan")
+    if not plans and args.get("outcome") == "needs_human" and "?" not in (args.get("summary") or ""):
+        problems.append("outcome needs_human with no plan must ask Matt a stated question in the summary; "
+                        "otherwise use nothing_to_do (findings go in plans, never only in the summary)")
+    return problems
+
+
+def enforce_discipline(args, allowed_kinds, tool_names=()):
+    """Deterministic settlement after the one corrective re-prompt: drop plans that are still unfit to file,
+    derive the outcome from the plans that remain, and say in the summary what was dropped or inconsistent.
+    Returns (args, notes)."""
+    if "plan" not in allowed_kinds:
+        return args, []
+    notes, kept, dropped = [], [], []
+    for o in args.get("outputs") or []:
+        if o.get("kind") == "plan" and plan_semantic_problems(o, tool_names):
+            dropped.append(f"{o['fingerprint']['rule']} {o['fingerprint']['resource']}")
+        else:
+            kept.append(o)
+    if dropped:
+        notes.append(f"dropped {len(dropped)} plan(s) that failed the plan rules (vocabulary, resource Kind, "
+                     f"evidence citation): {'; '.join(dropped)[:400]}")
+    args = dict(args, outputs=kept)
+    if not _plans_only(allowed_kinds) or args.get("outcome") == "failed":
+        return args, notes
+    sev, total = summary_claims(args.get("summary"))
+    plans = [o for o in kept if o.get("kind") == "plan"]
+    if (sev or total) and (not plans or total > len(plans) or any(
+            sum(1 for o in plans if o["severity"] == s) != n for s, n in sev.items())):
+        notes.append(f"the summary counts findings that are not among the {len(plans)} plan(s) returned; "
+                     "only the plans are filed")
+    if plans:
+        outcome = "needs_human" if any(o["severity"] != "info" for o in plans) else "done"
+    elif dropped or notes:
+        outcome = "needs_human"   # something was found but nothing will be filed: a person must look
+    elif args.get("outcome") == "needs_human" and "?" in (args.get("summary") or ""):
+        outcome = "needs_human"   # a stated question for Matt
+    else:
+        outcome = "nothing_to_do"
+    args["outcome"] = outcome
+    return args, notes
+
+
+def _rule_help():
+    return "; ".join(f"{r} = {d}" for r, (d, _) in PLAN_RULES.items())
 
 
 def _plan_item_schema():
@@ -47,11 +240,14 @@ def _plan_item_schema():
                 "description": "Stable identity of the finding: the same problem on the same resource must get "
                                "the same rule and resource on every run.",
                 "properties": {
-                    "rule": {"type": "string", "pattern": PLAN_RULE_RE.pattern,
-                             "description": "short stable lowercase slug, e.g. networkpolicy-no-default-deny"},
+                    "rule": {"type": "string", "enum": list(PLAN_RULES),
+                             "description": "exactly one of the listed rules (a closed vocabulary; if none "
+                                            "fits, it is not a finding): " + _rule_help()},
                     "resource": {"type": "string", "pattern": PLAN_RESOURCE_RE.pattern,
-                                 "description": "<namespace or 'cluster'>/<Kind>/<name>, e.g. "
-                                                "agents/NetworkPolicy/agent-base-egress"},
+                                 "description": "the ONE object the fix changes: <namespace>/<Kind>/<name>, Kind "
+                                                "in its Kubernetes spelling, e.g. agents/NetworkPolicy/agent-base-"
+                                                "egress; cluster-scoped objects and namespace-wide gaps use "
+                                                "cluster/<Kind>/<name>, e.g. cluster/Namespace/media"},
                 },
                 "required": ["rule", "resource"],
                 "additionalProperties": False,

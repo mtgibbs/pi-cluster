@@ -10,6 +10,18 @@ const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 const SECTIONS = [['found', 'What was found'], ['evidence', 'Evidence'], ['likely_cause', 'Likely cause'],
   ['proposed_change', 'Proposed change'], ['risk', 'Risk'], ['verify', 'How to verify'], ['rollback', 'How to roll back']];
 const RULE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
+// The CLOSED rule vocabulary (CONTRACT §5b; the runtime's PLAN_RULES and the manifest prompt list the same names).
+// rule + resource is the finding's identity, so a rule outside it would open a duplicate issue next run: invalid.
+// Never rename or remove a name that an issue was filed under.
+const RULES = new Set([
+  'rbac-wildcard', 'rbac-secrets-read', 'rbac-escalation-verbs', 'rbac-cluster-admin', 'rbac-broad-subject',
+  'rbac-workload-create', 'rbac-pod-exec', 'sa-token-automount', 'sa-shared', 'netpol-no-default-deny',
+  'netpol-broad-egress', 'netpol-broad-ingress', 'netpol-lan-egress', 'netpol-api-egress', 'pod-privileged',
+  'pod-host-namespace', 'pod-hostpath', 'pod-host-port', 'pod-runs-as-root', 'pod-privilege-escalation',
+  'pod-added-capabilities', 'pod-writable-rootfs', 'pod-no-seccomp', 'psa-not-enforced', 'image-mutable-tag',
+  'secret-inline-value', 'secret-tier-too-high', 'secret-shared-across-roles', 'ingress-public-no-auth',
+  'ingress-no-tls', 'ingress-unexpected-exposure', 'service-lan-exposure'
+]);
 const RESOURCE = /^[a-z0-9][a-z0-9.-]{0,62}\/[A-Z][A-Za-z0-9]{0,62}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$/;
 const SECTION_CAP = 6000, EVIDENCE_CAP = 12000;   // escaped chars; keeps a body well under GitHub's 65536
 if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(PLANS_REPO)) throw new Error('PLANS_REPO is not owner/repo');
@@ -92,7 +104,7 @@ let invalid = 0, duplicate = 0;
 for (const o of Array.isArray(outputs) ? outputs : []) {
   if (!o || o.kind !== 'plan') continue;
   const fp = o.fingerprint || {}, p = o.plan || {};
-  const ok = RULE.test(String(fp.rule || '')) && RESOURCE.test(String(fp.resource || '')) && SEVERITIES.includes(o.severity)
+  const ok = RULE.test(String(fp.rule || '')) && RULES.has(fp.rule) && RESOURCE.test(String(fp.resource || '')) && SEVERITIES.includes(o.severity)
     && typeof o.title === 'string' && o.title.trim() && SECTIONS.every(([k]) => typeof p[k] === 'string' && p[k].trim());
   if (!ok) { invalid++; continue; }
   const fingerprint = sha256hex(`${AGENT}|${fp.rule}|${fp.resource}`);

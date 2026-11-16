@@ -46,6 +46,10 @@ RULES = """Rules:
 NUDGE = ("Your reply was not delivered: plain text is discarded. Call the submit_result tool now with your "
          "outcome, summary and outputs. Do not answer in plain text again.")
 
+REVIEW_PREFIX = "ERROR: submit_result needs one correction: "
+REVIEW_SUFFIX = (". Fix these and call submit_result again. This is the only correction: after it, a plan that "
+                 "still breaks these rules is dropped, not filed, and the outcome is derived from the plans.")
+
 
 class ConfigError(Exception):
     pass
@@ -323,7 +327,10 @@ def run_loop(cfg, tools, routes):
     messages = [{"role": "system", "content": system_prompt(cfg)},
                 {"role": "user", "content": user_message(cfg["event"], cfg.get("repo"))}]
     state = {"model_idx": 0}
-    nudged = False
+    nudged = reviewed = False
+    # A plan's evidence may cite a live tool result by name (bare or as offered to the model).
+    evidence_tools = sorted({t for c in cfg["connectors"] for t in c["tools"]}
+                            | {f"{c['name']}__{t}" for c in cfg["connectors"] for t in c["tools"]})
     for step in range(1, cfg["max_steps"] + 1):
         if cfg["deadline"] is not None and time.monotonic() >= cfg["deadline"]:
             return R.failed(f"stopped before the Job deadline after {step - 1} step(s) without submit_result")
@@ -370,9 +377,21 @@ def run_loop(cfg, tools, routes):
             if name == "submit_result":
                 problems = R.validate_submission(args, cfg["outputs"])
                 if not problems:
-                    log("submit_result", step=step, outcome=args.get("outcome"),
-                        outputs=len(args.get("outputs") or []), arg_bytes=raw_size)
-                    return args
+                    review = R.review_submission(args, cfg["outputs"], evidence_tools)
+                    if review and not reviewed:
+                        # Plan discipline (CONTRACT §5b): ONE corrective re-prompt, then settle deterministically.
+                        reviewed = True
+                        log("submit_reviewed", step=step, problems=len(review))
+                        messages.append(tool_reply(tc_id, REVIEW_PREFIX + "; ".join(review) + REVIEW_SUFFIX))
+                        continue
+                    settled, notes = R.enforce_discipline(args, cfg["outputs"], evidence_tools)
+                    if notes:
+                        settled["summary"] = f"{settled.get('summary')} [agent-runtime: {'; '.join(notes)}]"
+                    log("submit_result", step=step, outcome=settled.get("outcome"),
+                        submitted_outcome=args.get("outcome"), outputs=len(settled.get("outputs") or []),
+                        dropped=len(args.get("outputs") or []) - len(settled.get("outputs") or []),
+                        review_problems=len(review), arg_bytes=raw_size)
+                    return settled
                 log("submit_rejected", step=step, problems=len(problems))
                 messages.append(tool_reply(tc_id, "ERROR: submit_result rejected: " + "; ".join(problems)
                                            + ". Fix these and call submit_result again."))
