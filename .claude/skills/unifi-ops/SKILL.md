@@ -98,7 +98,8 @@ Enumerate every resolver path and confirm each is exempt or routed through an al
 4. **Apps with hardcoded DNS** (some IoT/NAS hardcode `8.8.8.8`).
 
 > **⚠ STALE as of 2026-11-19. Verify live before acting.** A read-only inventory found the site
-> **migrated to the zone-based firewall**. `list_firewall_rule` returns `[]`, the lockdown now lives in
+> **migrated to the zone-based firewall** (Network 11.0.99; migration ~2026-11-15 01:00 UTC).
+> Zone policies are at `GET /proxy/network/v2/api/site/default/firewall-policies` (X-API-KEY). `list_firewall_rule` returns `[]`, the lockdown now lives in
 > 20 `firewall_zone_policy` objects (each rule ×4 across dst zones Internal/External/Hotspot/Vpn), and
 > **every ID below changed to a UUID** (e.g. `fw-dns-infra` = `3deaee48-af4b-4a49-9ea8-6ff4c086f142`).
 > The table and the break-glass `curl` IDs below no longer match. Use `list_firewall_zone_policy` /

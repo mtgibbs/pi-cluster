@@ -2,7 +2,7 @@
 
 > **REASONS Canvas** (see `mtgibbs/jig:specs/TEMPLATE.md`). Constraints-before-work order.
 
-- **Status:** DRAFT 2026-11-19. Phase 0 is a go/no-go probe. Nothing after it starts until Phase 0 passes.
+- **Status:** **Phase 0 GO (2026-11-19).** Network 11.0.99 + provider 0.65.0 + OpenTofu 1.13.9: all 24 objects import by UUID, and the round trip is clean (results in §9a). Phase 1 is next.
 - **Owner:** Matt
 - **Constitution:** `specs/constitution.md` (+ `/CLAUDE.md`)
 - **Origin:** `docs/research/spacelift-eval.md` (PR #277). That eval found Spacelift's free tier can't reach the LAN. Its recommended pilot was "UniFi under OpenTofu, executed in-lab".
@@ -139,6 +139,17 @@ This is deliberately two PRs. The first reviews *intent*, the second approves th
 2. Cross-check against provider issues #715 (import-by-UUID fails on Network 11), #716 (zone/NAT duplication after upgrade) and #717/#718. If #715 bites, try `<site>:<id>` and the `name=` form. Names are ×4 duplicates, so `name=` is ambiguous for policies. If import can't address UUIDs, the result is **NO-GO**: file or track upstream and stop. Never fall back to create-then-delete.
 3. Write `infra/unifi/` minimally (provider + the 4 groups) and run `tofu plan` with `import {}` blocks. A plan with imports is **read-only**. Expected: `4 to import, 0 add/change/destroy`. Then extend it to one policy intent (×4).
 4. Fix `unifi-ops/SKILL.md` now, independent of the IaC outcome: replace the legacy table with the zone-based reality and UUIDs, and rewrite the break-glass `curl` for zone policies (the endpoint differs from `/rest/firewallrule`, so confirm it during the probe).
+
+### 9a. Phase 0 results (2026-11-19, from Matt's laptop, read-only)
+
+- **Controller:** UniFi Network **11.0.99** (`atag_11.0.99_37236`), UniFi OS 6.0.17, no update pending. The legacy→zone migration happened **2026-11-15, ~00:45–01:45 UTC**, dated from the syslog format change in Loki. That is presumably the Network 11 upgrade.
+- **Import by UUID works.** `tofu plan` with 24 `import {}` blocks gave `24 to import, 0 to add, 0 to change, 0 to destroy`. Re-planning with the generated config in place gave the same result, so there are no perpetual diffs on groups or zone policies. Provider issue #715 does **not** affect these resource types.
+- **Use OpenTofu, not the laptop's Terraform 1.5.7.** Terraform 1.5.7 *crashed* (nil-pointer in `configschema.Filter`) during `-generate-config-out` on this provider's nested attributes. OpenTofu 1.13.9 (installed via Homebrew) works.
+- Probe artifacts are in `probe/`: `imports.tf` (the 24 IDs), `generated.tf` (provider-generated HCL, the Phase 1 starting point, which gets refactored into `for_each` per intent) and the lock file. They contain no secrets.
+- The v2 API endpoint `GET /proxy/network/v2/api/site/default/firewall-policies` returns 200 with the API key, so that's the break-glass base for the SKILL.md rewrite.
+- **Found while probing (not caused by the migration; follow-ups, not part of the adopt PR):**
+  - **IPv6 DoH is open.** From a non-exempt client pinned to `en0`: `https://[2606:4700:4700::1111]/dns-query` and `https://[2001:4860:4860::8888]/resolve` → **200**. The v4 DoH IPs, plain :53 (v4+v6) and :853 are all blocked. The DoH policy is `ip_version: IPV4` and `fw-doh-endpoints` holds v4 IPs only, the same as the legacy rule. **First real IaC change after adoption:** a v6 DoH group + BLOCK policy (and its ALLOW sibling), via PR.
+  - Vector labels every post-migration IPv6 drop `ip_ver="v4"` (it keys on `LANv6_IN`, which no longer exists), and DoH drops never reach Loki/ntfy because the matcher only catches "Block public DNS bypass". This is a `log-aggregation` fix, separate PR.
 
 **Phase 1 — code (harness, PR):**
 5. `infra/unifi/`: `versions.tf` (pins), `provider.tf` (`api_url`, `allow_insecure = true`, key from env `UNIFI_API_KEY`), `groups.tf`, `policies.tf` (5 intents, `for_each` over destination zones), `imports.tf`, `invariants.tf` (`check`/`precondition`).
