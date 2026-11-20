@@ -31,9 +31,6 @@ WHAT A VIOLATION LOOKS LIKE (fail)
   `scale*`, a `kubectl`/exec shell-out, a remote write — on a namespace/name/resource
   taken straight from `params`, with NO allowlist / label / scope check first. Name a
   concrete unsafe call: "delete_pod can delete ANY pod in ANY namespace from params".
-- Converting an existing READ-only tool into a mutating one (adding a `delete*`/
-  `patch*`/`create*` call into a handler that previously only listed/read) without
-  adding a gate in the same change.
 - Widening a tool's blast radius past its gate: dropping the closed enum / single-
   namespace restriction so an already-mutating tool now accepts arbitrary targets.
 
@@ -47,6 +44,13 @@ WHAT IS EXPLICITLY SAFE (pass)
   WHICH resource). But a read-only tool needs no gate regardless, so validation-only on
   a read tool is still pass.
 - Adding allowlist entries, plumbing, refactors, error-message edits, logging.
+- A new mutating tool that CALLS a gate helper (`isNodeAllowed`, `isXAllowed`, an
+  allowlist/label check) before the mutating call, even when the helper's DEFINITION is
+  not in this diff. Calling the gate is the gated shape; whether the helper exists or is
+  correct is a compile/CI concern and gate-regression's job — not yours. pass.
+- An EXISTING tool (one not added in this diff) that gains a write — a reader turning
+  into a writer. That is read-only-integrity's concern, not yours: pass it. You own
+  NEW tools and widened mutation targets only.
 
 HOW TO JUDGE — reason about the CHANGE, not the final file
 - REASON ACROSS FILES. A new tool's gate may be DEFINED in `whitelist.ts` (a new
@@ -63,15 +67,18 @@ HOW TO JUDGE — reason about the CHANGE, not the final file
   scale any deployment, exec into any namespace) with no gate, it is a violation.
 - This is NOT the gate-weakening reviewer. A diff that only edits an EXISTING gate's
   logic (and adds no new mutating tool) is out of scope for you — pass it.
+- This is NOT the read-only-integrity reviewer. A diff hunk inside an existing tool's
+  handler (no new `name:`/`handler:` tool object added) that adds a write is out of
+  scope for you — pass it, even though the write is ungated.
 
 VERDICTS
 - pass : no new ungated mutating tool (read-only tool, or a gated mutating tool, or
          out-of-scope change).
 - fail : a new (or newly-) mutating tool reaches a state-changing call on a caller-
          supplied target with NO allowlist / label / scope gate. Name the action.
-- flag : cannot prove safe — e.g. a new mutating tool references a gate helper whose
-         definition is not in this diff (can't confirm it actually restricts), or the
-         tool's safety depends on a coordinated change you cannot see. Escalate.
+- flag : cannot prove safe — e.g. a new mutating tool whose target restriction you
+         cannot locate at all, or whose safety depends on a coordinated change you
+         cannot see. (A visible CALL to a gate helper is NOT this case — that is pass.)
 
 
 {{INPUT}}

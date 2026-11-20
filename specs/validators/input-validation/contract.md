@@ -41,7 +41,9 @@ What is explicitly SAFE (NOT a violation — do not flag):
     interpolated INTO a shell string — `sh -c "... ${x} ..."`, `touch "${x}"` — IS a sink.)
   - Read-only tools that take NO parameters, or params that never reach a sink (a `boolean`
     flag, a `lines`/`count` number used only to slice/clamp output).
-  - Refactors that MOVE the same validation into a helper still called before the sink.
+  - Refactors that MOVE the same validation into a helper still called before the sink —
+    ONLY when the helper's body is also in this change set, so you can see it still
+    enforces the removed check (see RELOCATED VALIDATION below).
 
 HOW TO JUDGE — reason about the CHANGE, not the final file
 - TRACE THE TAINT. For each user param the diff introduces or touches, follow it to the sink.
@@ -64,13 +66,23 @@ HOW TO JUDGE — reason about the CHANGE, not the final file
   sink (a `namespace` of `../../etc`, a `path` with `..` or `;rm -rf`, a `domain` of
   `$(reboot)`, a `node` not in the allowlist, a `url` of `file:///etc/passwd`), it is a violation.
 
+RELOCATED VALIDATION (deleted inline check -> call to a helper)
+When the diff DELETES an inline check (a `DNS_1123_RE.test`, a regex, an enum check) and
+replaces it with a call to a helper, the helper is now the only thing between the param and
+the sink. If that helper's BODY is not in the change set, you cannot confirm it enforces what
+was deleted — a helper named `validate…` could be a no-op or weaker. That is `flag`, even if
+the helper's name appears in the SAFE list above (the list trusts helpers you can see called
+on a NEW path; it does not vouch for an unseen body replacing deleted code). If the helper's
+body IS in the change set and enforces the same check, it is `pass`.
+
 VERDICTS
 - pass : the user param is validated before the sink, or never reaches a sink, or the value is
          not user-controlled.
 - fail : a user param clearly reaches a sink with NO validation (you can name the unsafe input),
          or an existing check is removed/loosened so it now does.
-- flag : cannot prove safe — e.g. a new sink whose validation may live in code not shown, or a
-         regex change whose safety you cannot confirm from this diff alone. Escalate.
+- flag : cannot prove safe — e.g. a new sink whose validation may live in code not shown, an
+         inline check replaced by a helper whose body is not shown, or a regex change whose
+         safety you cannot confirm from this diff alone. Escalate.
 
 
 {{INPUT}}
