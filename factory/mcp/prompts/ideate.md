@@ -14,7 +14,7 @@ Spec name (fixed, do not change it): `{{ inputs.spec }}`
    - `specs/{{ inputs.spec }}/tasks.txt`
    - `specs/{{ inputs.spec }}/verify.sh`
    A deterministic check rejects the spec if you create or modify ANY other file.
-3. If the stages above show a failed spec check, a spec-judge objection, or human notes (`human.gate.text`), revise the three files to address exactly that.
+3. **Revision rounds.** Before anything else, check for `/tmp/factory/spec-feedback.md` and `/tmp/factory/human-note.md`. If either exists you are revising, not starting over: read them, keep what was not objected to, and change the three files so that EVERY listed objection is answered. A human note outranks a judge objection. An independent judge re-reads the spec after you; it tries to build a wrong implementation that still passes `verify.sh`, and raises again if it can. In your reply, list each objection and the exact change that answers it.
 
 ## spec.md — the REASONS shape (keep it short; one screen per section at most)
 
@@ -50,5 +50,16 @@ The factory runs it as `STRICT=1 bash specs/{{ inputs.spec }}/verify.sh` from th
 - It MUST FAIL on today's tree. The factory runs it before any implementation and rejects the spec if it passes. A check that passes before the change exists proves nothing.
 - Never `exit 0` unconditionally, never `|| true` on an assertion, no "pending" escapes.
 - Name the new test file(s) and test titles in spec.md §11 so the implementer creates exactly those.
+
+### Pin the assertions, not just the test titles
+
+The implementer writes the tests. A spec that fixes only test *titles* lets a wrong implementation ship with matching wrong tests and pass every check. So for each named test, spec.md §11 must state the fixture values going in and the exact values expected out, and `verify.sh` must grep the test file for those expected literals as well as the title. Lessons from earlier runs (each one was a real hole a judge found):
+
+- **Aggregation:** give each source DIFFERENT fixture numbers and state the expected total. Identical fixtures cannot tell "summed" from "first one wins".
+- **Counts:** assert an exact count per item (`=== 1` for each host), never "at most N". An upper bound passes at zero, which is usually the bug.
+- **The bug being fixed:** include a test that fails if the original bug comes back (for example: the second host is fetched without its own login).
+- **Handlers:** if a tool handler's output changes, a test must call that handler and assert on its output. Grepping source for a word is not a behaviour check.
+- **Negative shape rules** ("field X is absent when …") need their own assertion.
+- **Tool summaries:** if `CLAUDE.md` requires a summary or verdict line, the spec says what it must read in each state (healthy, partial, down).
 
 When you are done, reply with a short summary of the spec (outcomes, files to change, what verify.sh checks).

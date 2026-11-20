@@ -22,6 +22,8 @@ Usage (inside the sandbox, cwd = repo root):
   steps.py setup <spec-name> [issue]      (no stdin)
   steps.py spec_check                     stdin: fx
   steps.py capture spec|conf              stdin: response.<judge>
+  steps.py raised spec|conf               stdin: fx   (counts the raise, writes feedback, picks revise|hold)
+  steps.py note spec|build                stdin: human.gate.text (a human's typed note)
   steps.py merge <key> <value>            stdin: fx
   steps.py lock                           stdin: fx
   steps.py gates                          stdin: fx
@@ -39,6 +41,9 @@ REPORT_MARKER = "<!-- review-hub:report -->"
 VERDICT_MARKER = "<!-- factory:verdict -->"
 MAX_GATE_FIX_ROUNDS = 3                  # design table row 5
 MAX_CI_FIX_ROUNDS = 3                    # design table row 10
+MAX_SPEC_CHECK_RETRIES = 2               # failed deterministic spec checks sent back to ideate
+MAX_REVISE_ROUNDS = 2                    # judge raises sent back to the writer/builder before a human sees it
+FEEDBACK = {"spec": "spec-feedback.md", "conf": "build-feedback.md"}
 CHECK_WAIT_SECONDS = int(os.environ.get("FACTORY_CHECK_WAIT", "2700"))  # 45 min
 UNANIMOUS = 5                            # rule 5: would-merge needs 5/5 clear per validator
 
@@ -232,16 +237,21 @@ def st_spec_check(fx):
     result = "pass" if not problems else "fail"
     fx["spec_check"] = {"result": result, "problems": problems, "red_before_green": red}
     if problems:
-        log("SPEC CHECK FAILED:\n- " + "\n- ".join(problems))
+        fx["spec_check_fails"] = fx.get("spec_check_fails", 0) + 1
+        log(f"SPEC CHECK FAILED (failure {fx['spec_check_fails']}; {MAX_SPEC_CHECK_RETRIES} retries allowed):\n- " + "\n- ".join(problems))
     else:
         sid = spec_id(fx)
+        fx["spec_id_checked"] = sid
         os.makedirs(W, exist_ok=True)
+        packet = f"SPEC-ID: {sid}\n\n" + "".join(f"===== {f} =====\n{open(f).read()}\n" for f in spec_files(fx))
         with open(f"{W}/spec-review.md", "w") as out:
-            out.write(f"SPEC-ID: {sid}\n\n")
-            for f in spec_files(fx):
-                out.write(f"===== {f} =====\n{open(f).read()}\n")
+            out.write(packet)
         log(f"spec check passed; review packet {W}/spec-review.md (SPEC-ID {sid})")
-    emit(fx, fx_spec_check=result)
+        # The packet is echoed so factory/harvest.py can pair each judge verdict with exactly
+        # what the judge was shown, from the run log alone.
+        log(f"-----BEGIN SPEC PACKET {sid}-----\n{packet}\n-----END SPEC PACKET {sid}-----")
+    write_feedback(fx, "spec")
+    emit(fx, fx_spec_check=result, fx_spec_check_fails=fx.get("spec_check_fails", 0))
 
 
 def parse_verdict(text):
@@ -278,11 +288,71 @@ def st_capture(kind):
     log(f"{kind} judge verdict: {verdict}" + (f" ({why})" if why else ""))
     for r in reasons:
         log(" -", r)
+    with open(f"{W}/{kind}-verdict.json", "w") as fh:   # read only by `raised`, the very next stage
+        json.dump({"verdict": verdict, "id": obj["id"] if obj else "", "reasons": reasons}, fh)
     emit(None, **{f"fx_{kind}_verdict": verdict, f"fx_{kind}_reasons": json.dumps(reasons or ([why] if why else []))})
+
+
+def write_feedback(fx, kind):
+    """Render what the writer (spec) or builder (conf) must fix into a file its prompt tells it
+    to read. Rebuilt from fx every time, so it only ever holds what deterministic stages
+    recorded. It is advice to the author, never a verdict: nothing routes on it."""
+    out = [f"# Feedback to address ({kind}) — fix every item, then stop\n"]
+    sc = fx.get("spec_check") or {}
+    if kind == "spec" and sc.get("result") == "fail":
+        out.append("## The deterministic spec check FAILED\n" + "".join(f"- {p}\n" for p in sc.get("problems", [])))
+    rounds = [e for e in fx.get("judge_log", []) if e["judge"] == kind and e["verdict"] == "raise"]
+    for e in reversed(rounds):
+        latest = " (LATEST — these are what the judge will re-check)" if e is rounds[-1] else " (earlier round, for context)"
+        out.append(f"## {kind} judge objections, round {e['round']}{latest}\n" + "".join(f"- {r}\n" for r in e["reasons"]))
+    with open(f"{W}/{FEEDBACK[kind]}", "w") as fh:
+        fh.write("\n".join(out))
+
+
+def st_raised(fx, kind):
+    """A judge raised. Count it in fx (the engine's own visit counter is not usable in edge
+    conditions), log the objections, and choose: back to the author, or hold for a human.
+    Runs straight after `capture` with no agent stage in between, so the reasons file it
+    reads is the one capture just wrote."""
+    reasons, pid = [], ""
+    try:
+        v = json.load(open(f"{W}/{kind}-verdict.json"))
+        if v.get("verdict") == "raise":
+            reasons, pid = [str(r) for r in v.get("reasons", [])], str(v.get("id", ""))
+    except (OSError, ValueError):
+        pass
+    n = fx.get(f"{kind}_raises", 0) + 1
+    fx[f"{kind}_raises"] = n
+    fx[f"{kind}_judge"] = "raise"
+    fx.setdefault("judge_log", []).append({"judge": kind, "round": n, "verdict": "raise", "packet": pid, "reasons": reasons})
+    nxt = "revise" if n <= MAX_REVISE_ROUNDS and reasons else "hold"
+    write_feedback(fx, kind)
+    log(f"{kind} judge raised (raise {n}; {MAX_REVISE_ROUNDS} revise rounds allowed) -> {nxt}")
+    for r in reasons:
+        log(" -", r)
+    emit(fx, **{f"fx_{kind}_next": nxt, f"fx_{kind}_raises": n})
+
+
+def st_note(where):
+    """A human typed a note at a gate. It arrives on stdin (never through a shell), is saved
+    for the next agent stage to read, and is echoed so the run log keeps it."""
+    text = sys.stdin.read().strip()
+    if not text:
+        log("empty human note — nothing to revise against")
+        sys.exit(1)
+    with open(f"{W}/human-note.md", "a") as fh:
+        fh.write(f"## Human note at the {where} gate ({time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})\n{text}\n\n")
+    log(f"human note ({where}):\n{text}")
+    emit(None, **{f"fx_human_note_{where}": text[:2000]})
 
 
 def st_merge(fx, key, value):
     fx[key] = value
+    if key.endswith("_judge"):            # keep passes and no-verdicts in the same log as raises
+        kind = key[: -len("_judge")]
+        pid = fx.get("spec_id_checked", "") if kind == "spec" else fx.get("diff_id", "")
+        fx.setdefault("judge_log", []).append({"judge": kind, "round": fx.get(f"{kind}_raises", 0) + 1,
+                                               "verdict": value, "packet": pid, "reasons": []})
     log(f"fx.{key} = {value}")
     emit(fx)
 
@@ -296,6 +366,8 @@ def st_lock(fx):
     fx["spec_id"] = spec_id(fx)
     log(f"LOCKED {vs} as blob {blob}; spec id {fx['spec_id']}")
     log(f"spec judge: {fx.get('spec_judge')}   deterministic spec check: {fx.get('spec_check', {}).get('result')}")
+    for e in [e for e in fx.get("judge_log", []) if e["judge"] == "spec"]:
+        log(f"  spec judge round {e['round']}: {e['verdict']}" + "".join(f"\n    - {r}" for r in e["reasons"]))
     for f in spec_files(fx):
         log(f"\n===== {f} =====\n" + open(f).read())
     emit(fx)
@@ -596,6 +668,8 @@ def main():
             st_setup(*args)
         elif cmd == "capture":
             st_capture(args[0])
+        elif cmd == "note":
+            st_note(args[0])
         else:
             fx = read_stdin_json()
             if not fx.get("spec"):
@@ -605,6 +679,8 @@ def main():
                   "open_pr": st_open_pr, "wait_checks": st_wait_checks, "verdict": st_verdict}.get(cmd)
             if cmd == "merge":
                 st_merge(fx, args[0], args[1])
+            elif cmd == "raised":
+                st_raised(fx, args[0])
             elif fn:
                 fn(fx)
             else:

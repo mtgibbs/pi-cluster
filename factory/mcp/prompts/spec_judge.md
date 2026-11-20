@@ -11,6 +11,10 @@ Answer these, briefly:
 2. Can `verify.sh` actually fail? For each check: does it assert on something the change creates (a named test, an export, behaviour exercised by a targeted test run)? Would an empty or plausibly wrong implementation fail at least one check? Is there any unconditional pass (`|| true`, `exit 0`, a grep for something that already exists)?
 3. Does the spec deliver the idea, stay small, and avoid needless changes to CI, `package.json`, configs, auth or `k8s/`?
 
+If `/tmp/factory/spec-feedback.md` exists, this spec was revised after an earlier objection. Judge the spec fresh, then also check each earlier objection: is it actually closed, or only reworded? An objection that is still open is a raise.
+
+Keep your investigation short: at most one small throwaway counter-example outside the repository (under `/tmp`, deleted after). Put the problems in `reasons` as specific, fixable statements — the spec writer gets them verbatim.
+
 Raise if any answer is no. Otherwise pass.
 
 End your reply with EXACTLY one line of JSON and nothing after it (no code fence):
