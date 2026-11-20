@@ -34,19 +34,20 @@ records "would merge" or "would hold", and a human still merges.
 
 Files: `mcp/workflow.fabro` (the graph), `mcp/workflow.toml` (run config), `mcp/prompts/`
 (the four agent prompts), `steps.py` (every deterministic stage), `classify.sh` (risk
-class), `submit.sh` (start a run), `ledger.mjs` (evidence table), `test/classify.test.sh`.
+class), `submit.sh` (start a run), `ledger.mjs` (evidence table), `harvest.py` (judge verdicts →
+candidate eval cases), `evals/` (those cases), `test/classify.test.sh`.
 
 | # | Stage (node) | Kind | What it does |
 |---|-------|------|--------------|
 | 0 | setup | command | Unpacks the factory code (below), `npm ci`, records the base commit and the PR branch `factory/<spec>-<run>`. Refuses a spec name that already exists on main. |
 | 1 | ideate | agent | Reads `CLAUDE.md` and the code, drafts `specs/<name>/{spec.md,tasks.txt,verify.sh}` in a condensed REASONS shape (see deviations). |
-| 1b | spec_check | command | Deterministic: the three files exist, ideate wrote nothing outside `specs/<name>/`, and `STRICT=1 verify.sh` **fails on the unimplemented tree** (red-before-green: a gate that passes before the change exists cannot fail). Failure → back to ideate, at most 2 revisions, then abort. |
-| 2 | spec_judge → spec_capture | judge + command | Judge reads the spec packet from a file, answers with a last-line JSON verdict that must echo the packet's SPEC-ID. `spec_capture` parses Fabro's recorded reply. `raise` → ideate (≤2), then a hold marker; anything unparseable / absent / wrong id → hold marker. |
+| 1b | spec_check | command | Deterministic: the three files exist, ideate wrote nothing outside `specs/<name>/`, and `STRICT=1 verify.sh` **fails on the unimplemented tree** (red-before-green: a gate that passes before the change exists cannot fail). Failure → back to ideate with the problems in `/tmp/factory/spec-feedback.md`, at most 2 retries (counted in `fx`), then abort. Echoes the review packet into the run log for `harvest.py`. |
+| 2 | spec_judge → spec_capture | judge + command | Judge reads the spec packet from a file, answers with a last-line JSON verdict that must echo the packet's SPEC-ID. `spec_capture` parses Fabro's recorded reply. `raise` → `spec_raised`, which counts the raise in `fx`, writes the objections to `/tmp/factory/spec-feedback.md` and sends the spec back to ideate (≤2 rounds); the third raise goes to the human gate marked `raise`. Anything unparseable / absent / wrong id → hold marker, no revise. |
 | 2b | lock | command | Writes the approved `verify.sh` into git's object store and records its blob id; prints the spec for the human. |
-| 3 | approve_spec | **human** | `[A]` approve / `[R]` revise (free-text notes go to ideate) / `[X]` reject. |
+| 3 | approve_spec | **human** | `[A]` approve / `[X]` reject / **revise = type a note** instead of picking an option. Fabro does not render the freeform edge as a button; a typed answer follows it to `spec_note`, which saves the note for ideate, and the spec is checked and judged again. `lock` prints every judge round first. |
 | 4 | implement | agent | Works `tasks.txt`; told it may not touch `specs/<name>/`, deps, CI or config; runs the gates itself. Also the target of every fix round. |
 | 5 | gates | command | Tamper check, then `npm ci`, `lint`, `typecheck`, `test`, `build`, `STRICT=1 verify.sh`. Red → implement while failures ≤ 3; then the `gates_escalate` human gate (one more round / open PR as hold / abandon). Green → writes the review diff to a file with a DIFF-ID and records the gated tree hash. |
-| 6 | conf_judge → conf_capture | judge + command | Same contract as the spec judge, on `/tmp/factory/review.diff`. `raise` → implement (≤2), then hold marker; no usable verdict → hold marker. |
+| 6 | conf_judge → conf_capture | judge + command | Same contract as the spec judge, on `/tmp/factory/review.diff`. `raise` → `conf_raised` (same counter and feedback file, `build-feedback.md`) → implement (≤2), then hold marker; no usable verdict → hold marker. |
 | 7 | classify | command | `classify.sh` on the full-context diff, with `--tampered` when `verify.sh` differs from the locked blob; also holds if the tree changed after the gates passed (a judge or later stage edited files). |
 | 8 | open_pr | command | Pushes `factory/<spec>-<run>`, opens or refreshes the PR, creates/applies labels `factory` and `factory:class-<x>`. Refuses to push to anything not under `factory/`. |
 | 9 | wait_checks | command | Polls the head commit's check runs until build, lint, test, typecheck and review-hub have all completed (45 min cap), then reads each validator's check and the review-hub report card. Red → prints the failing checks (with Actions log tails and review-hub findings) for the builder. |
@@ -144,6 +145,34 @@ back to shadow.
 **Agreement** means: factory said "would merge" and the human merged it unchanged, or
 factory said "hold" and the human did not merge it as-is.
 
+### Learning from gate results
+
+Every gate result is evidence about some part of the factory. The loops below say where
+each kind goes. Three rules hold for all of them: a model's output can only **raise**
+(never clear a hold), **nothing that is judged writes what judges it** (cases, prompts and
+contracts change only through a pull request a person reviews), and nothing merges on its
+own in Stage 0.
+
+| Signal | Feeds | How | State |
+|---|---|---|---|
+| Spec judge raises | the spec writer, same run | `spec_raised` → feedback file → ideate, 2 rounds | **built** |
+| Human types a note at a gate | the spec writer / builder, same run | `spec_note` / `build_note` | **built** |
+| Conformance judge raises | the builder, same run | `conf_raised` → feedback file → implement, 2 rounds | **built**, not yet exercised |
+| Every spec-judge verdict + what the human did next | the spec judge's eval set | `harvest.py <run>` writes `evals/spec-judge/cases/<run>-r<n>.json` (packet, verdict, reasons, human action, `label: null`); a person sets the label in the PR | **built** (collection). Scoring a judge against the set is not built |
+| A lesson that recurs across cases | the ideate prompt | A person folds it into `prompts/ideate.md` ("Pin the assertions…" came from run 2's objections) | **manual**. Mining recurring objections and proposing the prompt PR is deferred until there are enough cases to tell a pattern from one run |
+| "Judge is wrong" at `review_escalate` | that validator's `eval/expected.yaml` in review-hub | not built; the override is logged on the PR today | deferred (review-hub change) |
+| Human merges/closes vs. the factory verdict | the earn-out ladder | `ledger.mjs` | built, no data yet |
+
+What the first cases already show: runs 1 and 2 drafted near-identical specs for issue #45
+with the same hole (test titles pinned, assertions not; the builder writes the tests). The
+same judge, same model, passed run 1 and raised run 2. **One spec-judge vote is a coin
+with a bias, not a gate** — it needs several votes or a second model before its `pass`
+means anything, which is the same conclusion review-hub reached for its validators.
+
+The structural fix the judge's objection points at, not built: have the spec ship the test
+file itself, frozen with `verify.sh` at approval, so the builder writes only `src/`. Then
+"the implementation authors its own tests" stops being possible instead of being judged.
+
 ### Preconditions for any promotion (not yet met)
 
 - **A judge on a different model than the builder.** Today both are `hot-coder`;
@@ -162,16 +191,26 @@ factory said "hold" and the human did not merge it as-is.
 export FABRO_URL=https://fabro.lab.mtgibbs.dev FABRO_DEV_TOKEN=...   # never commit the token
 factory/submit.sh --spec pihole-secondary-stats --issue 45 "<idea text>"   # prints the run URL
 node factory/ledger.mjs                                               # evidence table from GitHub
+factory/harvest.py <run-id>                                           # judge verdicts → evals/spec-judge/cases/ (then PR)
 bash factory/test/classify.test.sh                                    # classifier unit tests
 ```
 
 The run stops at `approve_spec`; answer it in the Fabro UI or with
 `POST /api/v1/runs/<id>/questions/<qid>/answer {"kind":"selected","option_key":"A"}` (URL-encode
-the `#` in the qid). `submit.sh` always sends `auto_approve: false`.
+the `#` in the qid). To revise instead, type a note in the UI or send `{"kind":"text","text":"…"}`.
+`submit.sh` always sends `auto_approve: false`.
 
 ## Known limits of the engine
 
 - Fabro has no GitHub triggers in token mode: runs start from the Fabro UI or API.
+- **`context.internal.node_visit_count` does not work in edge conditions.** The first build
+  bounded its loops with `... && context.internal.node_visit_count < 3`; on the live server
+  that was false on the first visit, so run 2's raised spec skipped the revise loop without
+  any error. Loop bounds are now counters in `fx`, compared numerically (`fx_gate_fails <= 3`
+  style conditions were verified with a no-model probe run).
+- **A human gate's freeform edge is not shown as an option.** The gate lists only the
+  labelled choices plus "allow freeform"; typed text takes the `freeform=true` edge and
+  lands in `human.gate.text`, readable by the next stage via `stdin_source`.
 - No spend cap; visit and retry limits are the only bound.
 - Sandbox CPU/memory limits are not enforced (rootless Docker without cgroups).
 - The sandbox holds an all-repo token until a GitHub App replaces it.
