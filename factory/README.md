@@ -163,6 +163,18 @@ own in Stage 0.
 | "Judge is wrong" at `review_escalate` | that validator's `eval/expected.yaml` in review-hub | not built; the override is logged on the PR today | deferred (review-hub change) |
 | Human merges/closes vs. the factory verdict | the earn-out ladder | `ledger.mjs` | built, no data yet |
 
+The revise loop has a positive control (`test/loop-control.py`): the real graph with ideate
+and the spec judge swapped for fixed stand-ins, the judge always raising. Expected, and
+observed on 2026-11-20 (run `01M7X7SB1VMEYNKQCF4DWKKM90`): raise → ideate twice, third raise →
+human gate, typed note → `spec_note` → ideate with both the objections and the note in its
+input, fourth raise → straight to the gate. Re-run it after any change to the spec half of
+the graph.
+
+A judge that runs out of time is "no verdict", which holds. Run 3's spec judge spent 35
+minutes building a counter-example and timed out; the prompt now limits it to reading.
+That trades away the kind of evidence run 2's judge produced (a wrong implementation that
+really passed 12/12) for a judge that finishes.
+
 What the first cases already show: runs 1 and 2 drafted near-identical specs for issue #45
 with the same hole (test titles pinned, assertions not; the builder writes the tests). The
 same judge, same model, passed run 1 and raised run 2. **One spec-judge vote is a coin
@@ -193,6 +205,7 @@ factory/submit.sh --spec pihole-secondary-stats --issue 45 "<idea text>"   # pri
 node factory/ledger.mjs                                               # evidence table from GitHub
 factory/harvest.py <run-id>                                           # judge verdicts → evals/spec-judge/cases/ (then PR)
 bash factory/test/classify.test.sh                                    # classifier unit tests
+python3 factory/test/loop-control.py /tmp/loopctl && FACTORY_WORKFLOW_DIR=/tmp/loopctl factory/submit.sh --spec loop-control "CONTROL"   # no-model positive control for the revise loop; never Approve its gate
 ```
 
 The run stops at `approve_spec`; answer it in the Fabro UI or with
