@@ -36,7 +36,7 @@ Destination base: `/share/cluster/backups/`
 - **Schedule**: Sundays 2:30 AM
 - **Node**: `pi5-worker-2`
 - **Scope**: Local-path PVCs on worker 2
-- **PVCs**: `media_sabnzbd-config`, `media_bazarr-config`, `n8n_n8n-data`
+- **PVCs**: `media_sabnzbd-config`, `media_bazarr-config`, `n8n_n8n-data`, `matrix_synapse-data`, `ntfy_ntfy-data`, `fabro_storage-fabro-0` (Fabro's SQLite DB — its vault is plaintext in there, so this backup holds a GitHub PAT + LiteLLM key)
 - **Destination**: `/share/cluster/backups/{date}/worker2/{pvc_name}/`
 
 ### 3. `postgres-backup` — Immich Database

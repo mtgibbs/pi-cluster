@@ -266,6 +266,18 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  # /health, not /: it is Fabro's unauthenticated health endpoint (200, {"status":"ok"}). The
+  # API under /api/v1 answers 401 without the dev token.
+  fabro.json: |
+    {
+      "notification_name_list": ["discord"],
+      "type": "http",
+      "name": "Fabro",
+      "url": "https://fabro.lab.mtgibbs.dev/health",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   romm.json: |
     {
       "notification_name_list": ["discord"],

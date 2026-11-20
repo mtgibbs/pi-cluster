@@ -133,6 +133,11 @@ data:
             href: https://kelos.lab.mtgibbs.dev
             description: Coding-agent tasks as Kubernetes resources — console
             siteMonitor: https://kelos.lab.mtgibbs.dev/healthz
+        - Fabro:
+            icon: mdi-sitemap
+            href: https://fabro.lab.mtgibbs.dev
+            description: Coding-agent workflows as graphs — runs in Docker sandboxes
+            siteMonitor: https://fabro.lab.mtgibbs.dev/health
         - Beelink GTR9 Pro:
             icon: mdi-chip
             href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load

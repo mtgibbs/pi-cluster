@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Stage 2 of 2 (Flux Kustomization `fabro`, dependsOn `fabro-secrets`): the workload. The
+# namespace and the ExternalSecrets are in ../secrets. See ../README.md.
+#
+# No top-level `namespace:`; every file declares `namespace: fabro`.
+resources:
+  - configmap-dind-subid.yaml
+  - networkpolicy.yaml
+  - statefulset.yaml
+  - service.yaml
+  - ingress.yaml
+
+# The server's settings, the bootstrap script and the sandbox environment definitions, as real
+# files rather than YAML strings. The generated name carries a content hash (the default — no
+# `disableNameSuffixHash`), and kustomize rewrites the StatefulSet's volume reference to match, so
+# changing any of these files rolls the pod, and the bootstrap re-applies them on the way up.
+#
+# To add a sandbox environment: add `environment-<id>.json` here (the definition WITHOUT its id —
+# the file name is the id). bootstrap.sh picks up every file matching that pattern.
+configMapGenerator:
+  - name: fabro-config
+    namespace: fabro
+    files:
+      - settings.toml
+      - bootstrap.sh
+      - environment-gated-docker.json

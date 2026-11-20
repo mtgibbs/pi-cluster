@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_75 ExternalSecrets · 53 1Password items · 74 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_77 ExternalSecrets · 54 1Password items · 77 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -118,6 +118,8 @@ graph LR
   np8hd7e["harness-coordinator<br/>(harness)"]
   n8i3u24 --> np8hd7e
   n8ivklm(["🔑 harness-fleet"])
+  nbsjbtm["fabro-vault-seed<br/>(fabro)"]
+  n8ivklm --> nbsjbtm
   n1ykti58["harness-dispatcher<br/>(harness-fleet)"]
   n8ivklm --> n1ykti58
   n8ivklm --> nq5a56a
@@ -241,6 +243,8 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
+- **fabro** → 1 ExternalSecret(s):
+    - `fabro/fabro-server-env`
 - **ghcr-read-token** `safe` → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
     - `harness-fleet/ghcr-pull-secret`
@@ -255,7 +259,8 @@ graph LR
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
     - `harness/harness-coordinator`
-- **harness-fleet** → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **harness-fleet** → 6 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+    - `fabro/fabro-vault-seed`
     - `harness-fleet/harness-dispatcher`
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
@@ -418,6 +423,13 @@ graph LR
 - **`external-secrets/onepassword-homelab-agent-service-account`** ← `homelab-agent-eso`
   produces Secret `onepassword-homelab-agent-service-account` in `external-secrets`
     → _ClusterSecretStore onepassword-homelab-agent (onepasswordSDK auth.serviceAccountSecretRef)_ (curated: not a pod-spec ref)
+- **`fabro/fabro-server-env`** ← `fabro`
+  produces Secret `fabro-server-env` in `fabro`
+    → `fabro/fabro` (StatefulSet, env)
+    → `fabro/fabro` (StatefulSet, envFrom)
+- **`fabro/fabro-vault-seed`** ← `harness-fleet`
+  produces Secret `fabro-vault-seed` in `fabro`
+    → `fabro/fabro` (StatefulSet, volume)
 - **`family-board/family-board-feed`** ← `n8n-automation`
   produces Secret `family-board-feed` in `family-board`
     → `family-board/family-board` (Deployment, env)

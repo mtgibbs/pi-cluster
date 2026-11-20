@@ -1,0 +1,21 @@
+# Sub-id ranges for rootless dockerd inside a user-namespaced pod (`hostUsers: false`).
+#
+# The pod's user namespace maps only ids 0..65535, and uid 1000 is the daemon itself, so the
+# image's default range (100000+) does not exist there. These two ranges cover every id except 0
+# and 1000, giving the nested (sandbox) user namespace container ids 1..65534 — 65534/nobody is
+# needed by most image layers. Mounted over /etc/subuid and /etc/subgid in the dind container.
+#
+# A plain ConfigMap rather than part of the name-hashed `fabro-config`: it is mounted by subPath
+# and never changes with the application config.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fabro-dind-subid
+  namespace: fabro
+data:
+  subuid: |
+    rootless:1:999
+    rootless:1001:64535
+  subgid: |
+    rootless:1:999
+    rootless:1001:64535

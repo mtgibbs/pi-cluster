@@ -54,7 +54,15 @@ spec:
                   # ntfy_ntfy-data = ntfy's SQLite databases (auth.db = users/ACLs,
                   # cache.db = message cache), also local-path on pi5-worker-2. ntfy has
                   # no external DB, so this PVC is its entire persistent state.
-                  PVCS="media_sabnzbd-config media_bazarr-config n8n_n8n-data matrix_synapse-data ntfy_ntfy-data"
+                  # fabro_storage-fabro-0 = Fabro's /storage (the StatefulSet's volumeClaimTemplate,
+                  # hence the `storage-<pod>` name): its SQLite database — run history, sandbox
+                  # environments and its vault — plus run artifacts, local-path on pi5-worker-2.
+                  # NOTE the vault is PLAINTEXT in that database (a GitHub PAT and a LiteLLM key),
+                  # so this copy on the QNAP holds them too. It is a live rsync of an open SQLite
+                  # file, like ntfy's above: good enough to recover from, not a consistent
+                  # snapshot. A rebuild does not depend on it — the bootstrap container
+                  # re-provisions the vault and environments; only run history would be lost.
+                  PVCS="media_sabnzbd-config media_bazarr-config n8n_n8n-data matrix_synapse-data ntfy_ntfy-data fabro_storage-fabro-0"
 
                   for PVC in ${PVCS}; do
                     echo "--- Backing up: ${PVC} ---"

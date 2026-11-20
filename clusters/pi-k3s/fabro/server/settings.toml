@@ -1,0 +1,80 @@
+# Fabro server settings — mounted read-only at /etc/fabro/settings.toml (ConfigMap `fabro-config`,
+# name-hashed by kustomization.yaml, so an edit here rolls the pod).
+#
+# NOT here, because Fabro does not read them from a file: provider keys and the GitHub token (its
+# vault) and sandbox environments (its database). bootstrap.sh provisions those on every pod start.
+_version = 1
+
+[server.listen]
+type = "tcp"
+address = "0.0.0.0:32276"
+
+# The single canonical origin for the UI and API. TLS terminates at ingress-nginx (ingress.yaml);
+# the listener itself is plain HTTP inside the pod network.
+[server.web]
+enabled = true
+url = "https://fabro.lab.mtgibbs.dev"
+
+# One shared login token (FABRO_DEV_TOKEN, Secret fabro-server-env). No roles, no per-user identity.
+[server.auth]
+methods = ["dev-token"]
+
+# Everything Fabro persists is under /storage, the node-local PVC: the SQLite database (runs,
+# environments, and the PLAINTEXT vault) and run artifacts.
+[server.storage]
+root = "/storage"
+
+[server.artifacts]
+provider = "local"
+prefix = "artifacts"
+
+[server.artifacts.local]
+root = "/storage/objects"
+
+# One run at a time: the sandbox shares a Pi with other workloads, and rootless Docker cannot
+# enforce per-sandbox CPU/memory limits (no cgroup delegation) — the dind container's own limits
+# are the only bound, so concurrency is what keeps runs from starving each other.
+[server.scheduler]
+max_concurrent_runs = 1
+
+# Docker only. `local` would run agent tools directly in the Fabro server container (which holds
+# the vault); `daytona` is a cloud service.
+[server.sandbox.providers.local]
+enabled = false
+
+[server.sandbox.providers.docker]
+enabled = true
+
+[server.sandbox.providers.daytona]
+enabled = false
+
+# The Beelink's LiteLLM gateway. The key is the vault secret LITELLM_API_KEY (bootstrap.sh).
+[llm.providers.litellm]
+base_url = "https://ai.lab.mtgibbs.dev/v1"
+default_model = "hot-coder"
+enabled = true
+
+[llm.providers.litellm.metadata.agent]
+profile = "openai"
+
+[llm.providers.litellm.models."hot-coder"]
+display_name = "hot-coder (LiteLLM -> local Qwen coder)"
+api_model = "hot-coder"
+limits = { context_tokens = 131072, max_output_tokens = 32768 }
+capabilities = { text = true, tools = true }
+
+# `token`: Fabro uses the vault secret GITHUB_TOKEN (a PAT) directly — to clone, to push the run
+# branch, to open pull requests — and injects that same PAT into the sandbox as GITHUB_TOKEN. A
+# GitHub App (strategy = "app") would mint short-lived, repo-scoped tokens instead; not set up.
+[server.integrations.github]
+strategy = "token"
+
+[run.model]
+name = "hot-coder"
+provider = "litellm"
+
+# [run.run_branch] and [run.pull_request] are deliberately absent, i.e. Fabro's defaults: the run
+# branch (fabro/run/<run-id>) IS pushed to the target repository after each stage, and no pull
+# request is opened unless a workflow asks for one ([run.pull_request] enabled = true in its
+# workflow.toml). The prototype pinned push = false / PRs off as a safety net; that is not carried
+# over, so a workflow here can open a PR.

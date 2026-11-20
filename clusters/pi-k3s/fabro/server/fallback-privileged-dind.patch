@@ -1,0 +1,52 @@
+# FALLBACK — not applied. Only if the unprivileged sidecar does not work on the Pi nodes.
+# (No .yaml extension on purpose: the repo's map generators and Renovate walk every *.yaml under
+# clusters/pi-k3s as a live manifest, and this is not one. kustomize does not care about the name.)
+# See ../README.md, "If the pod does not come up on the Pi", before using it.
+#
+# What it does: stops asking the node for a user-namespaced pod, and runs the SAME rootless Docker
+# image as a `privileged` container instead. dockerd still runs as uid 1000 and sandboxes still
+# live in rootless Docker's own nested user namespace — but the dind container itself is now a
+# privileged container on the host: every capability available to it, every host device visible,
+# no seccomp/AppArmor. That is a much weaker boundary than the default shape; it is the price of
+# not depending on pod user namespaces.
+#
+# To apply: add to kustomization.yaml in this directory
+#
+#   patches:
+#     - path: fallback-privileged-dind.patch
+#
+# then merge. The StatefulSet rolls on its own. Tested on the k3d test cluster (pod Ready, a
+# sandbox ran); like the default shape, NOT tested on the Pi nodes.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fabro
+  namespace: fabro
+spec:
+  template:
+    spec:
+      # Back to the host's user namespace (the field's default).
+      hostUsers: null
+      containers:
+        - name: dind
+          securityContext:
+            privileged: true
+            # `procMount: Unmasked` is only legal with hostUsers: false, and a privileged
+            # container's /proc is unmasked anyway.
+            procMount: null
+            # Meaningless once privileged.
+            capabilities: null
+          volumeMounts:
+            # A privileged container sees the host's /dev/net/tun without the hostPath.
+            - mountPath: /dev/net/tun
+              $patch: delete
+            # Outside a pod user namespace the image's own /etc/subuid range (100000+) is valid.
+            - mountPath: /etc/subuid
+              $patch: delete
+            - mountPath: /etc/subgid
+              $patch: delete
+      volumes:
+        - name: dev-tun
+          $patch: delete
+        - name: subid
+          $patch: delete
