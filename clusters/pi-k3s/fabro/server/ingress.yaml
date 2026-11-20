@@ -1,0 +1,41 @@
+# Fabro's web UI and REST API. LAN-only, like every other *.lab.mtgibbs.dev name (Pi-hole
+# split-horizon DNS; not tunneled). Fabro serves both from one origin, which must match
+# `server.web.url` in settings.toml.
+#
+# The login is ONE shared token (`fabro/dev-token` in 1Password) with no roles: anyone who can
+# reach this host and has it can run an arbitrary workflow with the credentials in Fabro's vault.
+# See ../README.md before widening who can reach this host — no Cloudflare tunnel route.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fabro
+  namespace: fabro
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # The UI and the CLI (`fabro attach`, `fabro logs -f`) follow a run over Server-Sent Events: one
+    # response held open for the length of the run, silent while a stage is thinking or a human
+    # gate is waiting. ingress-nginx's 60s default would cut it; 1h matches a long run.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # SSE must reach the browser as it is produced, not when a buffer fills.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Registering a workflow version uploads its files in one JSON body; 1m (the default) is tight.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - fabro.lab.mtgibbs.dev
+      secretName: fabro-tls
+  rules:
+    - host: fabro.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fabro
+                port:
+                  number: 32276

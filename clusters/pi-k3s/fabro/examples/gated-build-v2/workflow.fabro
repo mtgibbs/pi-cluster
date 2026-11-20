@@ -1,0 +1,78 @@
+digraph GatedBuild {
+    graph [
+        goal="Add a function `top_words(text: str, n: int) -> list[tuple[str, int]]` to textkit/core.py returning the n most frequent whitespace-separated words, case-insensitive (lowercase output), ordered by count descending then alphabetically. Export it from textkit/__init__.py and add tests in tests/test_core.py.",
+        max_node_visits="10"
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [
+        shape=tab,
+        label="Plan",
+        prompt="Write a SHORT implementation plan (at most 12 bullet points) for this task: {{ goal }}\n\nCover: the function signature and tie-breaking rule, edge cases (empty text, n <= 0, n larger than the number of distinct words, punctuation is NOT stripped), the export in textkit/__init__.py, and the specific tests you will add (including at least one test that pins the ordering and one that pins case-insensitivity). Do not write the code."
+    ]
+
+    approve_plan [shape=hexagon, label="Approve the plan?"]
+
+    implement [
+        label="Implement",
+        prompt="Task: {{ goal }}\n\nFollow the approved plan from the earlier plan stage. The repository is your current working directory; use your file tools and shell. If the stages above show a failing `verify` run or a judge objection, fix exactly that problem (add or strengthen tests, or fix the function) instead of starting over. Run `python3 -m pytest -q` yourself before you finish. Do not commit, push, or touch anything outside the repository.",
+        max_visits="3"
+    ]
+
+    verify [
+        label="Verify",
+        script="python3 -m pytest -q 2>&1",
+        timeout="300s",
+        max_retries=0
+    ]
+
+    diff [
+        label="Collect diff",
+        script="git add -N . >/dev/null 2>&1; B=$(git rev-parse --verify -q origin/main || git rev-list --max-parents=0 HEAD | tail -1); git diff $B -- . ':(exclude)**/__pycache__/**' ':(exclude).pytest_cache/**' > /tmp/fabro-judge.diff; N=$(wc -c < /tmp/fabro-judge.diff); if [ \"$N\" -eq 0 ]; then echo DIFF_EMPTY; elif [ \"$N\" -gt 7000 ]; then echo DIFF_TOO_LARGE; else cat /tmp/fabro-judge.diff; fi",
+        timeout="60s",
+        max_retries=0
+    ]
+
+    judge [
+        shape=tab,
+        label="Judge",
+        prompt="You are a strict test reviewer. The output of the `diff` stage above is a unified diff of the whole change (if it is DIFF_EMPTY or DIFF_TOO_LARGE, or you cannot see a diff, you MUST NOT give a verdict: say so in one sentence and output no JSON at all).\n\nSingle question: Does the diff add tests that would fail if the new function `top_words` were wrong? Consider whether the tests pin (a) count-descending ordering, (b) the alphabetical tie-break, (c) lowercase/case-insensitive counting, (d) truncation to n. Tests that only check the return type, or that pass for any plausible wrong implementation, do NOT count.\n\nAnswer with one or two sentences of reasoning, then end with EXACTLY one JSON object on the last line and nothing after it:\n  {\"preferred_next_label\": \"no_raise\"}   if the tests would catch a wrong implementation\n  {\"preferred_next_label\": \"raise\"}      if they would not (weak or missing tests)"
+    ]
+
+    escalate [
+        shape=hexagon,
+        label="Automatic checks did not settle this run (fix budget of 2 rounds spent, or the judge gave no usable verdict). Inspect the stages, then choose."
+    ]
+
+    abort [
+        label="Abort run",
+        script="echo 'Run aborted: plan rejected or gates unresolved.'; exit 1",
+        max_retries=0
+    ]
+
+    start -> plan -> approve_plan
+
+    approve_plan -> implement [label="[A] Approve"]
+    approve_plan -> plan      [label="[R] Revise plan"]
+    approve_plan -> abort     [label="[X] Reject"]
+
+    implement -> verify
+
+    verify -> implement [condition="outcome=failed && context.internal.node_visit_count < 3", weight=10]
+    verify -> escalate  [weight=1]
+    verify -> diff      [condition="outcome=succeeded"]
+
+    diff -> judge
+    diff -> escalate [condition="outcome=failed"]
+
+    judge -> exit      [label="no_raise"]
+    judge -> implement [condition="outcome=succeeded && preferred_label=raise && context.internal.node_visit_count < 3", weight=10]
+    judge -> escalate  [condition="outcome=failed", weight=5]
+    judge -> escalate
+
+    escalate -> implement [label="[R] Run one more fix round"]
+    escalate -> exit      [label="[A] Accept as is"]
+    escalate -> abort     [label="[X] Abort (fail the run)"]
+}

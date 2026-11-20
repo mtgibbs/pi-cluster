@@ -1,0 +1,267 @@
+# Fabro: the API server + web UI, a rootless Docker daemon the server runs agent sandboxes in, and
+# a bootstrap container that configures the server on every start. One pod, three containers.
+#
+# The pod shape (everything under `securityContext`, the dind volumes, `hostUsers: false`) is
+# lifted from a prototype measured on a k3d test cluster — NOT on the Raspberry Pi nodes. Every
+# relaxation below is there because the pod did not work without it; ../README.md ("Review this
+# first") lists them, says what was and was not tested, and gives the fallback if the Pi kernel
+# disagrees. Do not tidy a field away without re-testing.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fabro
+  namespace: fabro
+spec:
+  serviceName: fabro
+  replicas: 1
+  # Parallel, with one replica, changes exactly one thing: a pod stuck un-Ready on a bad revision
+  # is replaced when the next revision is applied. With the default (OrderedReady) the controller
+  # waits for the broken pod to become Ready first — which it never does — and a fix merged to Git
+  # would sit there until someone deleted the pod by hand. Tested both ways on the test cluster.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: fabro
+  template:
+    metadata:
+      labels:
+        app: fabro
+    spec:
+      # pi5-worker-2, with the other agent workloads (harness fleet workers, Kelos task pods). The
+      # PVC below is node-local, so the pod could not move anyway once it has first scheduled.
+      nodeSelector:
+        harness-fleet: "true"
+      # No Kubernetes API access: no token is mounted and the NetworkPolicy blocks the API server.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The pod runs in its own user namespace: uid 0 in here is an unprivileged high uid on the
+      # node, and so is every process of every container, sandboxes included. This is what lets
+      # the dind sidecar be unprivileged, and it is REQUIRED by `procMount: Unmasked` below.
+      hostUsers: false
+      # No hostAliases (the prototype pinned ai.lab.mtgibbs.dev -> 192.168.1.70 here). In this
+      # cluster CoreDNS forwards lab.mtgibbs.dev to Pi-hole (coredns-custom), and Pi-hole answers
+      # ai.lab.mtgibbs.dev with 192.168.1.70 (pihole/pihole-custom-dns.yaml).
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # --- the Fabro server ------------------------------------------------------------------
+        - name: fabro
+          image: ghcr.io/fabro-sh/fabro:0.421.0-nightly.0@sha256:177c3b796e8628c998fc52f32773764be340855a101ca8fc07bd9d50309fcc3d
+          args: ["sh", "-c", "exec fabro server start --foreground --bind 0.0.0.0:32276 --config /etc/fabro/settings.toml"]
+          env:
+            # The sidecar's daemon, over a unix socket on a shared emptyDir. No TCP listener.
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: FABRO_NO_UPGRADE_CHECK
+              value: "1"
+          envFrom:
+            - secretRef:
+                name: fabro-server-env   # SESSION_SECRET, FABRO_DEV_TOKEN (../secrets)
+          ports:
+            - name: http
+              containerPort: 32276
+          # /health is the unauthenticated 200 ({"status":"ok"}); everything under /api/v1 except
+          # /api/v1/health answers 401 without the dev token.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 5
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Measured ~50Mi in use on the test cluster.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+            - name: tmp
+              mountPath: /tmp
+            - name: docker-sock
+              mountPath: /var/run
+            - name: config
+              mountPath: /etc/fabro
+              readOnly: true
+
+        # --- rootless Docker: where agent sandboxes run -----------------------------------------
+        # NOT privileged. It runs as uid 1000 with only SETUID/SETGID, which newuidmap/newgidmap
+        # need to build the nested user namespace sandboxes live in.
+        - name: dind
+          image: docker:29.10.0-dind-rootless
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          # unix socket only, on the shared emptyDir — no TCP listener
+          args: ["dockerd-entrypoint.sh", "dockerd", "--host=unix:///run/user/1000/docker.sock"]
+          readinessProbe:
+            exec:
+              command: ["docker", "-H", "unix:///run/user/1000/docker.sock", "info", "--format", "{{.ServerVersion}}"]
+            periodSeconds: 30
+            timeoutSeconds: 10
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            # newuidmap/newgidmap are setuid binaries; they must be able to gain their file caps.
+            allowPrivilegeEscalation: true
+            # rootless Docker mounts a fresh /proc for each sandbox, which the kernel refuses while
+            # the container's own /proc has masked paths. Only allowed with hostUsers: false.
+            procMount: Unmasked
+            # RuntimeDefault was tried and does not work: the runtime's default profile refuses the
+            # user-namespace clone rootlesskit starts with (`fork/exec /proc/self/exe: operation
+            # not permitted`), and the container crash-loops. See ../README.md.
+            seccompProfile:
+              type: Unconfined
+            # Leaving AppArmor at its default could not be tested — the test cluster's kernel has
+            # no AppArmor at all — so this stays as the prototype had it. See ../README.md.
+            appArmorProfile:
+              type: Unconfined
+            capabilities:
+              drop: ["ALL"]
+              add: ["SETUID", "SETGID"]
+          # Measured ~300Mi idle. Rootless Docker has no cgroup delegation, so a sandbox's own
+          # cpu/memory settings are NOT enforced: these limits are the only bound on what all
+          # sandboxes together can use.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "3"
+              memory: 3Gi
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /run/user/1000
+            - name: docker-data
+              mountPath: /home/rootless/.local/share
+            - name: dev-tun
+              mountPath: /dev/net/tun
+            - name: subid
+              mountPath: /etc/subuid
+              subPath: subuid
+              readOnly: true
+            - name: subid
+              mountPath: /etc/subgid
+              subPath: subgid
+              readOnly: true
+
+        # --- bootstrap: configure the server on every pod start ---------------------------------
+        # Talks to the server over loopback: writes the vault seeds and the environments, then
+        # idles. Its readinessProbe keeps the pod — and so the Service and the Flux Kustomization —
+        # un-Ready until the server is configured. Unprivileged, read-only root, no capabilities,
+        # no service-account token, no Docker socket. See bootstrap.sh.
+        # curlimages/curl because the Fabro image has no HTTP client that can send PUT; the same
+        # image and tag the cluster already runs elsewhere.
+        - name: bootstrap
+          image: curlimages/curl:8.21.0
+          command: ["sh", "/etc/fabro/bootstrap.sh"]
+          env:
+            # Scratch files (auth header, request bodies); a memory-backed emptyDir.
+            - name: HOME
+              value: /bootstrap
+            - name: FABRO_DEV_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: fabro-server-env
+                  key: FABRO_DEV_TOKEN
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/bootstrap/ready"]
+            periodSeconds: 5
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: bootstrap-home
+              mountPath: /bootstrap
+            - name: vault-seed
+              mountPath: /run/secrets/fabro-vault-seed
+              readOnly: true
+            - name: config
+              mountPath: /etc/fabro
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: docker-sock
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # The sidecar's image store, containers and volumes. Deliberately an emptyDir: it is on the
+        # node's disk, capped, and EMPTY after every pod restart (sandbox images are pulled again
+        # on first use). Exceeding the limit evicts the pod.
+        - name: docker-data
+          emptyDir:
+            sizeLimit: 8Gi
+        # slirp4netns/vpnkit (rootless networking) open the host's tun device.
+        - name: dev-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        - name: subid
+          configMap:
+            name: fabro-dind-subid
+        - name: config
+          configMap:
+            name: fabro-config   # name-hashed by kustomization.yaml
+        - name: vault-seed
+          secret:
+            secretName: fabro-vault-seed
+            defaultMode: 0440
+        - name: bootstrap-home
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+  # Fabro's SQLite database (runs, environments and the PLAINTEXT vault) and run artifacts.
+  # local-path, never NFS: SQLite over NFS is how databases get corrupted, and every other
+  # SQLite-backed service here (ntfy, n8n, the *arr stack) is on local-path for the same reason.
+  # Node-local means node-pinned: the data is on pi5-worker-2's disk, and it is copied to the QNAP
+  # weekly by backup-jobs/worker2-backup-cronjob.yaml (`fabro_storage-fabro-0`).
+  # A volumeClaimTemplates PVC is created by the StatefulSet controller, not by Flux, so Flux never
+  # prunes it: deleting this StatefulSet (or the whole Kustomization) leaves the data in place.
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

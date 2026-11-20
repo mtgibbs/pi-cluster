@@ -915,3 +915,58 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 41. fabro-secrets - stage 1 of Fabro (clusters/pi-k3s/fabro/README.md): the `fabro` namespace and
+# its two ExternalSecrets — `fabro-server-env` (SESSION_SECRET + the dev login token, minted as
+# 1Password item `fabro`) and `fabro-vault-seed` (LITELLM_API_KEY + GITHUB_TOKEN, REUSED from
+# `harness-fleet/litellm-key` and `harness-fleet/outcome-pat`).
+# `wait: true` is load-bearing for the NEXT Kustomization: it keeps this one un-Ready until both
+# ExternalSecrets have synced, so `fabro` never creates the pod before the Secrets it mounts exist.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: fabro-secrets
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/fabro/secrets
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 42. fabro - stage 2: the Fabro workflow engine (fabro.lab.mtgibbs.dev) — API server + web UI
+# that runs coding-agent workflows inside Docker sandboxes. One StatefulSet pod on pi5-worker-2
+# (`harness-fleet=true`): the Fabro server, an UNPRIVILEGED rootless Docker sidecar the sandboxes
+# run in, and a bootstrap container that provisions Fabro's vault and environments on every start;
+# plus Service, Ingress and a NetworkPolicy that bounds the sandboxes.
+# Two stages, not kelos' three, and for a weaker reason than kelos had: nothing here fails
+# permanently if a Secret is late (the kubelet just holds the pod in CreateContainerConfigError and
+# retries). The split buys attribution — a 1Password/ESO failure shows up as `fabro-secrets` not
+# Ready, rather than as this Kustomization burning its timeout on a pod that cannot start.
+# `wait: true` + the bootstrap container's readinessProbe mean Ready here = server up AND
+# configured. Timeout is 10m for first image pulls on a Pi (three images).
+# The pod shape was proven on a k3d test cluster, NOT on the Pi nodes: if the pod does not come up,
+# read "Review this first" in the README before anything else — it has the fallback.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: fabro
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: fabro-secrets
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/fabro/server
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 10m

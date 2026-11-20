@@ -1,0 +1,83 @@
+# What the Fabro pod — and therefore every agent sandbox inside it — may talk to.
+#
+# NetworkPolicy is per POD. The sandboxes are containers inside the dind sidecar; their traffic
+# leaves through the pod's network namespace with the pod's IP, so this one policy is what bounds
+# them. Measured on the test cluster from inside a sandbox: public :443 and the model endpoint
+# reachable; the Kubernetes API, other pods and Services, and other LAN hosts blocked.
+#
+# Enforcement is on in this cluster (k3s' embedded kube-router; see agents/networkpolicies.yaml,
+# which has the full note). kube-router evaluates after kube-proxy's DNAT, so rules match the
+# backend pod/IP and port, never a Service ClusterIP — hence DNS by pod label.
+#
+# What this policy does NOT stop: a sandbox reaching the pod's own IP or loopback — i.e. the Fabro
+# API on :32276 — because that never leaves the pod. The API still wants the dev token, which
+# sandboxes are not given. See ../README.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fabro
+  namespace: fabro
+spec:
+  podSelector:
+    matchLabels:
+      app: fabro
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only ingress-nginx, only the Fabro port. ingress-nginx runs as pods with hostPort (not
+    # hostNetwork), so the proxied connection arrives from a pod IP in that namespace.
+    #
+    # The Uptime Kuma monitor and Homepage's siteMonitor both probe https://fabro.lab.mtgibbs.dev,
+    # i.e. through ingress-nginx, so they need no rule of their own. Kubelet probes come from the
+    # node, which kube-router always admits.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 32276
+  egress:
+    # DNS — CoreDNS in kube-system. Both protocols: large/truncated answers retry over TCP.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The public internet, TCP 443 only: GitHub (clone, push, PRs), Docker Hub and other
+    # registries (sandbox images), package indexes. Port 80 is closed on purpose, so `apt` (http
+    # mirrors) does not work in a sandbox — bake packages into the image or use pip/npm over https.
+    # Every private, link-local and carrier-grade-NAT range is carved out, which covers:
+    #   10.42.0.0/16  this cluster's pod CIDR      } k3s defaults, unchanged here;
+    #   10.43.0.0/16  this cluster's service CIDR  } both inside 10.0.0.0/8
+    #   192.168.1.0/24 the LAN (nodes, QNAP, UDM, Beelink)
+    #   100.64.0.0/10 Tailscale
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+    # The one LAN exception: the LiteLLM gateway (Caddy on the Beelink), which is what
+    # ai.lab.mtgibbs.dev resolves to. Same rule the agent sandbox uses (agents/networkpolicies.yaml).
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.70/32
+      ports:
+        - protocol: TCP
+          port: 443

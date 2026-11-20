@@ -1,0 +1,23 @@
+{
+  "provider": "docker",
+  "image": {
+    "docker": "python:3.12-bookworm",
+    "dockerfile": null
+  },
+  "resources": {
+    "cpu": 2,
+    "memory": "2GB",
+    "disk": null
+  },
+  "network": {
+    "mode": "allow_all",
+    "allow": []
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": null
+  },
+  "labels": {},
+  "env": {}
+}
