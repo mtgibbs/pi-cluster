@@ -13,7 +13,7 @@ Answer these, briefly:
 
 If `/tmp/factory/spec-feedback.md` exists, this spec was revised after an earlier objection. Judge the spec fresh, then also check each earlier objection: is it actually closed, or only reworded? An objection that is still open is a raise.
 
-Keep your investigation short: at most one small throwaway counter-example outside the repository (under `/tmp`, deleted after). Put the problems in `reasons` as specific, fixable statements — the spec writer gets them verbatim.
+Work by reading, not building. Do not run `npm`, `vitest` or `verify.sh`, and do not write code: the deterministic check has already shown `verify.sh` fails on today's tree. For question 2, describe in words the wrong implementation that would still pass each check (first-wins instead of a sum, zero calls under an "at most" bound, a handler nobody calls). You have about ten minutes; run 3's judge spent 35 building a counter-example, hit its time limit and produced no verdict, which holds the run. Put the problems in `reasons` as specific, fixable statements — the spec writer gets them verbatim.
 
 Raise if any answer is no. Otherwise pass.
 

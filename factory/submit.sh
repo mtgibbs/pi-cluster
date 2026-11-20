@@ -34,7 +34,8 @@ fi
 
 IDEA="$idea" SPEC="$spec" ISSUE="$issue" HERE="$HERE" REPO="$REPO" CREATE_ONLY="$create_only" python3 - <<'PY'
 import base64, hashlib, json, os, pathlib, sys, urllib.error, urllib.request
-here = pathlib.Path(os.environ["HERE"]); wf = here / "mcp"
+here = pathlib.Path(os.environ["HERE"])
+wf = pathlib.Path(os.environ.get("FACTORY_WORKFLOW_DIR") or here / "mcp")   # override only for test/loop-control.py
 url = os.environ["FABRO_URL"].rstrip("/"); api = url + "/api/v1"
 tok = os.environ["FABRO_DEV_TOKEN"]
 

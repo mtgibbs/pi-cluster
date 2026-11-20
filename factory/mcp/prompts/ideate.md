@@ -62,4 +62,6 @@ The implementer writes the tests. A spec that fixes only test *titles* lets a wr
 - **Negative shape rules** ("field X is absent when …") need their own assertion.
 - **Tool summaries:** if `CLAUDE.md` requires a summary or verdict line, the spec says what it must read in each state (healthy, partial, down).
 
+Do not prototype the implementation to test your spec; read the code, write the three files, run `verify.sh` once to see it fail. Aim to finish in about ten minutes.
+
 When you are done, reply with a short summary of the spec (outcomes, files to change, what verify.sh checks).
