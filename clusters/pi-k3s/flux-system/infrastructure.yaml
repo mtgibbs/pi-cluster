@@ -838,3 +838,80 @@ spec:
     name: flux-system
   wait: true
   timeout: 5m
+---
+# 38. kelos - the Kelos controller + web console (kelos.lab.mtgibbs.dev): a Kubernetes-native
+# controller that runs coding-agent tasks as custom resources (clusters/pi-k3s/kelos/README.md).
+# Flux Helm (chart oci://ghcr.io/kelos-dev/charts/kelos 0.64.0) into `kelos-system`, with the
+# chart's CRDs (`crds.install: true`). Needs cert-manager: the CRDs carry a conversion webhook whose
+# serving cert cert-manager issues. `wait: true` holds this Kustomization un-Ready until the
+# HelmRelease is Ready — i.e. until the CRDs exist and the controller is serving — which is what
+# `kelos-workspace` below depends on. The `kelos/console-token` 1Password field is already minted.
+# Timeout is 15m because the HelmRelease's own install timeout is 10m (first image pulls on a Pi).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kelos
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: ingress
+    - name: cert-manager-config
+  interval: 10m
+  path: ./clusters/pi-k3s/kelos/controller
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 15m
+---
+# 39. kelos-workspace - the `kelos-tasks` namespace Kelos agent pods run in: ResourceQuota +
+# LimitRange sized for ONE agent pod, the two credentials REUSED from the harness fleet
+# (`harness-fleet/outcome-pat`, `harness-fleet/litellm-key`), and the `factory-trial` Workspace.
+# CRD-then-CR ordering, same shape as cert-manager -> cert-manager-config and tailscale ->
+# tailscale-config: `Workspace` is a kelos.dev kind, so this dependsOn `kelos`.
+# `wait: true` is load-bearing for the NEXT Kustomization — it keeps this one un-Ready until both
+# ExternalSecrets have synced, so `kelos-tasks` never applies a Task before its Secrets exist.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kelos-workspace
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: kelos
+    - name: external-secrets-config
+  interval: 10m
+  path: ./clusters/pi-k3s/kelos/workspace
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m
+---
+# 40. kelos-tasks - the Kelos Tasks themselves; submitting one is adding a manifest under
+# clusters/pi-k3s/kelos/tasks via PR. Split from `kelos-workspace` on purpose: Kelos marks a Task
+# permanently Failed if its Workspace's Secret is missing when the Task is first reconciled (no
+# requeue), so Tasks must not apply in the same batch as the ExternalSecrets that produce it.
+# Today it holds one smoke Task (`smoke-word-stats`), which runs ONCE on merge — on qwen
+# (`hot-coder`) on pi5-worker-2 — and opens a PR in mtgibbs/factory-trial.
+# NOTE prune: removing a Task's file deletes the Task, its Job and its run record. Tasks carry a
+# finalizer the controller must clear, so remove Tasks BEFORE ever removing `kelos` itself.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kelos-tasks
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: kelos-workspace
+  interval: 10m
+  path: ./clusters/pi-k3s/kelos/tasks
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

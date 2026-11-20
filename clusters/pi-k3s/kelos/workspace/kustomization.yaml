@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The STANDING half of the task namespace (Flux Kustomization `kelos-workspace`, dependsOn
+# `kelos`): the namespace, its quota and defaults, the two reused credentials, and the Workspace.
+# `Workspace` is a kelos.dev kind, so this cannot apply until ../controller's HelmRelease has
+# installed the CRDs and the controller is serving their conversion webhook.
+#
+# The Tasks themselves are a THIRD Kustomization (../tasks, dependsOn this one), and the split is
+# load-bearing: Kelos fails a Task permanently if its Workspace's Secret does not exist at the
+# moment the Task is first reconciled. See ../tasks/kustomization.yaml.
+#
+# No top-level `namespace:`; every file declares `namespace: kelos-tasks`.
+resources:
+  - namespace.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - external-secret-github-token.yaml
+  - external-secret-litellm-key.yaml
+  - workspace-factory-trial.yaml

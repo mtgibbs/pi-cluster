@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# No top-level `namespace:` — docs/flux-gitops.md "Namespace Transformer": it would drag the
+# HelmRepository out of flux-system. Every file below declares its own namespace.
+#
+# This directory is the CONTROLLER (Flux Kustomization `kelos`). The custom resources live in
+# ../workspace and ../tasks (Flux Kustomizations `kelos-workspace` -> `kelos-tasks`, chained by
+# dependsOn) because they cannot be applied until the CRDs this HelmRelease installs exist.
+# See ../README.md.
+resources:
+  - namespace.yaml
+  - external-secret-console-token.yaml
+  - helmrelease.yaml
+  - ingress.yaml

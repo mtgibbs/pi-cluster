@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_72 ExternalSecrets · 52 1Password items · 74 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_75 ExternalSecrets · 53 1Password items · 74 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -122,6 +122,10 @@ graph LR
   n8ivklm --> n1ykti58
   n8ivklm --> nq5a56a
   n8ivklm --> ngvl95k
+  ngx122p["github-token<br/>(kelos-tasks)"]
+  n8ivklm --> ngx122p
+  nlpp9r3["litellm-key<br/>(kelos-tasks)"]
+  n8ivklm --> nlpp9r3
   n1ofxib0(["🔑 immich"])
   ny2dudm["immich-db-password<br/>(backup-jobs)"]
   n1ofxib0 --> ny2dudm
@@ -251,10 +255,12 @@ graph LR
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
     - `harness/harness-coordinator`
-- **harness-fleet** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **harness-fleet** → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `harness-fleet/harness-dispatcher`
     - `harness-fleet/harness-worker-build-codex`
     - `harness-fleet/harness-worker-build-converge`
+    - `kelos-tasks/github-token`
+    - `kelos-tasks/litellm-key`
 - **healthchecks** → 1 ExternalSecret(s):
     - `monitoring/alertmanager-healthchecks`
 - **homelab-agent-eso** → 1 ExternalSecret(s):
@@ -265,6 +271,8 @@ graph LR
     - `immich/immich-secret`
 - **jellyfin** → 1 ExternalSecret(s):
     - `homepage/homepage-jellyfin`
+- **kelos** → 1 ExternalSecret(s):
+    - `kelos-system/kelos-console-token`
 - **kiwix-mcp** → 1 ExternalSecret(s):
     - `kiwix-mcp/kiwix-mcp-secrets`
 - **local-llm-mcp** → 1 ExternalSecret(s):
@@ -470,6 +478,15 @@ graph LR
 - **`immich/immich-secret`** ← `immich`
   produces Secret `immich-secret` in `immich`
     → `immich/immich-postgresql` (Deployment, env)
+- **`kelos-system/kelos-console-token`** ← `kelos`
+  produces Secret `kelos-console-token` in `kelos-system`
+    → _kelos HelmRelease (consoleServer.secretName; mounted by the kelos-console-server Deployment as its static login token)_ (curated: not a pod-spec ref)
+- **`kelos-tasks/github-token`** ← `harness-fleet`
+  produces Secret `github-token` in `kelos-tasks`
+    → _Kelos-controller-rendered Task Jobs (Workspace factory-trial spec.secretRef; GITHUB_TOKEN/GH_TOKEN env + token file; see clusters/pi-k3s/kelos/README.md)_ (curated: not a pod-spec ref)
+- **`kelos-tasks/litellm-key`** ← `harness-fleet`
+  produces Secret `litellm-key` in `kelos-tasks`
+    → _Kelos-controller-rendered Task Jobs (Task podOverrides.env LITELLM_KEY; see clusters/pi-k3s/kelos/README.md)_ (curated: not a pod-spec ref)
 - **`kiwix-mcp/kiwix-mcp-secrets`** ← `kiwix-mcp`
   produces Secret `kiwix-mcp-secrets` in `kiwix-mcp`
     → `kiwix-mcp/kiwix-mcp` (Deployment, env)

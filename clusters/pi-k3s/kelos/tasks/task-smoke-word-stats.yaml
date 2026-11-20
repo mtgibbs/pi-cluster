@@ -1,0 +1,56 @@
+# The smoke test: one Task, applied once, kept as the run record.
+#
+# A Kelos Task is a one-shot — the controller turns it into a Job named after it and never re-runs
+# it. There is no `ttlSecondsAfterFinished`, so the finished Task (and its `status.results`: branch,
+# commit, pr, token counts) stays until this file is removed.
+#
+# `ssa: IfNotExists` makes "applied once" literal: Flux creates the Task if it is missing and never
+# patches it afterwards. That matters because the CRD makes Task.spec IMMUTABLE ("Task spec is
+# immutable after creation") — without the annotation, any later edit to this file would be
+# rejected by the API server and turn the whole kelos-tasks Kustomization (every other Task
+# included) red. With it, an edit here is silently ignored. Either way the rule is the same:
+# to run something else, add a NEW file with a NEW name — do not edit this one.
+#
+# `credentials.type: none` because Kelos has no built-in credential for a self-hosted OpenAI-
+# compatible endpoint; the key arrives through podOverrides.env instead and the Workspace's
+# setupCommand tells OpenCode where to find it.
+#
+# Pinned to pi5-worker-2 by the existing `harness-fleet=true` node label, beside the fleet workers.
+# Resources equal the kelos-tasks ResourceQuota — see ../workspace/resourcequota.yaml before
+# changing either.
+apiVersion: kelos.dev/v1alpha2
+kind: Task
+metadata:
+  name: smoke-word-stats
+  namespace: kelos-tasks
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: IfNotExists
+spec:
+  prompt: |
+    In this repository, add a function `longest_word(text: str) -> str` to textkit/core.py.
+    It returns the longest whitespace-separated word in `text` (the first one on ties), or
+    an empty string when `text` has no words. Export it from textkit/__init__.py. Add tests
+    for it in tests/test_core.py covering a normal string, a tie, and the empty string. Run
+    `python3 -m pytest -q` and make sure every test passes (install pytest with pip if it is
+    missing). Then create a new branch, commit, push it, and open a pull request against
+    main using the `gh` CLI. Do not merge the pull request.
+  worker:
+    type: opencode
+    model: litellm/hot-coder
+    credentials:
+      type: none
+    workspaceRef:
+      name: factory-trial
+    podOverrides:
+      activeDeadlineSeconds: 1800
+      nodeSelector:
+        harness-fleet: "true"
+      env:
+        - name: LITELLM_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm-key
+              key: LITELLM_KEY
+      resources:
+        requests: { cpu: 500m, memory: 512Mi }
+        limits: { cpu: "2", memory: 2Gi }

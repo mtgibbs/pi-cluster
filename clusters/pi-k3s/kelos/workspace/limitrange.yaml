@@ -1,0 +1,24 @@
+# Defaults, and the reason this file has to exist (same story as harness-fleet/limitrange.yaml).
+#
+# Once a ResourceQuota constrains requests/limits, Kubernetes REJECTS any pod that leaves them
+# unset. Kelos' init containers (`git-clone`, `branch-setup`, …) never set resources, and a Task
+# written without `podOverrides.resources` leaves the agent container bare too — so without these
+# defaults every Task pod would be refused by the quota meant to bound it.
+#
+# The default LIMIT equals the quota (2 CPU / 2Gi) so a Task that names no resources still gets the
+# whole one-pod budget rather than a smaller arbitrary one. The default REQUEST stays under the
+# quota's 500m / 1Gi so a defaulted init container never out-sizes the agent container.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: kelos-tasks-defaults
+  namespace: kelos-tasks
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 2Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi

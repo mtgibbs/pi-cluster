@@ -925,10 +925,10 @@ Pi K3s Cluster
 **How**:
 - pi-k3s (Pi 5): master + worker (critical infrastructure, DNS primary, monitoring, Immich Postgres — pinned here by its local-path PVC)
 - pi5-worker-1 (Pi 5): worker (media services, DNS secondary, Tailscale exit node, Immich server + valkey)
-- pi5-worker-2 (Pi 5): worker (heavy workloads, distributed apps; labeled `harness-fleet=true` — the ephemeral harness fleet Jobs land here, bounded by the `harness-fleet` namespace ResourceQuota)
+- pi5-worker-2 (Pi 5): worker (heavy workloads, distributed apps; labeled `harness-fleet=true` — the ephemeral harness fleet Jobs land here, bounded by the `harness-fleet` namespace ResourceQuota; Kelos task pods also land here via the same label, bounded by the `kelos-tasks` namespace ResourceQuota — one agent pod at a time, limits 2 CPU / 2Gi)
 - pi3-worker-2 (Pi 3): worker (lightweight services only, 1GB RAM)
 - Backup jobs pinned to pi-k3s (require hostPath access to local-path PVCs)
-- Most app placement is scheduler-driven (no nodeSelector) and can move on reschedule; the intentional pins are: Pi-hole primary/Unbound + backup jobs + Immich Postgres → pi-k3s (local-path data locality), Pi-hole secondary → pi5-worker-1, harness fleet workers → pi5-worker-2 (`harness-fleet=true`, so a dispatched build never contends with the DNS secondary).
+- Most app placement is scheduler-driven (no nodeSelector) and can move on reschedule; the intentional pins are: Pi-hole primary/Unbound + backup jobs + Immich Postgres → pi-k3s (local-path data locality), Pi-hole secondary → pi5-worker-1, harness fleet workers and Kelos task pods → pi5-worker-2 (`harness-fleet=true`, so a dispatched build never contends with the DNS secondary). The Kelos controller + console (`kelos-system`) are not pinned.
 
 **Trade-offs**:
 - Increased complexity in workload placement

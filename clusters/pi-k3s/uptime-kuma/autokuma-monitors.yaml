@@ -254,6 +254,18 @@ data:
       "retryInterval": 30,
       "maxretries": 3
     }
+  # /healthz, not /: the console answers / with a 302 to its login page and everything under /api
+  # with 401 until a token is presented; /healthz is the unauthenticated 200.
+  kelos-console.json: |
+    {
+      "notification_name_list": ["discord"],
+      "type": "http",
+      "name": "Kelos Console",
+      "url": "https://kelos.lab.mtgibbs.dev/healthz",
+      "interval": 60,
+      "retryInterval": 30,
+      "maxretries": 3
+    }
   romm.json: |
     {
       "notification_name_list": ["discord"],
