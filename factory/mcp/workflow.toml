@@ -37,8 +37,11 @@ GITHUB_TOKEN = "{{ secrets.GITHUB_TOKEN }}"
 enabled = true
 push = false
 
-[run.checkpoint]
-exclude_globs = ["**/node_modules/**", "dist/**", "coverage/**"]
+# No [run.checkpoint] exclude_globs, on purpose. Fabro passes them to `git add` as exclude
+# pathspecs, and git exits non-zero ("The following paths are ignored by one of your
+# .gitignore files: dist") when an exclude pathspec names a path that exists and is already
+# gitignored. That failed run 1's `implement` checkpoint the moment `npm run build` created
+# dist/. The repo's .gitignore already keeps node_modules/, dist/ and coverage/ out of commits.
 
 # Fabro's own end-of-run PR cannot be used: it needs a structured-output model to write the
 # PR text (hot-coder has none: "publish_failed ... does not support structured output") and

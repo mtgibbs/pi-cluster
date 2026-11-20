@@ -200,4 +200,16 @@ the `#` in the qid). `submit.sh` always sends `auto_approve: false`.
   catalog, else 404). The factory selects the GitOps-managed `gated-docker` environment
   and overrides its image sparsely (`[run.environment.image] docker = "node:20-bookworm"`),
   which does work, so no server change was needed.
+- **`[run.checkpoint] exclude_globs` can fail a run (Fabro bug, not filed).** Repro on
+  0.421.0-nightly.0: a repo whose `.gitignore` lists `dist/`; a workflow with
+  `exclude_globs = ["dist/**"]`; a command stage that runs `mkdir dist && touch dist/x`. That
+  stage's checkpoint fails with `checkpoint_failed: git add failed (non-zero exit): The
+  following paths are ignored by one of your .gitignore files: dist`, and the run ends
+  (`no route is taken`). Same workflow without `exclude_globs`: succeeds (runs
+  `01M7WS14MQG7DYTYN3NAXCVKTE` vs `01M7WS1554HQ2VXXYCXPXXE8X5` on factory-trial). Cause:
+  plain git, `git add -A -- . ':(glob,exclude)dist/**'` exits 1 when `dist` exists and is
+  ignored; `':(glob,exclude)**/node_modules/**'` happens not to trip it, which is why setup's
+  `node_modules/` never failed. Fabro should not let an exclude it adds itself fail the
+  checkpoint (filter after `git add -A`, or tolerate this specific exit). The factory sets no
+  `exclude_globs` and relies on the target's `.gitignore`.
 
