@@ -1,0 +1,87 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kelos
+  namespace: flux-system
+spec:
+  interval: 1h
+  type: oci
+  url: oci://ghcr.io/kelos-dev/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kelos
+  namespace: kelos-system
+spec:
+  interval: 1h
+  # The first install pulls two images onto a Pi and waits on a cert-manager Certificate before the
+  # controller can mount its webhook cert; the 5m default is tight for that.
+  timeout: 10m
+  chart:
+    spec:
+      chart: kelos
+      version: "0.64.0"
+      sourceRef:
+        kind: HelmRepository
+        name: kelos
+        namespace: flux-system
+  # The chart renders `Namespace/kelos-system` itself whenever the release namespace is
+  # kelos-system (templates/namespace.yaml, no value to turn it off). The namespace has to exist
+  # BEFORE Helm runs — this HelmRelease and the console-token ExternalSecret both live in it — so
+  # Git owns it (namespace.yaml), like every other HelmRelease in this repo. Left in, the chart's
+  # copy would either fail the install ("exists and cannot be imported into the current release")
+  # or, once adopted, make Helm the owner: the chart README warns that Helm deletes an owned
+  # Namespace "with everything in it" when the chart stops rendering it, and an uninstall would do
+  # the same to the ExternalSecret and Ingress beside it. Dropping the chart's copy leaves one
+  # owner.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              version: v1
+              kind: Namespace
+              name: kelos-system
+            patch: |
+              $patch: delete
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: kelos-system
+  values:
+    # The chart default is false (controller-only). Without this no kelos.dev CRD exists, the
+    # controller never becomes ready, and ../workspace has nothing to apply against. With it, Helm owns
+    # the CRDs (templates in a subchart, `crds.keep: true` by default so an uninstall leaves them).
+    crds:
+      install: true
+
+    # Default is true: a daily CronJob that phones home. Off.
+    telemetry:
+      enabled: false
+
+    # Controller manager. The chart ships no resources for it at all.
+    controller:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+
+    # Web console, exposed at kelos.lab.mtgibbs.dev by ingress.yaml (Service
+    # kelos-console-server:80 -> container 8080). Its own resources are the chart defaults
+    # (10m/64Mi requests, 500m/256Mi limits).
+    consoleServer:
+      enabled: true
+      secretName: kelos-console-token
+      tokenKey: token
+      auth:
+        mode: staticToken
+      # TLS terminates at ingress-nginx, so the browser only ever sees https.
+      secureCookie: true
+      defaultNamespace: kelos-tasks
+
+    # Webhook servers, the Slack server, spawner/ghproxy extras and the PodMonitor are left at the
+    # chart defaults (all off).

@@ -128,6 +128,11 @@ data:
             href: https://harness.lab.mtgibbs.dev
             description: Loop runs — task, attempt, gate verdicts
             siteMonitor: https://harness.lab.mtgibbs.dev/api/runs
+        - Kelos:
+            icon: mdi-robot-industrial
+            href: https://kelos.lab.mtgibbs.dev
+            description: Coding-agent tasks as Kubernetes resources — console
+            siteMonitor: https://kelos.lab.mtgibbs.dev/healthz
         - Beelink GTR9 Pro:
             icon: mdi-chip
             href: https://grafana.lab.mtgibbs.dev/d/beelink-ai-load

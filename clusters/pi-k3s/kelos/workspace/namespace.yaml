@@ -1,0 +1,12 @@
+# Where Kelos agent pods run. Deliberately NOT kelos-system (the controller and console) and NOT
+# harness-fleet (the in-house fleet, which has its own quota sized for its own workers): the
+# namespace is the unit the ResourceQuota bounds and the unit the two reused credentials are
+# materialised into.
+#
+# It is NOT a containment boundary for the controller the way harness-fleet is for its dispatcher:
+# Kelos' controller runs under a ClusterRole, so it can act in any namespace a Task is created in.
+# See ../README.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kelos-tasks

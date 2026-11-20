@@ -1,0 +1,7 @@
+# Owned by Git, not by the chart. Chart 0.64.0 also renders `Namespace/kelos-system` whenever the
+# release namespace is kelos-system; helmrelease.yaml deletes that copy in a postRenderer so there
+# is exactly one owner. The reasons are written there.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kelos-system

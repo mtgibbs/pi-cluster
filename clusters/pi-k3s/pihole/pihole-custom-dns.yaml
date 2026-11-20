@@ -15,6 +15,9 @@ data:
     # qnap.lab → ingress (.55), backed by Endpoints in external-services/qnap.yaml
     # Wildcard already routes *.lab → .55, but explicit entry documents intent.
     address=/qnap.lab.mtgibbs.dev/192.168.1.55
+    # kelos.lab → ingress (.55): the Kelos console (clusters/pi-k3s/kelos/controller/ingress.yaml).
+    # Covered by the wildcard too; explicit for the same reason as qnap.lab above.
+    address=/kelos.lab.mtgibbs.dev/192.168.1.55
     # QNAP appliance direct (MCP and other raw protocols) — hardware-pinned
     address=/qnap-mcp.lab.mtgibbs.dev/192.168.1.61
     # Beelink AI inference appliance — Caddy terminates TLS on :443

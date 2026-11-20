@@ -1,0 +1,37 @@
+# The Kelos console. LAN-only, like every other *.lab.mtgibbs.dev name (Pi-hole split-horizon DNS;
+# not tunneled). The backend Service is created by the HelmRelease, not by a manifest in this
+# directory: chart 0.64.0 names it `kelos-console-server` and serves port 80 (-> container 8080).
+#
+# The login is ONE shared static token (external-secret-console-token.yaml), and the console's
+# ServiceAccount can create Tasks and exec into pods cluster-wide — see ../README.md before
+# widening who can reach this host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kelos-console
+  namespace: kelos-system
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # The console streams task logs and session terminals over long-lived connections. 15m mirrors
+    # the upstream timeout the chart itself configures when it fronts the console with
+    # oauth2-proxy; ingress-nginx's 60s default would cut a quiet log tail.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kelos.lab.mtgibbs.dev
+      secretName: kelos-console-tls
+  rules:
+    - host: kelos.lab.mtgibbs.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kelos-console-server
+                port:
+                  number: 80

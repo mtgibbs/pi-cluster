@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The Tasks (Flux Kustomization `kelos-tasks`, dependsOn `kelos-workspace`). Submitting a Task is
+# adding a file here via PR.
+#
+# Why Tasks are not simply listed beside the Workspace and its secrets: a Task is a one-shot, and
+# the controller (v0.64.0, internal/controller/task_controller.go) reads the Workspace's Secret the
+# instant the Task appears. If that Secret is not there yet it does not requeue — it marks the Task
+# Failed ("Failed to resolve GitHub token") and never looks again. Applied in one batch, the Task
+# would race External Secrets materialising `github-token` and lose. `kelos-workspace` runs with
+# `wait: true`, so it is not Ready until both ExternalSecrets have synced; only then does Flux
+# apply this directory.
+#
+# No top-level `namespace:`; every file declares `namespace: kelos-tasks`.
+resources:
+  - task-smoke-word-stats.yaml

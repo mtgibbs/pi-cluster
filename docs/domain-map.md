@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_41 services · 72 workloads · 42 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_42 services · 72 workloads · 45 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -98,6 +98,15 @@ graph LR
   k1unc8vb --> k1ce1t9w
   kkuvy6m --> k1ce1t9w
   k19g0j44 --> k1ce1t9w
+  k5004r3["kelos<br/>(kelos/controller)"]
+  k1unc8vb --> k5004r3
+  kkuvy6m --> k5004r3
+  k19g0j44 --> k5004r3
+  kzplbv4["kelos-tasks<br/>(kelos/tasks)"]
+  k1qhv51z["kelos-workspace<br/>(kelos/workspace)"]
+  k1qhv51z --> kzplbv4
+  k5004r3 --> k1qhv51z
+  k1unc8vb --> k1qhv51z
   k502wpt["kiwix"]
   kkuvy6m --> k502wpt
   k19g0j44 --> k502wpt
@@ -262,6 +271,9 @@ _Images are listed **without tags** on purpose — this map is topology, and the
 - **Deployment/jellyfin** — `jellyfin/jellyfin`
   - storage: `jellyfin-config`, `jellyfin-video`
   - ingress: `jellyfin.lab.mtgibbs.dev`
+
+### kelos
+  - ingress: `kelos.lab.mtgibbs.dev`
 
 ### kiwix  ·  Flux: `kiwix` (after: `ingress`, `cert-manager-config`)
 - **Deployment/kiwix** — `ghcr.io/kiwix/kiwix-tools`

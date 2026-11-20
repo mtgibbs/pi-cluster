@@ -1,0 +1,42 @@
+# The repository a Task works in, plus the setup every Task in it needs.
+#
+# `setupCommand` runs in the agent container after the clone and before the agent starts. It writes
+# the OpenCode provider config that points the `litellm/…` models at the in-house LiteLLM endpoint
+# on the Beelink. The key is NOT in this file: OpenCode resolves `{env:LITELLM_KEY}` at run time
+# from the env var each Task injects from the `litellm-key` Secret. The heredoc is quoted ('JSON')
+# so the shell does not expand anything either. `webfetch: deny` keeps the agent off the open web;
+# `edit`/`bash: allow` is what makes it an unattended worker — and an unrestricted shell.
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: factory-trial
+  namespace: kelos-tasks
+spec:
+  repo: https://github.com/mtgibbs/factory-trial.git
+  ref: main
+  secretRef:
+    name: github-token
+  setupCommand:
+    - sh
+    - -c
+    - |
+      mkdir -p ~/.config/opencode
+      cat > ~/.config/opencode/opencode.json <<'JSON'
+      {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {
+          "litellm": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "LiteLLM",
+            "options": {
+              "baseURL": "https://ai.lab.mtgibbs.dev/v1",
+              "apiKey": "{env:LITELLM_KEY}"
+            },
+            "models": {
+              "hot-coder": { "limit": { "context": 131072, "output": 32768 } }
+            }
+          }
+        },
+        "permission": { "edit": "allow", "bash": "allow", "webfetch": "deny" }
+      }
+      JSON

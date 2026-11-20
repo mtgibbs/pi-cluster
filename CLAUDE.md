@@ -90,6 +90,7 @@ regardless of service (see [Route the work](#2-route-the-work--read--investigate
 | **Secrets — writing the manifest** | `.claude/skills/secrets-management/SKILL.md` (author an ExternalSecret, 1Password item shape, debug a failed sync, ESO bootstrap) | `cluster-ops` |
 | **MCP Homelab** | `docs/mcp-homelab-setup.md` | `cluster-ops` |
 | **Local Coding Agent (qwen / opencode)** | `.claude/skills/coding-agent-ops/SKILL.md` (the loop itself lives in `mtgibbs/harness`) | `oc` (local) — Claude orchestrates |
+| **Kelos (coding-agent tasks as CRs)** | `clusters/pi-k3s/kelos/README.md` (controller + console at `kelos.lab.mtgibbs.dev`; submit a Task = a manifest via PR; reused fleet credentials; **read its risk note first**) | `cluster-ops` (Task manifests + deploy/verify) |
 | **Trying out a new local model** | `docs/model-onboarding.md` (intake gates, VRAM/KV math, stand-up path, decision log) | Ansible PR in `beelink-ansible`, applied from the laptop |
 | **n8n Email Ingestion Pipeline** | `docs/n8n-email-pipeline.md` (incl. manual/Cloudflare runbook) | `cluster-ops` (in-cluster) + manual edge |
 | **Family Board (dashboard UI)** | **self-contained subtree** `clusters/pi-k3s/family-board/` (own `CLAUDE.md` + `.claude/skills/family-board-ui` + `.claude/agents/board-designer`; slated to spin off) | `cluster-ops` (deploy/verify) |

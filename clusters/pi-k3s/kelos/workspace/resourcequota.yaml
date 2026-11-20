@@ -1,0 +1,34 @@
+# One agent pod at a time.
+#
+# Sized to exactly ONE Task pod of the shape ../tasks/task-smoke-word-stats.yaml uses (requests 500m/512Mi,
+# limits 2 CPU/2Gi) — the same per-worker ceiling the harness fleet uses, on the same node
+# (pi5-worker-2, via the `harness-fleet=true` label). A second concurrent Task is refused at
+# admission: its Job is created, its pod is not, and the Job controller keeps retrying until the
+# first pod finishes and frees the quota. That is the intended behaviour, not a fault — but the
+# event names the quota, so it is written down here.
+#
+# The arithmetic, because a quota counts EVERY container in the pod: Kelos builds a Task pod as one
+# agent container (`kelos-agent`, which takes podOverrides.resources) plus init containers
+# (`git-clone`, …) that carry NO resources and so take the LimitRange defaults (limitrange.yaml).
+# A pod's effective size is max(largest init container, sum of app containers), so the init
+# defaults must not exceed this quota on their own — they are set to exactly it.
+#
+# Deliberately NO `count/jobs.batch` cap, unlike harness-fleet: Kelos names the Job after the Task
+# and keeps it for as long as the Task exists, and the smoke Task is kept as a run record. A Job
+# count of 1 would be spent forever by the first finished Task. Compute is the only ceiling here;
+# finished pods do not count against it.
+#
+# Nothing else runs in this namespace. If that changes (a workspace `ghproxy`, a TaskSpawner — both
+# are Deployments the controller creates beside the Tasks), this quota must grow by that pod's size
+# or the agent pod stops fitting.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kelos-tasks
+  namespace: kelos-tasks
+spec:
+  hard:
+    requests.cpu: 500m
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
