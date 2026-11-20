@@ -1,0 +1,47 @@
+# The factory workflow for mtgibbs/pi-cluster-mcp. Start it with factory/submit.sh, which
+# uploads this file + workflow.fabro + prompts/ and APPENDS a [run.inputs] table holding
+# the factory's own code (steps.py, classify.sh, base64) and its sha256 — so the code that
+# judges a run is part of the content-addressed workflow version, not the target repo.
+# Do not add a [run.inputs] table here; submit.sh owns it.
+_version = 1
+
+[workflow]
+graph = "workflow.fabro"
+
+[run]
+goal = "Turn an idea into a reviewed pull request on mtgibbs/pi-cluster-mcp."
+
+# hot-coder is the only model on this server. It rejects reasoning_effort: set none.
+[run.model]
+name = "hot-coder"
+provider = "litellm"
+
+# The server's `gated-docker` environment uses a stock Python image; this repo needs Node 20.
+# A sparse override of the selected environment works over the API (a workflow-defined
+# [environments.<id>] table does NOT: run creation resolves environment_id against the
+# server catalog only and 404s on an id it does not hold).
+[run.environment]
+id = "gated-docker"
+
+[run.environment.image]
+docker = "node:20-bookworm"
+
+# The token is the vault's GITHUB_TOKEN (a fine-grained all-repo PAT until a GitHub App
+# replaces it). Every stage — agents included — can read it. See README "Known limits".
+[run.environment.env]
+GITHUB_TOKEN = "{{ secrets.GITHUB_TOKEN }}"
+
+# Fabro checkpoints each stage as a commit on a local run branch; the factory pushes its own
+# `factory/<spec>-<id>` branch from open_pr, so the fabro/run/<id> branch stays local.
+[run.run_branch]
+enabled = true
+push = false
+
+[run.checkpoint]
+exclude_globs = ["**/node_modules/**", "dist/**", "coverage/**"]
+
+# Fabro's own end-of-run PR cannot be used: it needs a structured-output model to write the
+# PR text (hot-coder has none: "publish_failed ... does not support structured output") and
+# it only fires after the run ends, while the factory must wait on CI mid-run.
+[run.pull_request]
+enabled = false
