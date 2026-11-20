@@ -11,6 +11,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      # Bounds a hung fetch. First run with starred repos is the long one
+      # (~20-40 min of cloning + index-pack on 1 core); steady state is minutes.
+      activeDeadlineSeconds: 10800
       template:
         spec:
           restartPolicy: OnFailure
@@ -21,11 +24,20 @@ spec:
           containers:
             - name: git-mirror
               image: instrumentisto/rsync-ssh:alpine
+              env:
+                # Starred repos whose GitHub-reported size (KB) exceeds this are
+                # NOT cloned — skipped and logged. 250 MB keeps 59 of 64 current
+                # stars (~1.6 GB) and skips the giants (vscode 1.7 GB, ElDorito,
+                # nucleus, DependencyCheck, echarts). The whole mirror set is
+                # staged on pi-k3s's SD card every run, so this is the knob.
+                # Only gates NEW clones: an existing mirror keeps updating.
+                - name: STARRED_MAX_KB
+                  value: "256000"
               command:
                 - /bin/sh
                 - -c
                 - |
-                  set -e
+                  set -eu
 
                   apk add --no-cache git curl jq
 
@@ -33,107 +45,214 @@ spec:
                   # each run — git 2.35.2+'s "dubious ownership" check (CVE-2022-24765
                   # mitigation) flags them since the synced-down dirs' ownership
                   # doesn't match this run's UID. Safe to trust globally here: the
-                  # only content in this workspace is our own repos, in an ephemeral
-                  # emptyDir, in a job whose only job is mirroring them.
+                  # only content in this workspace is our own mirrors, in an
+                  # ephemeral emptyDir, in a job whose only job is mirroring them.
                   git config --global --add safe.directory '*'
+                  # Memory: index-pack defaults to one thread per core, each with
+                  # its own delta cache — single-thread it so a big clone fits the
+                  # limit. Abort a fetch stalled under 1 KB/s for 5 min.
+                  git config --global pack.threads 1
+                  git config --global http.lowSpeedLimit 1000
+                  git config --global http.lowSpeedTime 300
 
                   GITHUB_USER="mtgibbs"
-                  GITHUB_TOKEN=$(cat /github/token)
+                  GITHUB_TOKEN=$(tr -d '[:space:]' < /github/token)
                   export GIT_TERMINAL_PROMPT=0
                   NAS_USER="cluster-backup"
                   NAS_HOST="storage.lab.mtgibbs.dev"
                   NAS_PATH="/share/cluster/backups/git-mirrors"
                   WORK_DIR="/tmp/mirrors"
+                  STARRED_DIR="${WORK_DIR}/starred"
                   SSH_KEY="/ssh/id_ed25519"
+                  STARRED_MAX_KB="${STARRED_MAX_KB:-256000}"
+
+                  # Git auth: an Authorization header scoped to github.com, passed
+                  # via GIT_CONFIG_* env — never in a URL, never written to any
+                  # repo config. The previous token-in-URL method silently failed
+                  # every PRIVATE repo ("redirecting to …" then "could not read
+                  # Username") while the job still reported success.
+                  GIT_AUTH_B64=$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\n')
+                  export GIT_CONFIG_COUNT=1
+                  export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+                  export GIT_CONFIG_VALUE_0="Authorization: Basic ${GIT_AUTH_B64}"
+
+                  SSH_CMD="ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no"
 
                   echo "=== GitHub Repository Mirror Backup ==="
                   echo "Date: $(date +%Y-%m-%d)"
                   echo "Destination: ${NAS_USER}@${NAS_HOST}:${NAS_PATH}"
+                  echo "Starred size cap: ${STARRED_MAX_KB} KB"
                   echo ""
 
                   # Fix SSH key permissions
                   cp ${SSH_KEY} /tmp/id_ed25519
                   chmod 600 /tmp/id_ed25519
 
-                  # Create workspace and NAS target dir
-                  mkdir -p ${WORK_DIR}
-                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
-                    ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}"
+                  # Create workspace and NAS target dirs
+                  mkdir -p "${WORK_DIR}" "${STARRED_DIR}"
+                  ${SSH_CMD} ${NAS_USER}@${NAS_HOST} "mkdir -p ${NAS_PATH}/starred"
 
-                  # Pull existing mirrors from NAS (incremental - avoids full re-clone)
+                  # Pull existing mirrors from NAS (incremental - avoids full
+                  # re-clone). A failure here is FATAL: carrying on would re-clone
+                  # everything from scratch. No -z: LAN, and packfiles are
+                  # already compressed.
                   echo "--- Syncing existing mirrors from NAS ---"
-                  rsync -az -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
-                    ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/ ${WORK_DIR}/ 2>/dev/null || true
+                  rsync -a -e "${SSH_CMD}" \
+                    ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/ ${WORK_DIR}/
+                  echo "Workspace after sync-down: $(du -sh ${WORK_DIR} | cut -f1)"
 
+                  # GET a paginated GitHub list endpoint (follows the Link header)
+                  # into a single JSON array. Returns non-zero on any non-200.
+                  gh_list() {
+                    _url="https://api.github.com/$1"; _out="$2"; _page=0
+                    : > "${_out}.ndjson"
+                    while [ -n "${_url}" ]; do
+                      _page=$((_page + 1))
+                      _code=$(curl -sS -o "${_out}.page" -D "${_out}.hdr" -w "%{http_code}" \
+                        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                        -H "Accept: application/vnd.github+json" "${_url}") || _code=000
+                      if [ "${_code}" != "200" ]; then
+                        echo "ERROR: GitHub API $1 page ${_page} returned HTTP ${_code}" >&2
+                        head -c 300 "${_out}.page" >&2 2>/dev/null; echo >&2
+                        return 1
+                      fi
+                      jq -c '.[]' "${_out}.page" >> "${_out}.ndjson"
+                      _url=$(tr -d '\r' < "${_out}.hdr" | grep -i '^link:' | tr ',' '\n' \
+                        | grep 'rel="next"' | sed -E 's/.*<([^>]+)>.*/\1/' || true)
+                      [ "${_page}" -lt 100 ] || { echo "ERROR: >100 pages from $1" >&2; return 1; }
+                    done
+                    jq -s '.' "${_out}.ndjson" > "${_out}"
+                  }
+
+                  # Fetch into an existing bare repo from an EXPLICIT url, so the
+                  # result never depends on whatever remote config came down from
+                  # the NAS. On failure, dump the repo's config (credentials
+                  # masked) so the cause is visible in the log.
+                  fetch_into() {  # dir url refspec...
+                    _dir="$1"; _url="$2"; shift 2
+                    if git -C "${_dir}" fetch --prune "${_url}" "$@"; then return 0; fi
+                    echo "  config of ${_dir} (masked):" >&2
+                    GIT_CONFIG_COUNT=0 git -C "${_dir}" config --list 2>&1 \
+                      | sed -E 's#(https?://)[^@/]+@#\1<cred>@#g; s#([Ee]xtra[Hh]eader=).*#\1<masked>#' \
+                      | sed 's/^/    /' >&2
+                    return 1
+                  }
+
+                  ######## Owned repos — a failure here fails the run ########
                   # Fetch all repos from GitHub API. FAIL LOUDLY on auth errors —
                   # a silently-swallowed 401 previously made this a no-op that
                   # reported success while mirroring nothing.
-                  echo "--- Fetching repository list from GitHub ---"
-                  HTTP_CODE=$(curl -s -o /tmp/repos.json -w "%{http_code}" \
-                    -H "Authorization: token ${GITHUB_TOKEN}" \
-                    -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/user/repos?per_page=100&affiliation=owner")
-                  if [ "${HTTP_CODE}" != "200" ]; then
-                    echo "ERROR: GitHub API returned HTTP ${HTTP_CODE} — token invalid/expired?" >&2
-                    head -c 300 /tmp/repos.json >&2; echo >&2
-                    exit 1
-                  fi
+                  echo "--- Fetching owned repository list from GitHub ---"
+                  gh_list "user/repos?per_page=100&affiliation=owner" /tmp/repos.json || exit 1
                   REPO_COUNT=$(jq 'length' /tmp/repos.json)
-                  echo "Found ${REPO_COUNT} repositories"
+                  echo "Found ${REPO_COUNT} owned repositories"
                   if [ "${REPO_COUNT}" -eq 0 ]; then
                     echo "ERROR: 0 repositories returned — refusing to sync an empty mirror set" >&2
                     exit 1
                   fi
-                  REPOS=$(jq -r '.[].clone_url' /tmp/repos.json)
                   echo ""
 
-                  # Mirror each repo. Fetch using the token embedded in the URL
-                  # (works for public + private), then IMMEDIATELY rewrite the
-                  # remote to a clean, token-less URL before anything is rsynced
-                  # to the NAS. The token therefore lives only in the pod-local
-                  # /tmp config during the fetch and never lands off-pod.
-                  # Per-repo failures are recorded but do not abort the run, so
-                  # the scrub + rsync always happen.
-                  FAILED=""
-                  for REPO_URL in ${REPOS}; do
+                  # Owned repos stay at the top level (existing layout), full
+                  # mirror (all refs, incl. refs/pull/*). Per-repo failures are
+                  # recorded and the run continues, so the upload always happens.
+                  OWNED_FAILED=""
+                  for REPO_URL in $(jq -r '.[].clone_url' /tmp/repos.json); do
                     REPO_NAME=$(basename "${REPO_URL}" .git)
                     MIRROR_DIR="${WORK_DIR}/${REPO_NAME}.git"
-                    AUTH_URL=$(echo "${REPO_URL}" | sed "s|https://|https://${GITHUB_TOKEN}@|")
-
                     if [ -d "${MIRROR_DIR}" ]; then
                       echo "--- Updating mirror: ${REPO_NAME} ---"
-                      git -C "${MIRROR_DIR}" remote set-url origin "${AUTH_URL}"
-                      git -C "${MIRROR_DIR}" remote update --prune || FAILED="${FAILED} ${REPO_NAME}"
+                      git -C "${MIRROR_DIR}" remote set-url origin "${REPO_URL}" 2>/dev/null || true
+                      fetch_into "${MIRROR_DIR}" "${REPO_URL}" '+refs/*:refs/*' \
+                        || OWNED_FAILED="${OWNED_FAILED} ${REPO_NAME}"
                     else
                       echo "--- Cloning new mirror: ${REPO_NAME} ---"
-                      git clone --mirror "${AUTH_URL}" "${MIRROR_DIR}" || FAILED="${FAILED} ${REPO_NAME}"
+                      git clone --mirror "${REPO_URL}" "${MIRROR_DIR}" \
+                        || OWNED_FAILED="${OWNED_FAILED} ${REPO_NAME}"
                     fi
-
-                    # Scrub the token from the persisted config BEFORE the rsync.
-                    [ -d "${MIRROR_DIR}/config" ] && \
-                      git -C "${MIRROR_DIR}" remote set-url origin "${REPO_URL}"
                   done
 
-                  if [ -n "${FAILED}" ]; then
-                    echo "WARNING: failed to update:${FAILED}" >&2
+                  ######## Starred repos — best effort, never fails the run ########
+                  # Stored as starred/<owner>__<repo>.git (GitHub logins can't
+                  # contain "_", so the split is unambiguous and can't collide
+                  # with an owned repo). Heads + tags only — no refs/pull/*,
+                  # which on big upstreams is tens of thousands of refs.
+                  # Nothing under starred/ is ever deleted: unstarred or vanished
+                  # upstreams keep their last copy.
+                  echo ""
+                  echo "--- Fetching starred repository list from GitHub ---"
+                  STARRED_LIST_FAILED=""
+                  STARRED_FAILED=""
+                  STARRED_SKIPPED=""
+                  if gh_list "user/starred?per_page=100" /tmp/starred.json; then
+                    jq -r --arg me "${GITHUB_USER}" \
+                      '.[] | select(.owner.login != $me)
+                           | [.owner.login, .name, .clone_url, (.size|tostring)] | @tsv' \
+                      /tmp/starred.json > /tmp/starred.tsv
+                    echo "Found $(jq 'length' /tmp/starred.json) starred ($(wc -l < /tmp/starred.tsv) not owned by ${GITHUB_USER})"
+                    # Record what is starred right now (unstarred mirrors stay on disk).
+                    jq -r '.[] | [.full_name, (.size|tostring), (.archived|tostring)] | @tsv' \
+                      /tmp/starred.json > "${STARRED_DIR}/STARRED.tsv"
+
+                    while IFS="$(printf '\t')" read -r S_OWNER S_NAME S_URL S_SIZE; do
+                      S_KEY="${S_OWNER}__${S_NAME}"
+                      S_DIR="${STARRED_DIR}/${S_KEY}.git"
+                      if [ -d "${S_DIR}" ]; then
+                        echo "--- Updating starred: ${S_OWNER}/${S_NAME} ---"
+                        fetch_into "${S_DIR}" "${S_URL}" \
+                          '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' < /dev/null \
+                          || STARRED_FAILED="${STARRED_FAILED} ${S_OWNER}/${S_NAME}"
+                      elif [ "${S_SIZE}" -gt "${STARRED_MAX_KB}" ]; then
+                        echo "--- SKIP starred ${S_OWNER}/${S_NAME}: $((S_SIZE / 1024)) MB > cap $((STARRED_MAX_KB / 1024)) MB ---"
+                        STARRED_SKIPPED="${STARRED_SKIPPED} ${S_OWNER}/${S_NAME}($((S_SIZE / 1024))MB)"
+                      else
+                        echo "--- Cloning starred: ${S_OWNER}/${S_NAME} ($((S_SIZE / 1024)) MB) ---"
+                        git clone --bare --quiet "${S_URL}" "${S_DIR}" < /dev/null \
+                          || STARRED_FAILED="${STARRED_FAILED} ${S_OWNER}/${S_NAME}"
+                      fi
+                    done < /tmp/starred.tsv
+                  else
+                    # Listing failed (e.g. token lost the Starring permission).
+                    # Owned mirrors still upload; the run fails at the end.
+                    STARRED_LIST_FAILED=1
                   fi
 
+                  # Belt-and-braces: the token must never reach the NAS. Auth
+                  # rides in env, but legacy configs came down from the NAS.
+                  for CFG in "${WORK_DIR}"/*.git/config "${STARRED_DIR}"/*.git/config; do
+                    [ -f "${CFG}" ] || continue
+                    if grep -qF "${GITHUB_TOKEN}" "${CFG}"; then
+                      echo "WARNING: scrubbing token from ${CFG}" >&2
+                      sed -i "s#${GITHUB_TOKEN}@##g; s#${GITHUB_TOKEN}#REDACTED#g" "${CFG}"
+                    fi
+                  done
+
+                  # No --delete: nothing is removed locally, so --delete could only
+                  # ever wipe NAS mirrors after a bad sync-down. Retention is the point.
                   echo ""
                   echo "--- Syncing mirrors to NAS ---"
-                  rsync -az --delete \
-                    -e "ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no" \
-                    ${WORK_DIR}/ ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/
+                  rsync -a -e "${SSH_CMD}" ${WORK_DIR}/ ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/
 
                   echo ""
                   echo "=== Mirror Backup Summary ==="
-                  ssh -i /tmp/id_ed25519 -o StrictHostKeyChecking=no \
-                    ${NAS_USER}@${NAS_HOST} "ls -la ${NAS_PATH}/"
+                  ${SSH_CMD} ${NAS_USER}@${NAS_HOST} \
+                    "cd ${NAS_PATH} && echo \"owned: \$(ls -d *.git | wc -l) mirrors\" && echo \"starred: \$(ls -d starred/*.git 2>/dev/null | wc -l) mirrors\" && du -sh . starred"
+                  echo "Owned failed:  ${OWNED_FAILED:- none}"
+                  echo "Starred failed:${STARRED_FAILED:- none}"
+                  echo "Starred skipped (over cap):${STARRED_SKIPPED:- none}"
 
-                  echo ""
-                  echo "Git mirror backup completed successfully!"
-
-                  # Cleanup
                   rm -f /tmp/id_ed25519
+
+                  RC=0
+                  if [ -n "${OWNED_FAILED}" ]; then
+                    echo "ERROR: owned repos failed to mirror:${OWNED_FAILED}" >&2
+                    RC=1
+                  fi
+                  if [ -n "${STARRED_LIST_FAILED}" ]; then
+                    echo "ERROR: could not list starred repos (token permission?) — starred mirrors not refreshed" >&2
+                    RC=1
+                  fi
+                  [ "${RC}" -eq 0 ] && echo "Git mirror backup completed successfully!"
+                  exit ${RC}
               volumeMounts:
                 - name: ssh-key
                   mountPath: /ssh
@@ -148,8 +267,11 @@ spec:
                   cpu: 100m
                   memory: 256Mi
                 limits:
-                  cpu: 500m
-                  memory: 512Mi
+                  # 1 core: index-pack on first starred clones is CPU-bound.
+                  cpu: 1000m
+                  # 1Gi: headroom for single-threaded index-pack of a ~250 MB
+                  # repo (node has ~3.5 GiB available).
+                  memory: 1Gi
           volumes:
             - name: ssh-key
               secret:
@@ -160,4 +282,8 @@ spec:
                 secretName: github-mirror-token
                 defaultMode: 0400
             - name: workspace
-              emptyDir: {}
+              # Lives on pi-k3s's SD card (59G, ~18G free). Expected ~2.5G;
+              # the limit evicts THIS pod, not the control plane, if a run
+              # ever balloons.
+              emptyDir:
+                sizeLimit: 6Gi
