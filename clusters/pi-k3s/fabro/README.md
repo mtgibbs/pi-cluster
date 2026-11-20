@@ -15,14 +15,20 @@ coding worker; it replaces neither.
 
 ## Review this first
 
-**(a) The sidecar is unprivileged, but it is not an ordinary container.** `dind` is not
-`privileged`, runs as uid 1000 and drops every capability except SETUID and SETGID. To run rootless
-Docker it also needs, and has:
+**(a) The sidecar is privileged only inside the pod's user namespace.** `dind` runs as uid 1000
+with `privileged: true`, but the pod has `hostUsers: false`, so those capabilities apply to the
+pod's user namespace and not to the node. To run rootless Docker it also needs, and has:
 
 - `allowPrivilegeEscalation: true` — `newuidmap`/`newgidmap` are setuid binaries.
 - `procMount: Unmasked` — its `/proc` has no masked paths, so it can mount a fresh `/proc` for each
   sandbox.
-- the host's `/dev/net/tun`, as a `hostPath` volume — rootless networking opens it.
+- the host's `/dev/net/tun`, which rootless networking opens. This is the only reason for
+  `privileged`: it makes the runtime expose the node's devices. A `hostPath` volume for the device
+  was the first attempt and failed on pi5-worker-2 (`failed to set MOUNT_ATTR_IDMAP on
+  /dev/net/tun`): a user-namespaced pod's volumes are id-mapped mounts and devtmpfs does not
+  support them. The cost is that every node device node is visible in the container; root-owned
+  ones (disks, memory) cannot be opened, because root in the pod is a high unprivileged uid on
+  the node.
 - `seccompProfile: Unconfined` and `appArmorProfile: Unconfined` (see the table below).
 - a pod-level user namespace (`hostUsers: false`), which is what makes the rest tolerable: every
   process in the pod, sandboxes included, is one unprivileged high uid on the node.
@@ -51,7 +57,11 @@ It depends on four things the Pi kernel and runtime must provide:
    id-mapped mounts in the kernel for the pod's volumes;
 2. unprivileged user namespaces (rootless Docker creates a nested one for the sandboxes);
 3. overlayfs inside a user namespace (the sidecar's image store);
-4. a non-privileged container being allowed to open `/dev/net/tun`.
+4. the runtime exposing `/dev/net/tun` to a container that is privileged inside a pod user
+   namespace.
+
+Seen on pi5-worker-2 (2026-11-20): items 1 held for the `fabro` and `bootstrap` containers
+(both ran with `hostUsers: false`, volumes mounted); the `hostPath` form of item 4 failed.
 
 What this repo records about the nodes: **k3s v1.34.3+k3s1** on all four, **Raspberry Pi OS Lite
 64-bit / Debian 13**. It records **no kernel version, no containerd version, and nothing about

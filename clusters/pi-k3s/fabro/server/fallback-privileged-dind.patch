@@ -30,6 +30,8 @@ spec:
       containers:
         - name: dind
           securityContext:
+            # Already true in the default shape; what changes here is that it is no longer
+            # confined to a pod user namespace.
             privileged: true
             # `procMount: Unmasked` is only legal with hostUsers: false, and a privileged
             # container's /proc is unmasked anyway.
@@ -37,16 +39,11 @@ spec:
             # Meaningless once privileged.
             capabilities: null
           volumeMounts:
-            # A privileged container sees the host's /dev/net/tun without the hostPath.
-            - mountPath: /dev/net/tun
-              $patch: delete
             # Outside a pod user namespace the image's own /etc/subuid range (100000+) is valid.
             - mountPath: /etc/subuid
               $patch: delete
             - mountPath: /etc/subgid
               $patch: delete
       volumes:
-        - name: dev-tun
-          $patch: delete
         - name: subid
           $patch: delete
