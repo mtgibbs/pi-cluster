@@ -109,8 +109,8 @@ spec:
               readOnly: true
 
         # --- rootless Docker: where agent sandboxes run -----------------------------------------
-        # NOT privileged. It runs as uid 1000 with only SETUID/SETGID, which newuidmap/newgidmap
-        # need to build the nested user namespace sandboxes live in.
+        # Runs as uid 1000, `privileged` only within the pod's user namespace (see the
+        # securityContext comment): not privileged on the node.
         - name: dind
           image: docker:29.10.0-dind-rootless
           env:
@@ -140,9 +140,16 @@ spec:
             # no AppArmor at all — so this stays as the prototype had it. See ../README.md.
             appArmorProfile:
               type: Unconfined
-            capabilities:
-              drop: ["ALL"]
-              add: ["SETUID", "SETGID"]
+            # `privileged` INSIDE the pod's user namespace (hostUsers: false above), for one reason:
+            # it makes the runtime expose the node's /dev/net/tun, which rootless networking
+            # opens. The hostPath mount this replaces cannot work on a real node: the kubelet
+            # asks for an id-mapped mount, and devtmpfs does not support those (`failed to set
+            # MOUNT_ATTR_IDMAP on /dev/net/tun`, seen on pi5-worker-2). It only worked on k3d
+            # because a k3d node's /dev is a tmpfs.
+            # What it costs: every capability, but only over this pod's user namespace — root
+            # in here is still an unprivileged high uid on the node, so root-owned host devices
+            # (disks, mem) are visible but not openable. dockerd itself still runs as uid 1000.
+            privileged: true
           # Measured ~300Mi idle. Rootless Docker has no cgroup delegation, so a sandbox's own
           # cpu/memory settings are NOT enforced: these limits are the only bound on what all
           # sandboxes together can use.
@@ -158,8 +165,6 @@ spec:
               mountPath: /run/user/1000
             - name: docker-data
               mountPath: /home/rootless/.local/share
-            - name: dev-tun
-              mountPath: /dev/net/tun
             - name: subid
               mountPath: /etc/subuid
               subPath: subuid
@@ -230,11 +235,6 @@ spec:
         - name: docker-data
           emptyDir:
             sizeLimit: 8Gi
-        # slirp4netns/vpnkit (rootless networking) open the host's tun device.
-        - name: dev-tun
-          hostPath:
-            path: /dev/net/tun
-            type: CharDevice
         - name: subid
           configMap:
             name: fabro-dind-subid
