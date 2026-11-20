@@ -55,7 +55,7 @@ for p in sorted(wf.rglob("*")):
     if p.is_file() and not p.name.startswith("."):
         files[str(p.relative_to(wf))] = p.read_text()
 toml = files["workflow.toml"]
-if "[run.inputs]" in toml:
+if any(l.strip().startswith("[run.inputs") for l in toml.splitlines()):
     sys.exit("workflow.toml must not define [run.inputs]; submit.sh owns it")
 files["workflow.toml"] = toml.rstrip() + "\n\n# --- appended by factory/submit.sh ---\n[run.inputs]\n" + "".join(
     f'{k} = "{v}"\n' for k, v in [("steps_b64", base64.b64encode(steps).decode()),
