@@ -1,0 +1,191 @@
+// The factory, Stage 0 (shadow mode), for mtgibbs/pi-cluster-mcp. Spec: factory/README.md.
+//
+// Start it with factory/submit.sh, never by hand: submit.sh packs factory/steps.py and
+// factory/classify.sh into [run.inputs] (steps_b64, classify_b64, code_sha). `setup`
+// writes them to /tmp/factory once; every later deterministic stage first re-checks their
+// sha256 against inputs.code_sha and refuses to run if an agent stage touched them.
+//
+// Routing discipline (rules 3 and 4):
+//   * Every forward edge out of a deterministic stage is conditioned on
+//     `outcome=succeeded && fx_<thing>=<good value>`. A crash, a missing value or an
+//     unexpected value falls through to the unconditional edge, which is always a hold
+//     path (or abort), never forward.
+//   * Judges never route. Each judge is followed by a `*_capture` command that parses the
+//     judge's recorded reply (stdin = response.<judge>) and emits pass|raise|none. Only
+//     `pass` moves forward. `raise` goes to `*_raised`, which counts it in fx and sends it
+//     back to the author with the objections (2 rounds), then onward marked `raise`;
+//     `none` (no reply, unparseable, wrong packet id) goes straight to a hold marker.
+//   * Loop bounds are counters kept in fx by steps.py. `context.internal.node_visit_count`
+//     is NOT usable in an edge condition on this engine: run 2 showed it evaluate false on
+//     the first visit, which silently skipped the revise loop.
+//   * Nothing a judge says can reach a stage after a red deterministic gate: the judges
+//     only run on the `fx_gates=pass` / `fx_spec_check=pass` edges.
+digraph Factory {
+    graph [
+        goal="Turn an idea into a reviewed pull request on mtgibbs/pi-cluster-mcp (factory Stage 0, shadow mode).",
+        max_node_visits="14",
+        default_max_retries=0,
+        stall_timeout="5400s"
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    // ------------------------------------------------------------------ setup
+    setup [label="Setup (npm ci, record base)", timeout="25m", output_schema="routing",
+        script="set -e; mkdir -p /tmp/factory; printf %s {{ inputs.steps_b64 }} | base64 -d > /tmp/factory/steps.py; printf %s {{ inputs.classify_b64 }} | base64 -d > /tmp/factory/classify.sh; [ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code does not match inputs.code_sha'; exit 1; }; python3 /tmp/factory/steps.py setup {{ inputs.spec }} {{ inputs.issue }}"]
+
+    // ------------------------------------------------------------------ spec
+    ideate [label="Ideate (draft spec)", prompt="@prompts/ideate.md", timeout="40m", max_visits=8]
+
+    spec_check [label="Spec check (deterministic, red-before-green)", timeout="15m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py spec_check"]
+
+    spec_judge [label="Spec judge", prompt="@prompts/spec_judge.md", fidelity="truncate", timeout="35m", max_visits=8]
+
+    spec_capture [label="Spec verdict (parse)", timeout="5m", stdin_source="response.spec_judge", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py capture spec"]
+
+    spec_pass   [label="spec judge: pass", stdin_source="fx", output_schema="routing", max_visits=6,
+        script="python3 /tmp/factory/steps.py merge spec_judge pass"]
+    spec_raised [label="spec judge: raised (count it; revise or hold)", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py raised spec"]
+    spec_none   [label="spec judge: no usable verdict -> hold", stdin_source="fx", output_schema="routing", max_visits=6,
+        script="python3 /tmp/factory/steps.py merge spec_judge none"]
+
+    lock [label="Lock spec (freeze verify.sh)", timeout="5m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py lock"]
+
+    approve_spec [shape=hexagon, label="Approve this spec? Read the `lock` stage output: spec.md, tasks.txt, verify.sh and every spec-judge round. To REVISE, type a note instead of picking an option: it goes to the spec writer and the spec is checked and judged again. On approval verify.sh is frozen; any later edit to it makes the PR class C and holds it."]
+
+    // A typed answer at a gate lands in context key human.gate.text and follows the freeform
+    // edge. These stages take it on stdin and save it where the next agent stage reads it.
+    spec_note [label="human: revise spec (note saved)", timeout="5m", stdin_source="human.gate.text", output_schema="routing", max_visits=6,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py note spec"]
+
+    // ------------------------------------------------------------------ build
+    implement [label="Implement", prompt="@prompts/implement.md", timeout="60m", max_visits=12]
+
+    gates [label="Gates: npm ci, lint, typecheck, test, build, STRICT verify.sh", timeout="40m", stdin_source="fx", output_schema="routing", max_visits=12,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py gates"]
+
+    gates_escalate [shape=hexagon, label="The deterministic gates are still red after 3 fix rounds (or the gate stage crashed). Read the `gates` output, then choose."]
+    gates_hold [label="human: open PR as hold", stdin_source="fx", output_schema="routing", max_visits=4,
+        script="python3 /tmp/factory/steps.py merge gates_escalated opened-as-hold"]
+
+    conf_judge [label="Conformance judge", prompt="@prompts/conf_judge.md", fidelity="truncate", timeout="25m", max_visits=8]
+
+    conf_capture [label="Conformance verdict (parse)", timeout="5m", stdin_source="response.conf_judge", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py capture conf"]
+
+    conf_pass   [label="conformance: pass", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="python3 /tmp/factory/steps.py merge conf_judge pass"]
+    conf_raised [label="conformance: raised (count it; fix or hold)", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py raised conf"]
+    conf_none   [label="conformance: no usable verdict -> hold", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="python3 /tmp/factory/steps.py merge conf_judge none"]
+
+    // ------------------------------------------------------------------ PR
+    classify [label="Classify risk (classify.sh) + tamper check", timeout="10m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py classify"]
+
+    open_pr [label="Push branch, open/refresh PR, labels", timeout="10m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py open_pr"]
+
+    wait_checks [label="Wait for CI + review-hub", timeout="50m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py wait_checks"]
+
+    review_escalate [shape=hexagon, label="CI or review-hub is still red after 3 fix rounds. Read the `wait_checks` output and the PR. Is the judge right (type a note for the builder), wrong (override, logged, verdict stays hold), or abandon?"]
+    build_note [label="human: judge is right (note saved)", timeout="5m", stdin_source="human.gate.text", output_schema="routing", max_visits=6,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py note build"]
+    override [label="human: judge is wrong (logged)", stdin_source="fx", output_schema="routing", max_visits=4,
+        script="python3 /tmp/factory/steps.py merge override judge-is-wrong"]
+    abandon  [label="human: abandon", stdin_source="fx", output_schema="routing", max_visits=4,
+        script="python3 /tmp/factory/steps.py merge abandoned abandoned-at-escalation"]
+
+    verdict [label="Post factory verdict (never merges)", timeout="10m", stdin_source="fx", output_schema="routing", max_visits=4,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code changed since setup'; exit 1; }; python3 /tmp/factory/steps.py verdict"]
+
+    abort [label="Abort (no PR)", script="echo 'Factory run stopped: setup failed, the spec never passed its deterministic check, the spec was rejected, or a stage crashed before a PR existed.'; exit 1"]
+
+    // ------------------------------------------------------------------ edges
+    start -> setup
+    setup -> ideate [condition="outcome=succeeded && fx_spec matches ^[a-z0-9]"]
+    setup -> abort
+
+    ideate -> spec_check
+
+    spec_check -> spec_judge [condition="outcome=succeeded && fx_spec_check=pass"]
+    spec_check -> ideate     [condition="outcome=succeeded && fx_spec_check=fail && fx_spec_check_fails <= 2"]
+    spec_check -> abort
+
+    spec_judge -> spec_capture
+
+    spec_capture -> spec_pass   [condition="outcome=succeeded && fx_spec_verdict=pass"]
+    spec_capture -> spec_raised [condition="outcome=succeeded && fx_spec_verdict=raise"]
+    spec_capture -> spec_none
+
+    // The revise loop: a raise goes back to the spec writer with the judge's objections
+    // (at most 2 rounds, counted in fx by `raised`), then to the human gate marked `raise`.
+    spec_raised -> ideate [condition="outcome=succeeded && fx_spec_next=revise"]
+    spec_pass   -> lock
+    spec_raised -> lock
+    spec_none   -> lock
+
+    lock -> approve_spec [condition="outcome=succeeded"]
+    lock -> abort
+
+    approve_spec -> implement [label="[A] Approve - build it"]
+    approve_spec -> spec_note [label="[R] Revise (type notes for the spec writer)", freeform=true]
+    approve_spec -> abort     [label="[X] Reject"]
+    approve_spec -> abort     [condition="outcome=failed"]
+
+    spec_note -> ideate [condition="outcome=succeeded"]
+    spec_note -> abort
+
+    implement -> gates
+
+    gates -> conf_judge     [condition="outcome=succeeded && fx_gates=pass"]
+    gates -> implement      [condition="outcome=succeeded && fx_gates=fail && fx_gate_fails <= 3"]
+    gates -> gates_escalate
+
+    gates_escalate -> implement  [label="[R] One more fix round"]
+    gates_escalate -> gates_hold [label="[H] Open the PR anyway (verdict: hold)"]
+    gates_escalate -> abort      [label="[X] Abandon"]
+    gates_escalate -> abort      [condition="outcome=failed"]
+    gates_hold -> classify
+
+    conf_judge -> conf_capture
+
+    conf_capture -> conf_pass   [condition="outcome=succeeded && fx_conf_verdict=pass"]
+    conf_capture -> conf_raised [condition="outcome=succeeded && fx_conf_verdict=raise"]
+    conf_capture -> conf_none
+
+    conf_raised -> implement [condition="outcome=succeeded && fx_conf_next=revise"]
+    conf_pass   -> classify
+    conf_raised -> classify
+    conf_none   -> classify
+
+    classify -> open_pr [condition="outcome=succeeded && fx_class matches ^[ABC]$"]
+    classify -> abort
+
+    open_pr -> wait_checks [condition="outcome=succeeded"]
+    open_pr -> abort
+
+    wait_checks -> verdict         [condition="outcome=succeeded && fx_ci=green"]
+    wait_checks -> implement       [condition="outcome=succeeded && fx_ci=red && fx_ci_red_rounds <= 3", weight=10]
+    wait_checks -> review_escalate [condition="outcome=succeeded && fx_ci=red", weight=1]
+    wait_checks -> verdict
+
+    review_escalate -> build_note [label="[J] Judge is right (type a note for the builder)", freeform=true]
+    build_note -> implement [condition="outcome=succeeded"]
+    build_note -> review_escalate
+    review_escalate -> override  [label="[W] Judge is wrong - override (logged, verdict stays hold)"]
+    review_escalate -> abandon   [label="[X] Abandon"]
+    review_escalate -> abandon   [condition="outcome=failed"]
+    override -> verdict
+    abandon  -> verdict
+
+    verdict -> exit [condition="outcome=succeeded"]
+    verdict -> abort
+}
