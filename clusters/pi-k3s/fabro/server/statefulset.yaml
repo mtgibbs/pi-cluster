@@ -182,7 +182,7 @@ spec:
         # curlimages/curl because the Fabro image has no HTTP client that can send PUT; the same
         # image and tag the cluster already runs elsewhere.
         - name: bootstrap
-          image: curlimages/curl:8.21.0
+          image: curlimages/curl:8.23.0
           command: ["sh", "/etc/fabro/bootstrap.sh"]
           env:
             # Scratch files (auth header, request bodies); a memory-backed emptyDir.
