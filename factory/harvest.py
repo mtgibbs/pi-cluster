@@ -75,10 +75,18 @@ def harvest(rid):
         out = stage_output(rid, s["id"])
         upd = json.loads(out.strip().splitlines()[-1])["context_updates"]
         verdict, reasons = upd["fx_spec_verdict"], json.loads(upd["fx_spec_reasons"])
-        judge = by_node("spec_judge")[n - 1]
-        reply = stage_output(rid, judge["id"])
+        # Pair by visit order across every judge visit: a timed-out judge is a failed stage
+        # whose capture still records verdict "none".
+        judges = [x for x in stages if x["node_id"] == "spec_judge"]
+        judge = judges[n - 1] if n <= len(judges) else {}
+        try:
+            reply = stage_output(rid, judge["id"]) if judge else ""
+        except Exception:
+            reply = ""
         m = re.search(r'"id":\s*"(\w+)"', reply.strip().splitlines()[-1]) if reply.strip() else None
         pid = m.group(1) if m else ""
+        if not pid and len(packets) == 1:                # no reply to read the id from (timeout)
+            pid = next(iter(packets))
         last = n == len(caps)
         case = {
             "judge": "spec-judge",
@@ -90,6 +98,7 @@ def harvest(rid):
             "verdict": verdict,
             "reasons": reasons,
             "judge_seconds": judge.get("wall_time_ms", 0) // 1000,
+            "judge_stage_status": judge.get("status"),
             # Only the last round reaches a human; earlier raises were answered by the spec writer.
             "followed_by": ("human gate" if last else "automatic revise round"),
             "human_action": (action(answers[-1]) if last and answers else None),
