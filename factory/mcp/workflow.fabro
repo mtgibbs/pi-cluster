@@ -21,11 +21,15 @@
 //   * Nothing a judge says can reach a stage after a red deterministic gate: the judges
 //     only run on the `fx_gates=pass` / `fx_spec_check=pass` edges.
 digraph Factory {
+    // Which model does which job. The names come from the profile submit.sh picked out of
+    // factory/models.toml and wrote into [run.inputs] (m_writer ...), so the choice is part
+    // of the uploaded workflow version. A stylesheet rule beats [run.model] and run args.
     graph [
         goal="Turn an idea into a reviewed pull request on mtgibbs/pi-cluster-mcp (factory Stage 0, shadow mode).",
         max_node_visits="14",
         default_max_retries=0,
-        stall_timeout="5400s"
+        stall_timeout="5400s",
+        model_stylesheet="#ideate { model: {{ inputs.m_writer }}; } #spec_judge { model: {{ inputs.m_spec_judge }}; } #implement { model: {{ inputs.m_builder }}; } #conf_judge { model: {{ inputs.m_conf_judge }}; }"
     ]
 
     start [shape=Mdiamond, label="Start"]
@@ -33,7 +37,7 @@ digraph Factory {
 
     // ------------------------------------------------------------------ setup
     setup [label="Setup (npm ci, record base)", timeout="25m", output_schema="routing",
-        script="set -e; mkdir -p /tmp/factory; printf %s {{ inputs.steps_b64 }} | base64 -d > /tmp/factory/steps.py; printf %s {{ inputs.classify_b64 }} | base64 -d > /tmp/factory/classify.sh; [ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code does not match inputs.code_sha'; exit 1; }; python3 /tmp/factory/steps.py setup {{ inputs.spec }} {{ inputs.issue }}"]
+        script="set -e; mkdir -p /tmp/factory; printf %s {{ inputs.steps_b64 }} | base64 -d > /tmp/factory/steps.py; printf %s {{ inputs.classify_b64 }} | base64 -d > /tmp/factory/classify.sh; [ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code does not match inputs.code_sha'; exit 1; }; FACTORY_PROFILE='{{ inputs.profile }}' python3 /tmp/factory/steps.py setup {{ inputs.spec }} {{ inputs.issue }}"]
 
     // ------------------------------------------------------------------ spec
     ideate [label="Ideate (draft spec)", prompt="@prompts/ideate.md", timeout="40m", max_visits=8]

@@ -265,3 +265,49 @@ the `#` in the qid). To revise instead, type a note in the UI or send `{"kind":"
   checkpoint (filter after `git add -A`, or tolerate this specific exit). The factory sets no
   `exclude_globs` and relies on the target's `.gitignore`.
 
+
+## Model profiles: who writes, builds and judges
+
+`factory/models.toml` names a model for each of the four model-driven roles and groups them
+into profiles. Pick one per run:
+
+```bash
+factory/submit.sh --profile hybrid --issue 45 "<idea>"     # default: all-local
+factory/report.py                                          # time, tokens and cost per run, by role
+```
+
+| Profile | writer | spec judge | builder | conformance judge |
+|---|---|---|---|---|
+| `all-local` | hot-coder | hot-coder | hot-coder | hot-coder |
+| `hybrid` | hot-coder | claude-haiku | hot-coder | claude-sonnet |
+| `cloud-builder` | claude-haiku | hot-coder | claude-haiku | hot-coder |
+| `all-cloud` | claude-sonnet | claude-haiku | claude-haiku | claude-sonnet |
+
+How it works: `submit.sh` writes the profile into `[run.inputs]` (`m_writer`, `m_spec_judge`,
+`m_builder`, `m_conf_judge`, `profile`), and the graph's `model_stylesheet` reads them, one
+`#node { model: ... }` rule per role. The profile is therefore part of the uploaded workflow
+version, is logged by `setup`, and is written into the verdict record on the PR.
+
+`report.py` reads Fabro's recorded stages (model used, wall time, tokens) and the run's final
+state (verdict, gate fails, CI red rounds, judge raises) and prices the tokens from
+`models.toml`. That is the comparison: same idea, different profile, look at time, cost and
+outcome side by side. Its dollar figure is an estimate with a no-cache worst case beside it;
+LiteLLM's spend log for Fabro's key is the bill of record.
+
+Proven with a no-model control run (`01M89Q3E58YXD65BP3TS47MAFF`, profile `hybrid`): the
+spec-judge stage was routed to `claude-haiku`, failed because the server could not call it yet,
+and the run held at the human gate with no verdict — the stylesheet takes effect and a model
+that cannot answer is a hold, not a pass.
+
+What a hosted profile still needs before it can run:
+
+1. Fabro's `settings.toml` must list `claude-haiku` and `claude-sonnet` (with pricing, so the
+   portal's Usage tab shows cost) — a pi-cluster manifest change.
+2. Fabro needs its own LiteLLM virtual key allowed to call them, with a budget. Today it
+   borrows the harness-fleet key, which is local-only.
+
+Not covered: the review-hub panels. review-hub has one `JUDGE_MODEL` for every repo and no
+per-PR switch, so the "tiny judges" cannot follow a factory profile until review-hub grows one.
+Unverified: whether prompt caching survives the LiteLLM hop to Anthropic. An agent stage
+re-sends its history every turn (run 4's builder read 7.3M cached tokens), so this decides
+whether a Sonnet conformance pass costs about $0.80 or about $9.

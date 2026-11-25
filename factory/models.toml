@@ -1,0 +1,70 @@
+# models.toml — which model does which job, and what each model costs.
+#
+#   factory/submit.sh --profile hybrid "<idea>"      # default profile: all-local
+#   factory/report.py                                 # time and cost per run, by role
+#
+# A PROFILE names a model for each ROLE. submit.sh stamps the chosen profile into the
+# workflow version it uploads, so the profile is part of the content-addressed version and
+# a run cannot change it part-way.
+#
+# Roles (the model-driven stages of factory/mcp/workflow.fabro):
+#   writer      ideate      — turns the idea into spec.md, tasks.txt, verify.sh
+#   spec_judge  spec_judge  — reads the spec before the human gate
+#   builder     implement   — writes the code and its tests
+#   conf_judge  conf_judge  — reads the finished diff against the spec
+#
+# NOT set here: the review-hub panels (9 validators x 5 votes). review-hub runs in the
+# cluster with one JUDGE_MODEL for every repo (clusters/pi-k3s/review-hub/deployment.yaml);
+# it has no per-PR model switch yet.
+#
+# Every model is reached through the one LiteLLM gateway (https://ai.lab.mtgibbs.dev), so a
+# model is usable only if (a) LiteLLM serves the alias, (b) Fabro's settings.toml lists it,
+# and (c) Fabro's LiteLLM key is allowed to call it.
+
+[profiles.all-local]
+writer = "hot-coder"
+spec_judge = "hot-coder"
+builder = "hot-coder"
+conf_judge = "hot-coder"
+
+# Local model builds; hosted models judge it. The judge is never the model that wrote the code.
+[profiles.hybrid]
+writer = "hot-coder"
+spec_judge = "claude-haiku"
+builder = "hot-coder"
+conf_judge = "claude-sonnet"
+
+# Hosted model builds; the local model judges it.
+[profiles.cloud-builder]
+writer = "claude-haiku"
+spec_judge = "hot-coder"
+builder = "claude-haiku"
+conf_judge = "hot-coder"
+
+[profiles.all-cloud]
+writer = "claude-sonnet"
+spec_judge = "claude-haiku"
+builder = "claude-haiku"
+conf_judge = "claude-sonnet"
+
+# Prices are USD per million tokens and are used ONLY for report.py's estimate. The bill of
+# record is LiteLLM's spend log for Fabro's key. hot-coder runs on the Beelink: no per-token
+# price (its cost is electricity and the box being busy, which the time columns show).
+# Claude prices are LiteLLM's own price map (model_prices_and_context_window.json, read
+# 2026-11-25). Haiku's are its <=100K-token-prompt tier; above that it is 0.50 / 2.50 /
+# 0.05, which this estimate ignores. cache_read applies only if the gateway passes prompt
+# caching through — unverified, so report.py prints a no-cache worst case beside it.
+[models.hot-coder]
+provider = "litellm"
+runs = "local"
+usd_per_mtok = { input = 0.0, output = 0.0, cache_read = 0.0 }
+
+[models.claude-haiku]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.10, output = 0.50, cache_read = 0.01 }
+
+[models.claude-sonnet]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 2.00, output = 10.00, cache_read = 0.10 }

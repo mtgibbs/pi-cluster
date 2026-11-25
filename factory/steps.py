@@ -210,7 +210,10 @@ def st_setup(spec, issue=""):
     suffix = (run_id[-6:] or short_hash(spec + base)[:6]).lower()
     fx = {"v": 1, "spec": spec, "issue": issue, "run_id": run_id, "repo": repo_slug(),
           "base": base, "branch": f"factory/{spec}-{suffix}", "gate_fails": 0, "gate_runs": 0,
-          "ci_red_rounds": 0, "notes": []}
+          "ci_red_rounds": 0, "notes": [],
+          # "<profile name> writer=<model> spec_judge=<model> builder=<model> conf_judge=<model>"
+          "profile": os.environ.get("FACTORY_PROFILE", "")}
+    log(f"model profile: {fx['profile'] or '(none recorded)'}")
     emit(fx, fx_spec=spec)
 
 
@@ -633,7 +636,7 @@ def st_verdict(fx):
               "spec_judge": fx.get("spec_judge"), "conf_judge": fx.get("conf_judge"),
               "gate_runs": fx.get("gate_runs"), "gate_fails": fx.get("gate_fails"),
               "ci_red_rounds": fx.get("ci_red_rounds"), "required": ci.get("required"),
-              "override": fx.get("override"), "factory_stage": 0}
+              "override": fx.get("override"), "factory_stage": 0, "profile": fx.get("profile")}
     head = "✅ **would merge**" if verdict == "would merge" else "⏸️ **hold**"
     body = "\n".join([
         VERDICT_MARKER, f"## Factory verdict: {head} · class {fx.get('class', '?')}", "",
