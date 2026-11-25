@@ -223,17 +223,20 @@ LAN, not the cluster.
 
 | Secret (namespace `fabro`) | Key | 1Password | Status |
 | :--- | :--- | :--- | :--- |
-| `fabro-vault-seed` | `LITELLM_API_KEY` | `harness-fleet/litellm-key` | **Reused** from the harness fleet |
+| `fabro-vault-seed` | `LITELLM_API_KEY` | `fabro/litellm-key` | Minted 2026-11-25 — Fabro's own LiteLLM key: `hot-coder`, `claude-haiku`, `claude-sonnet`; $100 per 30 days (only Claude spends it) |
 | `fabro-vault-seed` | `GITHUB_TOKEN` | `harness-fleet/outcome-pat` | **Reused** from the harness fleet |
 | `fabro-server-env` | `FABRO_DEV_TOKEN` | `fabro/dev-token` | Minted — Fabro's own login |
 | `fabro-server-env` | `SESSION_SECRET` | `fabro/session-secret` | Minted — its cookie key |
 
-Credentials here scale by role, not by tool. A Fabro run does the job a fleet worker and a Kelos
-agent pod already do — clone, push a branch, open a PR, spend `hot-coder` tokens — on the same
-node, so it carries the same two identities rather than a third pair to rotate and audit. The
-costs are the ones Kelos already accepted, now three ways: LiteLLM cannot tell fleet, Kelos and
-Fabro spend apart, and revoking either credential stops all three. If Fabro outlives its trial,
-mint it its own LiteLLM key first, and replace the PAT with a GitHub App (risk (d)).
+Credentials here scale by role, not by tool. For GitHub a Fabro run does the job a fleet worker
+and a Kelos agent pod already do — clone, push a branch, open a PR — so it carries the same PAT
+rather than a third one to rotate and audit; the cost is that revoking it stops all three. Replace
+it with a GitHub App if Fabro outlives its trial (risk (d)).
+
+The LiteLLM key is Fabro's own since 2026-11-25. Fabro is the one runner allowed hosted models
+(`claude-haiku`, `claude-sonnet`, chosen per stage by a workflow's model stylesheet), and a
+hosted-model budget has to be attributable to the workload that spends it. `hot-coder` has no
+price in LiteLLM, so local runs do not draw on the $100.
 
 The key names are Fabro's, not ours: its `litellm` provider looks up `LITELLM_API_KEY` and its
 `token` GitHub strategy looks up `GITHUB_TOKEN`, both in its vault. Neither is read from the

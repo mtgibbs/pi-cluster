@@ -93,12 +93,17 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_77 ExternalSecrets · 54 1Password items · 77 consumer edges · 19 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_77 ExternalSecrets · 54 1Password items · 77 consumer edges · 20 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
 ```mermaid
 graph LR
+  n14ulz31(["🔑 fabro"])
+  nr8be8h["fabro-server-env<br/>(fabro)"]
+  n14ulz31 --> nr8be8h
+  nbsjbtm["fabro-vault-seed<br/>(fabro)"]
+  n14ulz31 --> nbsjbtm
   n1uid43c(["🔑 ghcr-read-token"])
   n1dgsmvl["ghcr-pull-secret<br/>(flux-system)"]
   n1uid43c --> n1dgsmvl
@@ -118,7 +123,6 @@ graph LR
   np8hd7e["harness-coordinator<br/>(harness)"]
   n8i3u24 --> np8hd7e
   n8ivklm(["🔑 harness-fleet"])
-  nbsjbtm["fabro-vault-seed<br/>(fabro)"]
   n8ivklm --> nbsjbtm
   n1ykti58["harness-dispatcher<br/>(harness-fleet)"]
   n8ivklm --> n1ykti58
@@ -243,8 +247,9 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
-- **fabro** → 1 ExternalSecret(s):
+- **fabro** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `fabro/fabro-server-env`
+    - `fabro/fabro-vault-seed`
 - **ghcr-read-token** `safe` → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
     - `harness-fleet/ghcr-pull-secret`
@@ -427,7 +432,7 @@ graph LR
   produces Secret `fabro-server-env` in `fabro`
     → `fabro/fabro` (StatefulSet, env)
     → `fabro/fabro` (StatefulSet, envFrom)
-- **`fabro/fabro-vault-seed`** ← `harness-fleet`
+- **`fabro/fabro-vault-seed`** ← `fabro`, `harness-fleet`
   produces Secret `fabro-vault-seed` in `fabro`
     → `fabro/fabro` (StatefulSet, volume)
 - **`family-board/family-board-feed`** ← `n8n-automation`
