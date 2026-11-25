@@ -299,12 +299,10 @@ spec-judge stage was routed to `claude-haiku`, failed because the server could n
 and the run held at the human gate with no verdict — the stylesheet takes effect and a model
 that cannot answer is a hold, not a pass.
 
-What a hosted profile still needs before it can run:
-
-1. Fabro's `settings.toml` must list `claude-haiku` and `claude-sonnet` (with pricing, so the
-   portal's Usage tab shows cost) — a pi-cluster manifest change.
-2. Fabro needs its own LiteLLM virtual key allowed to call them, with a budget. Today it
-   borrows the harness-fleet key, which is local-only.
+A hosted profile needs pi-cluster PR #283 merged: it lists `claude-haiku` and `claude-sonnet`
+in Fabro's `settings.toml` (with pricing, so the portal's Usage tab shows cost) and switches
+Fabro to its own LiteLLM key (alias `fabro`: those two plus `hot-coder`, $100 per 30 days).
+`hot-coder` has no price in LiteLLM, so `all-local` runs do not draw on that budget.
 
 Not covered: the review-hub panels. review-hub has one `JUDGE_MODEL` for every repo and no
 per-PR switch, so the "tiny judges" cannot follow a factory profile until review-hub grows one.
