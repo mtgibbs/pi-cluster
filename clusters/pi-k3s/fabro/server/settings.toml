@@ -68,9 +68,8 @@ pricing = { input_usd_micros_per_million = 0, output_usd_micros_per_million = 0,
 
 # Hosted Claude, through the SAME LiteLLM gateway (aliases added in beelink-ansible #48; the
 # Anthropic key lives only in LiteLLM). A workflow picks these per stage with a model
-# stylesheet — factory/models.toml holds the factory's profiles. They answer only once Fabro's
-# LITELLM_API_KEY is a virtual key whose `models` list names them; the shared harness-fleet key
-# is local-only and gets 403.
+# stylesheet — factory/models.toml holds the factory's profiles. Fabro's LITELLM_API_KEY is its own
+# virtual key (op fabro/litellm-key) allowed exactly these three models, $100 per 30 days.
 # Prices: LiteLLM's price map, USD micros per million tokens (Haiku's <=100K-prompt tier).
 # context_tokens is held at 200K on purpose (both models accept 1M): an agent stage re-sends
 # its whole history every turn, and Haiku's price is 5x above 100K.
