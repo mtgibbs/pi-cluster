@@ -62,6 +62,31 @@ display_name = "hot-coder (LiteLLM -> local Qwen coder)"
 api_model = "hot-coder"
 limits = { context_tokens = 131072, max_output_tokens = 32768 }
 capabilities = { text = true, tools = true }
+# Zero, not absent: Fabro shows a run's cost only when every model that used tokens is priced.
+# hot-coder runs on the Beelink, so its per-token price is nothing.
+pricing = { input_usd_micros_per_million = 0, output_usd_micros_per_million = 0, cached_input_usd_micros_per_million = 0 }
+
+# Hosted Claude, through the SAME LiteLLM gateway (aliases added in beelink-ansible #48; the
+# Anthropic key lives only in LiteLLM). A workflow picks these per stage with a model
+# stylesheet — factory/models.toml holds the factory's profiles. They answer only once Fabro's
+# LITELLM_API_KEY is a virtual key whose `models` list names them; the shared harness-fleet key
+# is local-only and gets 403.
+# Prices: LiteLLM's price map, USD micros per million tokens (Haiku's <=100K-prompt tier).
+# context_tokens is held at 200K on purpose (both models accept 1M): an agent stage re-sends
+# its whole history every turn, and Haiku's price is 5x above 100K.
+[llm.providers.litellm.models."claude-haiku"]
+display_name = "claude-haiku (LiteLLM -> Anthropic Haiku 5.5)"
+api_model = "claude-haiku"
+limits = { context_tokens = 200000, max_output_tokens = 32768 }
+capabilities = { text = true, tools = true }
+pricing = { input_usd_micros_per_million = 100000, output_usd_micros_per_million = 500000, cached_input_usd_micros_per_million = 10000 }
+
+[llm.providers.litellm.models."claude-sonnet"]
+display_name = "claude-sonnet (LiteLLM -> Anthropic Sonnet 5.5)"
+api_model = "claude-sonnet"
+limits = { context_tokens = 200000, max_output_tokens = 32768 }
+capabilities = { text = true, tools = true }
+pricing = { input_usd_micros_per_million = 2000000, output_usd_micros_per_million = 10000000, cached_input_usd_micros_per_million = 100000 }
 
 # `token`: Fabro uses the vault secret GITHUB_TOKEN (a PAT) directly — to clone, to push the run
 # branch, to open pull requests — and injects that same PAT into the sandbox as GITHUB_TOKEN. A
