@@ -57,10 +57,13 @@ Destination base: `/share/cluster/backups/`
 ### 5. `git-mirror-backup` — GitHub Repository Mirrors
 - **Schedule**: Sundays 3:30 AM
 - **Node**: `pi-k3s`
-- **Scope**: All GitHub repos owned by `mtgibbs` (bare mirror clones)
-- **Destination**: `/share/cluster/backups/git-mirrors/`
-- **Secret**: `github-mirror-token` (from 1Password via ExternalSecret)
-- **Note**: Incremental — pulls existing mirrors from NAS before updating
+- **Scope**: All GitHub repos owned by `mtgibbs` (full `--mirror`, all refs) **plus every starred repo** (bare, heads + tags only)
+- **Destination**: `/share/cluster/backups/git-mirrors/` (owned) and `git-mirrors/starred/<owner>__<repo>.git` (starred; `starred/STARRED.tsv` = what was starred at the last run)
+- **Secret**: `github-mirror-token` (fine-grained PAT, 1Password via ExternalSecret). Needs Contents:read on owned repos **and** the user permission *Starring: read*.
+- **Note**: Incremental — rsyncs the whole mirror set down from the NAS to an emptyDir on pi-k3s's SD card, fetches, rsyncs back. **No `--delete`**: unstarred/deleted upstreams keep their last copy forever.
+- **Starred size cap**: `STARRED_MAX_KB` env (default 256000 = 250 MB, GitHub's `size` field). Over-cap repos are skipped + listed in the summary; the cap only gates *new* clones.
+- **Failure semantics**: owned-list auth error or empty owned list → immediate fail. A failed owned repo → run continues, uploads, then exits 1. Starred repo failures → logged only, never fail the run; a failed starred *listing* → owned still uploads, run exits 1.
+- **Auth gotcha**: git auth rides an `http.extraheader` via `GIT_CONFIG_*` env — never a token-in-URL. The old token-in-URL method made every **private** repo fail (`redirecting to …` / `could not read Username`) while the job reported success (found 2026-11-11).
 
 ### 6. `mariadb-backup` — RomM Database
 - **Schedule**: Sundays 3:45 AM
