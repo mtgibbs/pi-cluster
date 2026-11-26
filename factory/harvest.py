@@ -3,12 +3,16 @@
 
   FABRO_URL=... FABRO_DEV_TOKEN=... factory/harvest.py <run-id> [<run-id> ...]
 
-For every spec-judge VOTE in the run it writes one case:
+For every spec-judge (rigor) VOTE in the run it writes one case:
   factory/evals/spec-judge/cases/<run-id>-r<R>-v<V>.json   (panel runs: round R, vote V)
   factory/evals/spec-judge/cases/<run-id>-r<N>.json        (runs from before judge panels)
-holding exactly what the judge was shown (the review packet), what it said, the panel
-round's outcome, and what the human then did at the gate. Existing case files are never
-overwritten, so re-harvesting an old run reproduces its old file names.
+and for every intent-panel vote, in a directory of its own:
+  factory/evals/spec-intent/cases/<run-id>-r<R>-v<V>.json     (spec intent panel)
+  factory/evals/change-intent/cases/<run-id>-r<R>-v<V>.json   (change intent panel)
+each holding exactly what the judge was shown (the review packet, which for an intent panel
+includes the idea verbatim), what it said, the panel round's outcome, and — for the rounds a
+human saw — what the human then did at the gate. Existing case files are never overwritten,
+so re-harvesting an old run reproduces its old file names.
 
 Why a script on the laptop and not a stage in the run: a judge must not be able to write
 the cases that grade it. This reads the run's recorded log after the fact; the cases reach
@@ -24,7 +28,20 @@ import base64, json, os, pathlib, re, sys, urllib.parse, urllib.request
 
 U = os.environ["FABRO_URL"].rstrip("/") + "/api/v1"
 T = os.environ["FABRO_DEV_TOKEN"]
-OUT = pathlib.Path(__file__).resolve().parent / "evals" / "spec-judge" / "cases"
+EVALS = pathlib.Path(__file__).resolve().parent / "evals"
+OUT = EVALS / "spec-judge" / "cases"
+# One entry per harvested panel. `tag` is the packet echo marker in the run log
+# (-----BEGIN <tag> PACKET <id>-----), `packets_from` the stages that echo it.
+PANELS = {
+    "spec": {"judge": "spec-judge", "node": "spec_judge", "kind": "spec", "out": OUT, "tag": "SPEC",
+             "packets_from": ("spec_check", "lock"), "gate": True},
+    "spec_intent": {"judge": "spec-intent", "node": "spec_intent", "kind": "spec_intent",
+                    "out": EVALS / "spec-intent" / "cases", "tag": "SPEC-INTENT",
+                    "packets_from": ("spec_check",), "gate": True},
+    "conf_intent": {"judge": "change-intent", "node": "conf_intent", "kind": "conf_intent",
+                    "out": EVALS / "change-intent" / "cases", "tag": "CHANGE-INTENT",
+                    "packets_from": ("gates",), "gate": False},
+}
 
 
 def get(path):
@@ -61,26 +78,35 @@ def action(ans):
 def harvest(rid):
     run = get(f"/runs/{rid}")
     stages = get(f"/runs/{rid}/stages")["data"]
+    answers = gate_answers(rid)
+    written = []
+    for cfg in PANELS.values():
+        written += harvest_panel(rid, run, stages, answers, cfg)
+    return written
+
+
+def harvest_panel(rid, run, stages, answers, cfg):
+    kind, node, OUT = cfg["kind"], cfg["node"], cfg["out"]
     by_node = lambda n: [s for s in stages if s["node_id"] == n and s["status"] == "succeeded"]
     packets = {}
-    for s in by_node("spec_check") + by_node("lock"):
+    for s in [x for n in cfg["packets_from"] for x in by_node(n)]:
         out = stage_output(rid, s["id"])
-        for sid, body in re.findall(r"-----BEGIN SPEC PACKET (\w+)-----\n(.*?)\n-----END SPEC PACKET \1-----", out, re.S):
+        tag = re.escape(cfg["tag"])
+        for sid, body in re.findall(rf"-----BEGIN {tag} PACKET (\w+)-----\n(.*?)\n-----END {tag} PACKET \1-----", out, re.S):
             packets[sid] = body
         m = re.search(r"spec id (\w{12})", out)          # runs before the packet echo existed
-        if m and m.group(1) not in packets and "===== specs/" in out:
+        if kind == "spec" and m and m.group(1) not in packets and "===== specs/" in out:
             packets[m.group(1)] = out[out.index("===== specs/"):]
-    answers = gate_answers(rid)
-    caps = by_node("spec_capture")
+    caps = by_node(f"{kind}_capture")
     # Panel runs: each capture is followed by a `spec_vote` stage that names the vote
     # (fx_spec_vote = "r<R>v<V>") and the round's state after it (fx_spec_panel). Paired by
     # visit order; a vote stage that crashed has no output and its vote keeps the visit index.
     votes = []
-    for vs in [x for x in stages if x["node_id"] == "spec_vote"]:
+    for vs in [x for x in stages if x["node_id"] == f"{kind}_vote"]:
         try:
             u = json.loads(stage_output(rid, vs["id"]).strip().splitlines()[-1])["context_updates"]
-            m = re.fullmatch(r"r(\d+)v(\d+)", u.get("fx_spec_vote", ""))
-            votes.append({"round": int(m.group(1)), "vote": int(m.group(2)), "after": u.get("fx_spec_panel")} if m else None)
+            m = re.fullmatch(r"r(\d+)v(\d+)", u.get(f"fx_{kind}_vote", ""))
+            votes.append({"round": int(m.group(1)), "vote": int(m.group(2)), "after": u.get(f"fx_{kind}_panel")} if m else None)
         except Exception:
             votes.append(None)
     outcome = {}                                   # round -> decided outcome (last vote of the round)
@@ -89,17 +115,17 @@ def harvest(rid):
             outcome[v["round"]] = v["after"]
     last_round = max((v["round"] for v in votes if v), default=None)
     if votes:          # panel run: index every capture visit so judge/capture/vote stay aligned
-        caps = [x for x in stages if x["node_id"] == "spec_capture"]
+        caps = [x for x in stages if x["node_id"] == f"{kind}_capture"]
     written = []
     for n, s in enumerate(caps, 1):
         if s["status"] != "succeeded":                  # a crashed capture recorded no verdict to harvest
             continue
         out = stage_output(rid, s["id"])
         upd = json.loads(out.strip().splitlines()[-1])["context_updates"]
-        verdict, reasons = upd["fx_spec_verdict"], json.loads(upd["fx_spec_reasons"])
+        verdict, reasons = upd[f"fx_{kind}_verdict"], json.loads(upd[f"fx_{kind}_reasons"])
         # Pair by visit order across every judge visit: a timed-out judge is a failed stage
         # whose capture still records verdict "none".
-        judges = [x for x in stages if x["node_id"] == "spec_judge"]
+        judges = [x for x in stages if x["node_id"] == node]
         judge = judges[n - 1] if n <= len(judges) else {}
         try:
             reply = stage_output(rid, judge["id"]) if judge else ""
@@ -111,8 +137,21 @@ def harvest(rid):
             pid = next(iter(packets))
         vote = votes[n - 1] if n <= len(votes) else None
         last = (vote["round"] == last_round) if vote else n == len(caps)
+        rnd_outcome = outcome.get(vote["round"]) if vote else None
+        if cfg["gate"]:
+            # Only the last round reaches a human; earlier raises were answered by the spec writer.
+            # (A panel run that went round the human gate more than once attributes only the
+            # final answer, to the final round, as before.) An intent round that passed handed
+            # on to the rigor panel, not to the human.
+            seen = last and not (kind == "spec_intent" and rnd_outcome == "pass")
+            followed = ("human gate" if seen else
+                        "rigor panel" if kind == "spec_intent" and rnd_outcome == "pass" else "automatic revise round")
+        else:   # change intent: never followed directly by a human
+            seen = False
+            followed = {"pass": "conformance panel", "raise": "builder revise round, or hold after the cap",
+                        "none": "hold"}.get(rnd_outcome, "unknown")
         case = {
-            "judge": "spec-judge",
+            "judge": cfg["judge"],
             "source": {"run": rid, "round": n, "of": len(caps), "title": run.get("title"),
                        "model": (judge.get("provider_used") or {}).get("model")},
             "idea": run.get("goal"),
@@ -120,16 +159,13 @@ def harvest(rid):
             "packet": packets.get(pid),
             "verdict": verdict,
             "reasons": reasons,
-            "panel": ({"round": vote["round"], "vote": vote["vote"], "round_outcome": outcome.get(vote["round"])}
+            "panel": ({"round": vote["round"], "vote": vote["vote"], "round_outcome": rnd_outcome}
                       if vote else None),
             "judge_seconds": judge.get("wall_time_ms", 0) // 1000,
             "judge_stage_status": judge.get("status"),
-            # Only the last round reaches a human; earlier raises were answered by the spec writer.
-            # (A panel run that went round the human gate more than once attributes only the
-            # final answer, to the final round, as before.)
-            "followed_by": ("human gate" if last else "automatic revise round"),
-            "human_action": (action(answers[-1]) if last and answers else None),
-            "human_answered_as": (answers[-1]["by"] if last and answers else None),
+            "followed_by": followed,
+            "human_action": (action(answers[-1]) if seen and answers else None),
+            "human_answered_as": (answers[-1]["by"] if seen and answers else None),
             "label": None,
             "label_note": "",
         }
@@ -147,7 +183,7 @@ def harvest(rid):
         written.append(f.name)
         print(f"wrote  {f.name}: {verdict}, {len(reasons)} reasons, packet {'ok' if case['packet'] else 'MISSING'}, human: {case['human_action']}")
     if not caps:
-        print(f"{rid}: no spec-judge verdicts recorded")
+        print(f"{rid}: no {cfg['judge']} verdicts recorded")
     return written
 
 

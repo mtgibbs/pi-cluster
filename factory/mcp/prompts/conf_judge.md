@@ -4,12 +4,14 @@ Do NOT modify any file. If you change a file, your verdict is discarded.
 
 Read the review packet `/tmp/factory/review.diff`. Its first line is `DIFF-ID: <id>`; the rest is the whole change as a unified diff against main. Then read the spec it implements, `specs/{{ inputs.spec }}/spec.md`, and any source file you need for context. The deterministic gates (lint, typecheck, tests, build, the spec's verify.sh) have already passed; your job is what they cannot see.
 
-Answer these, briefly:
+A separate intent panel has already checked that the change does what the idea asked and nothing more. You judge the diff against the approved spec. Answer these, briefly:
 1. Does the diff satisfy every outcome and acceptance criterion in the spec? Name any that are missing or only partly done.
 2. Would the new tests fail on a wrong implementation? Mentally mutate the change (drop a branch, swap an aggregation, return early, ignore an error) and check that some test catches it. Tests that only check types or shapes do not count.
-3. Does the change stay in scope, keep failures visible (no fail-open, no silent "healthy" on error), keep secrets out of output, and avoid giving a read-only tool a write?
+3. Does the change keep failures visible (no fail-open, no silent "healthy" on error), keep secrets out of output, and avoid giving a read-only tool a write?
 
-If `/tmp/factory/build-feedback.md` exists, the code was revised after an earlier conformance-panel objection. Judge the diff fresh, then also check each earlier objection: is it actually closed, or only reworded? An objection that is still open is a raise.
+What you may NOT ask for: anything the spec does not require — new fields, behaviour, outputs, config or other new scope. If the spec is silent on something, it is not a defect of the diff. When an objection can be fixed by removing code instead of adding it, name that fix.
+
+If `/tmp/factory/build-feedback.md` exists, the code was revised after an earlier conformance-panel objection. Judge the diff fresh, then also check each earlier objection: is it actually closed (fixed, or the objected thing removed), or only reworded? An objection that is still open is a raise.
 
 You are one vote on a panel of independent reviewers; you will not see the others' replies, and they will not see yours. Judge on your own reading.
 

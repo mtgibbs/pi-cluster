@@ -16,17 +16,26 @@ many times the local gates and CI went red, and how many times each judge raised
 Judge panels: each judge role's `visits` is the number of votes cast (one agent visit per
 vote), and a `panel` line per judge shows every round's tally (raise / pass / none of the
 votes cast, panel size, threshold, outcome). Runs from before panels show one vote per round.
+The intent panels (spec_intent, conf_intent) are roles of their own; their raises are counted
+separately, with how many raising reasons were `missing` / `added` / `oversized`. Runs from
+before the intent panels simply have no rows for them.
 """
 import json, os, pathlib, sys, tomllib, urllib.request
 
-U = os.environ["FABRO_URL"].rstrip("/") + "/api/v1"
-T = os.environ["FABRO_DEV_TOKEN"]
+U = os.environ.get("FABRO_URL", "").rstrip("/") + "/api/v1"
+T = os.environ.get("FABRO_DEV_TOKEN", "")
 CFG = tomllib.loads((pathlib.Path(__file__).resolve().parent / "models.toml").read_text())
-ROLES = {"ideate": "writer", "spec_judge": "spec_judge", "implement": "builder", "conf_judge": "conf_judge"}
-ORDER = ["writer", "spec_judge", "builder", "conf_judge"]
+# node id -> role. A judge role's node id is the role name.
+ROLES = {"ideate": "writer", "spec_intent": "spec_intent", "spec_judge": "spec_judge", "implement": "builder",
+         "conf_intent": "conf_intent", "conf_judge": "conf_judge"}
+ORDER = ["writer", "spec_intent", "spec_judge", "builder", "conf_intent", "conf_judge"]
+# panel kind (fx keys, judge_log "judge") -> role
+KIND_ROLE = {"spec_intent": "spec_intent", "spec": "spec_judge", "conf_intent": "conf_intent", "conf": "conf_judge"}
 
 
 def get(path):
+    if not U.startswith("http") or not T:
+        sys.exit("set FABRO_URL and FABRO_DEV_TOKEN")
     req = urllib.request.Request(U + path, headers={"Authorization": "Bearer " + T})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read())
@@ -44,10 +53,11 @@ def cost(model, tok):
 
 
 def profile_of(models):
+    """The profile whose models match every role that ran. A role that did not run (or did not
+    exist yet: runs from before the intent panels) matches anything."""
     for name, prof in CFG["profiles"].items():
-        if all(models.get(r) in (None, prof[r]) for r in ORDER) and any(models.values()):
-            if all(models.get(r) == prof[r] for r in ORDER if models.get(r)):
-                return name
+        if any(models.values()) and all(models.get(r) in (None, prof.get(r)) for r in ORDER):
+            return name
     return "custom"
 
 
@@ -71,6 +81,11 @@ def last_fx(rid, stages):
 def one(rid):
     run = get(f"/runs/{rid}")
     stages = get(f"/runs/{rid}/stages")["data"]
+    return summarize(rid, run, stages, last_fx(rid, stages))
+
+
+def summarize(rid, run, stages, fx):
+    """Pure: a run's record, its recorded stages and its last fx -> the report row."""
     roles = {r: {"model": None, "seconds": 0, "visits": 0, "failed": 0,
                  "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0}} for r in ORDER}
     for s in stages:
@@ -87,9 +102,8 @@ def one(rid):
                 d["tokens"][k] += v or 0
     for d in roles.values():
         d["usd_est"], d["usd_no_cache"] = cost(d["model"], d["tokens"]) if d["model"] else (None, None)
-    fx = last_fx(rid, stages)
     log = fx.get("judge_log") or []
-    tallies = {k: fx.get(f"{k}_tallies") for k in ("spec", "conf")}
+    tallies = {k: fx.get(f"{k}_tallies") for k in KIND_ROLE}
 
     def raises(k):          # panel runs count raised ROUNDS; older runs logged one entry per round
         if tallies[k] is not None:
@@ -110,9 +124,14 @@ def one(rid):
         "class": fx.get("class"),
         "gate_fails": fx.get("gate_fails"), "ci_red_rounds": fx.get("ci_red_rounds"),
         "spec_raises": raises("spec"), "conf_raises": raises("conf"),
+        "spec_intent_raises": raises("spec_intent"), "conf_intent_raises": raises("conf_intent"),
+        # reasons on raising intent votes, by kind: what the intent panels kept finding
+        "intent_reason_kinds": {k: {t: sum(j.get("kinds", []).count(t) for j in log
+                                          if j.get("judge") == k and j.get("verdict") == "raise")
+                                    for t in ("missing", "added", "oversized")} for k in ("spec_intent", "conf_intent")},
         "panel": fx.get("panel"),
-        "votes_cast": {k: sum(1 for j in log if j.get("judge") == k) for k in ("spec", "conf")},
-        "tallies": {k: tallies[k] or [] for k in ("spec", "conf")},
+        "votes_cast": {k: sum(1 for j in log if j.get("judge") == k) for k in KIND_ROLE},
+        "tallies": {k: tallies[k] or [] for k in KIND_ROLE},
         "pr": (fx.get("pr") or {}).get("url"),
     }
 
@@ -127,9 +146,10 @@ def show(r):
           f" · class {r['class'] or '-'}")
     print(f"  machine time {mins(r['machine_seconds'])} · waiting on a human {mins(r['human_wait_seconds'])}"
           f" · est ${r['usd_est']:.2f} (no-cache ${r['usd_no_cache']:.2f})")
-    print(f"  gate fails {r['gate_fails']} · CI red rounds {r['ci_red_rounds']} · spec raises {r['spec_raises']}"
+    print(f"  gate fails {r['gate_fails']} · CI red rounds {r['ci_red_rounds']} · spec intent raises {r['spec_intent_raises']}"
+          f" · spec rigor raises {r['spec_raises']} · change intent raises {r['conf_intent_raises']}"
           f" · conformance raises {r['conf_raises']}" + (f"\n  {r['pr']}" if r["pr"] else ""))
-    print(f"  {'role':<11}{'model':<15}{'time':>6}{'visits':>7}{'in':>9}{'cached':>10}{'out':>8}{'est $':>8}{'no-cache $':>12}")
+    print(f"  {'role':<12}{'model':<15}{'time':>6}{'visits':>7}{'in':>9}{'cached':>10}{'out':>8}{'est $':>8}{'no-cache $':>12}")
     for name in ORDER:
         d = r["roles"][name]
         if not d["visits"]:
@@ -138,15 +158,17 @@ def show(r):
         e = "-" if d["usd_est"] is None else f"{d['usd_est']:.2f}"
         w = "-" if d["usd_no_cache"] is None else f"{d['usd_no_cache']:.2f}"
         v = f"{d['visits']}" + (f" ({d['failed']}✗)" if d["failed"] else "")
-        print(f"  {name:<11}{d['model'] or '?':<15}{mins(d['seconds']):>6}{v:>7}{t['input']:>9}{t['cache_read']:>10}"
+        print(f"  {name:<12}{d['model'] or '?':<15}{mins(d['seconds']):>6}{v:>7}{t['input']:>9}{t['cache_read']:>10}"
               f"{t['output'] + t['reasoning']:>8}{e:>8}{w:>12}")
-    for k, name in (("spec", "spec_judge"), ("conf", "conf_judge")):
-        ts = r["tallies"][k]
-        if not ts and not r["votes_cast"][k]:
+    for k, name in KIND_ROLE.items():
+        ts = r["tallies"].get(k) or []
+        if not ts and not r["votes_cast"].get(k):
             continue
         rounds = "; ".join(f"r{t['round']} {t['outcome']} {t['raise']}R/{t['pass']}P/{t['none']}N of {t['cast']}"
                            f" (panel {t['n']}, threshold {t['threshold']})" for t in ts) or "no decided rounds"
-        print(f"  {name} panel: {r['votes_cast'][k]} vote(s) cast · {rounds}")
+        kinds = r["intent_reason_kinds"].get(k)
+        kinds = (" · raise reasons " + ", ".join(f"{n} {t}" for t, n in kinds.items())) if kinds and any(kinds.values()) else ""
+        print(f"  {name} panel: {r['votes_cast'][k]} vote(s) cast · {rounds}{kinds}")
 
 
 if __name__ == "__main__":

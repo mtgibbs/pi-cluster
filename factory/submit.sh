@@ -6,7 +6,9 @@
 # --profile picks a row of factory/models.toml (which model writes, builds and judges, and
 # how many votes each judge panel casts); the default is all-local.
 # --panel overrides panel settings for this run, e.g. "spec_votes=3 spec_threshold=2 spec_rounds=2"
-# (keys: spec_votes spec_threshold conf_votes conf_threshold spec_rounds conf_rounds).
+# (keys: <kind>_votes <kind>_threshold <kind>_rounds for kind in spec_intent spec conf_intent conf).
+# The idea text is stamped verbatim into [run.inputs] (idea_b64) and covered by code_sha, so
+# the intent panels judge against exactly what was submitted.
 # --dry-run resolves and validates the profile and panel, prints the [run.inputs] it would
 # stamp (code is shown by size only), and exits without contacting the server.
 #
@@ -29,7 +31,7 @@ while [ $# -gt 0 ]; do
     --panel) panel="$2"; shift 2 ;;
     --create-only) create_only=1; shift ;;
     --dry-run) dry_run=1; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     --) shift; break ;;
     -*) echo "unknown flag $1" >&2; exit 2 ;;
     *) break ;;
@@ -62,7 +64,10 @@ def call(method, path, body=None):
         sys.exit(f"{method} {path} -> HTTP {e.code}: {e.read().decode()[:600]}")
 
 steps = (here / "steps.py").read_bytes(); classify = (here / "classify.sh").read_bytes()
-code_sha = hashlib.sha256(steps).hexdigest() + hashlib.sha256(classify).hexdigest()
+# The idea, byte for byte as submitted. setup writes it to /tmp/factory/idea.md and every
+# deterministic stage re-checks it with the code: code_sha = sha(steps) + sha(classify) + sha(idea).
+idea = os.environ["IDEA"].encode()
+code_sha = hashlib.sha256(steps).hexdigest() + hashlib.sha256(classify).hexdigest() + hashlib.sha256(idea).hexdigest()
 files = {}
 for p in sorted(wf.rglob("*")):
     if p.is_file() and not p.name.startswith("."):
@@ -70,7 +75,7 @@ for p in sorted(wf.rglob("*")):
 cfg = tomllib.loads((here / "models.toml").read_text())
 pname = os.environ["PROFILE"]
 prof = cfg["profiles"].get(pname) or sys.exit(f"no profile {pname!r} in models.toml; have: {', '.join(cfg['profiles'])}")
-ROLES = ["writer", "spec_judge", "builder", "conf_judge"]
+ROLES = ["writer", "spec_intent", "spec_judge", "builder", "conf_intent", "conf_judge"]
 for r in ROLES:
     if prof.get(r) not in cfg["models"]:
         sys.exit(f"profile {pname}: role {r} names model {prof.get(r)!r}, which models.toml does not define")
@@ -87,19 +92,35 @@ try:
 except ValueError as e:
     sys.exit(f"profile {pname}: bad judge-panel settings: {e}")
 graph = (wf / "workflow.fabro").read_text()
-for kind in ("spec", "conf"):
-    m = re.search(rf"^\s*{kind}_judge \[[^\n]*max_visits=(\d+)", graph, re.M)
-    cap = int(m.group(1)) if m else 0
+def max_visits(node):
+    m = re.search(rf"^\s*{node} \[[^\n]*max_visits=(\d+)", graph, re.M)
+    return int(m.group(1)) if m else 0
+# Every panel's judge, capture and vote nodes: votes x (rounds + 4).
+JUDGE_NODE = {"spec_intent": "spec_intent", "spec": "spec_judge", "conf_intent": "conf_intent", "conf": "conf_judge"}
+for kind, jnode in JUDGE_NODE.items():
     need = panel[f"{kind}_votes"] * (panel[f"{kind}_rounds"] + 4)
-    if need > cap:
-        sys.exit(f"{kind} panel: {panel[f'{kind}_votes']} votes x ({panel[f'{kind}_rounds']} rounds + 4) = {need} "
-                 f"visits > {kind}_judge max_visits={cap} in workflow.fabro; raise max_visits or lower the panel")
+    for node in (jnode, f"{kind}_capture", f"{kind}_vote"):
+        cap = max_visits(node)
+        if need > cap:
+            sys.exit(f"{kind} panel: {panel[f'{kind}_votes']} votes x ({panel[f'{kind}_rounds']} rounds + 4) = {need} "
+                     f"visits > {node} max_visits={cap} in workflow.fabro; raise max_visits or lower the panel")
+# The authors: each panel's revise rounds come back to the same writer/builder, so their caps add.
+author_need = {
+    "ideate": 1 + panel["spec_intent_rounds"] + panel["spec_rounds"] + steps_mod.MAX_SPEC_CHECK_RETRIES + 4,
+    "implement": 1 + panel["conf_intent_rounds"] + panel["conf_rounds"] + steps_mod.MAX_GATE_FIX_ROUNDS
+                 + steps_mod.MAX_CI_FIX_ROUNDS + 4}
+for node, follow in (("ideate", "spec_check"), ("implement", "gates")):
+    for n in (node, follow):
+        if author_need[node] > max_visits(n):
+            sys.exit(f"{node}: its revise rounds (+4 human headroom) need {author_need[node]} visits > {n} "
+                     f"max_visits={max_visits(n)} in workflow.fabro; raise max_visits or lower the round caps")
 toml = files["workflow.toml"]
 if any(l.strip().startswith("[run.inputs") for l in toml.splitlines()):
     sys.exit("workflow.toml must not define [run.inputs]; submit.sh owns it")
 files["workflow.toml"] = toml.rstrip() + "\n\n# --- appended by factory/submit.sh ---\n[run.inputs]\n" + "".join(
     f'{k} = "{v}"\n' for k, v in [("steps_b64", base64.b64encode(steps).decode()),
                                    ("classify_b64", base64.b64encode(classify).decode()),
+                                   ("idea_b64", base64.b64encode(idea).decode()),
                                    ("code_sha", code_sha), ("profile", profile_line)]
                                   + [("m_" + r, prof[r]) for r in ROLES]
                                   + [(k, str(panel[k])) for k in steps_mod.PANEL_KEYS])

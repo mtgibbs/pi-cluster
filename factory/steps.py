@@ -21,10 +21,11 @@ path, never forward.
 Usage (inside the sandbox, cwd = repo root):
   steps.py setup <spec-name> [issue]      (no stdin)
   steps.py spec_check                     stdin: fx
-  steps.py capture spec|conf              stdin: response.<judge>   (parses ONE vote)
-  steps.py vote spec|conf                 stdin: fx   (records the vote, tallies the round: more|pass|raise|none)
-  steps.py raised spec|conf               stdin: fx   (counts the raise, writes feedback, picks revise|hold)
-  steps.py forward spec                   stdin: fx   (human gate [F]: the panel's open objections become the note)
+  steps.py capture <kind>                 stdin: response.<judge>   (parses ONE vote)
+  steps.py vote <kind>                    stdin: fx   (records the vote, tallies the round: more|pass|raise|none)
+  steps.py raised <kind>                  stdin: fx   (counts the raise, writes feedback, picks revise|hold)
+  steps.py passed spec_intent|conf_intent stdin: fx   (intent panel passed: record it, hand on to rigor/conformance)
+  steps.py forward spec                   stdin: fx   (human gate [F]: the last-raising spec panel's objections become the note)
   steps.py note spec|build                stdin: human.gate.text (a human's typed note)
   steps.py merge <key> <value>            stdin: fx
   steps.py lock                           stdin: fx
@@ -33,6 +34,14 @@ Usage (inside the sandbox, cwd = repo root):
   steps.py open_pr                        stdin: fx
   steps.py wait_checks                    stdin: fx
   steps.py verdict                        stdin: fx
+
+<kind> is a judge panel: spec_intent, spec (rigor), conf_intent, conf (conformance). The panel
+order is spec_intent -> spec -> (build, gates) -> conf_intent -> conf; see README "Judge panels".
+
+The idea text. setup writes it verbatim to /tmp/factory/idea.md (from inputs.idea_b64), and
+inputs.code_sha covers it alongside steps.py and classify.sh, so the sha256 check every
+deterministic stage runs first also catches an agent editing the idea the intent panels judge
+against.
 """
 import hashlib, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
@@ -49,12 +58,27 @@ MAX_SPEC_CHECK_RETRIES = 2               # failed deterministic spec checks sent
 # Judge panels (README "Judge panels"). Votes, thresholds and the revise cap come from
 # factory/models.toml via submit.sh -> [run.inputs] -> setup (FACTORY_PANEL) -> fx["panel"].
 # These defaults apply only when setup was given nothing.
-PANEL_KEYS = ("spec_votes", "spec_threshold", "conf_votes", "conf_threshold", "spec_rounds", "conf_rounds")
+# Panel kinds, in the order a run meets them. `spec`/`conf` are the rigor and conformance
+# panels (their node ids, fx keys and records predate the intent panels and are unchanged).
+KINDS = ("spec_intent", "spec", "conf_intent", "conf")
+INTENT_KINDS = ("spec_intent", "conf_intent")
+PANEL_KEYS = ("spec_votes", "spec_threshold", "conf_votes", "conf_threshold", "spec_rounds", "conf_rounds",
+              "spec_intent_votes", "spec_intent_threshold", "spec_intent_rounds",
+              "conf_intent_votes", "conf_intent_threshold", "conf_intent_rounds")
 DEFAULT_PANEL = {"spec_votes": 1, "spec_threshold": 1, "conf_votes": 1, "conf_threshold": 1,
-                 "spec_rounds": 4, "conf_rounds": 4}
+                 "spec_rounds": 4, "conf_rounds": 4,
+                 "spec_intent_votes": 1, "spec_intent_threshold": 1, "spec_intent_rounds": 3,
+                 "conf_intent_votes": 1, "conf_intent_threshold": 1, "conf_intent_rounds": 3}
 MAX_VOTES = 15
 MAX_ROUNDS = 10
-FEEDBACK = {"spec": "spec-feedback.md", "conf": "build-feedback.md"}
+FEEDBACK = {"spec": "spec-feedback.md", "conf": "build-feedback.md",
+            "spec_intent": "spec-intent-feedback.md", "conf_intent": "change-intent-feedback.md"}
+PACKET = {"spec": "spec-review.md", "conf": "review.diff",
+          "spec_intent": "spec-intent-review.md", "conf_intent": "change-intent-review.md"}
+NAME = {"spec": "spec rigor", "conf": "conformance", "spec_intent": "spec intent", "conf_intent": "change intent"}
+# What an intent panel may raise about. A raise reason must carry one of these tags.
+INTENT_TAGS = ("missing", "added", "oversized")
+_TAG_RE = re.compile(r"^\s*[\[(]?\s*(missing|added|oversized)\s*[\])]?\s*[:\-\u2013\u2014]\s*(\S.*)$", re.I | re.S)
 CHECK_WAIT_SECONDS = int(os.environ.get("FACTORY_CHECK_WAIT", "2700"))  # 45 min
 UNANIMOUS = 5                            # rule 5: would-merge needs 5/5 clear per validator
 
@@ -128,9 +152,10 @@ def worktree_tree():
     return sh(["git", "write-tree"], env=env, check=True).stdout.strip()
 
 
-def worktree_diff(base, context=5):
+def worktree_diff(base, context=5, exclude=None):
     env = _scratch_index()
-    return sh(["git", "diff", "--cached", "--no-renames", "--no-ext-diff", f"-U{context}", base],
+    spec = ["--", ".", f":(exclude){exclude}"] if exclude else []
+    return sh(["git", "diff", "--cached", "--no-renames", "--no-ext-diff", f"-U{context}", base, *spec],
               env=env, check=True).stdout
 
 
@@ -170,6 +195,66 @@ def spec_name_from_tree():
     if len(names) != 1:
         raise RuntimeError(f"expected exactly one new specs/<name>/, found {sorted(names)}")
     return names.pop()
+
+
+def idea_text():
+    """The idea exactly as submitted. setup wrote it from inputs.idea_b64; the script line of
+    every deterministic stage has already checked its sha256 (inside inputs.code_sha)."""
+    with open(f"{W}/idea.md", "rb") as fh:
+        return fh.read().decode("utf-8", errors="replace")
+
+
+def idea_sha():
+    with open(f"{W}/idea.md", "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def intent_id(inner):
+    """An intent packet's id: binds the idea to the spec or diff it is compared with, and
+    differs from the rigor/conformance packet ids so a voter cannot echo the wrong packet."""
+    return short_hash(f"intent:{idea_sha()}:{inner}")
+
+
+def packet_id(kind, spec=None, base=None):
+    """The id a judge of `kind` must echo, recomputed from the tree (and the idea) as it is now."""
+    if kind in ("spec", "spec_intent"):
+        sid = spec_id({"spec": spec or spec_name_from_tree()})
+        return sid if kind == "spec" else intent_id(sid)
+    did = short_hash(worktree_diff(base or base_rev()))
+    return did if kind == "conf" else intent_id(did)
+
+
+def file_sha(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def write_packet(fx, kind, text):
+    """Write a judge's review packet and remember its hash; `vote` refuses a round whose packet
+    changed under it (a voter editing what the next voter reads)."""
+    os.makedirs(W, exist_ok=True)
+    with open(f"{W}/{PACKET[kind]}", "w") as out:
+        out.write(text)
+    fx[f"{kind}_packet_sha"] = file_sha(f"{W}/{PACKET[kind]}")
+
+
+def idea_block():
+    return ("===== THE IDEA (verbatim, exactly as submitted) =====\n" + idea_text().rstrip("\n")
+            + "\n===== END OF THE IDEA =====\n")
+
+
+def tag_reasons(reasons):
+    """Intent-panel reasons -> (tagged 'kind: text' strings, their kinds, untagged strings)."""
+    tagged, kinds, untagged = [], [], []
+    for r in reasons:
+        m = _TAG_RE.match(str(r))
+        if m:
+            k = m.group(1).lower()
+            tagged.append(f"{k}: {m.group(2).strip()}")
+            kinds.append(k)
+        else:
+            untagged.append(str(r))
+    return tagged, kinds, untagged
 
 
 # ---------------------------------------------------------------- GitHub
@@ -224,8 +309,12 @@ def st_setup(spec, issue=""):
           "ci_red_rounds": 0, "notes": [],
           # "<profile name> writer=<model> spec_judge=<model> builder=<model> conf_judge=<model>"
           "profile": os.environ.get("FACTORY_PROFILE", ""),
-          "panel": parse_panel(os.environ.get("FACTORY_PANEL", ""))}
+          "panel": parse_panel(os.environ.get("FACTORY_PANEL", "")),
+          "idea_sha": idea_sha()}
+    if not idea_text().strip():
+        raise RuntimeError(f"{W}/idea.md is empty — the intent panels would have nothing to judge against")
     log(f"model profile: {fx['profile'] or '(none recorded)'}")
+    log(f"idea ({len(idea_text())} chars, sha256 {fx['idea_sha'][:12]}) saved verbatim to {W}/idea.md")
     log("judge panels: " + panel_line(fx["panel"]))
     emit(fx, fx_spec=spec)
 
@@ -258,16 +347,26 @@ def st_spec_check(fx):
     else:
         sid = spec_id(fx)
         fx["spec_id_checked"] = sid
-        fx.pop("spec_open", None)     # a new spec-panel round starts here; no stale votes carry in
-        os.makedirs(W, exist_ok=True)
+        # A new version of the spec: both spec panels start a fresh round on it, and no verdict
+        # about an earlier version stands (decide() reads a missing one as hold).
+        for k in ("spec_intent", "spec"):
+            fx.pop(f"{k}_open", None)
+            fx.pop(f"{k}_judge", None)
+        fx["spec_cycle"] = {k: len(fx.get(f"{k}_tallies") or []) for k in ("spec_intent", "spec")}
+        iid = intent_id(sid)
+        ipacket = (f"INTENT-ID: {iid}\n\n" + idea_block() + "\n"
+                   + "".join(f"===== {f} =====\n{open(f).read()}\n" for f in spec_files(fx)[:2]))
+        write_packet(fx, "spec_intent", ipacket)
         packet = f"SPEC-ID: {sid}\n\n" + "".join(f"===== {f} =====\n{open(f).read()}\n" for f in spec_files(fx))
-        with open(f"{W}/spec-review.md", "w") as out:
-            out.write(packet)
-        log(f"spec check passed; review packet {W}/spec-review.md (SPEC-ID {sid})")
-        # The packet is echoed so factory/harvest.py can pair each judge verdict with exactly
+        write_packet(fx, "spec", packet)
+        log(f"spec check passed; intent packet {W}/{PACKET['spec_intent']} (INTENT-ID {iid}), "
+            f"rigor packet {W}/{PACKET['spec']} (SPEC-ID {sid})")
+        # The packets are echoed so factory/harvest.py can pair each judge verdict with exactly
         # what the judge was shown, from the run log alone.
+        log(f"-----BEGIN SPEC-INTENT PACKET {iid}-----\n{ipacket}\n-----END SPEC-INTENT PACKET {iid}-----")
         log(f"-----BEGIN SPEC PACKET {sid}-----\n{packet}\n-----END SPEC PACKET {sid}-----")
     write_feedback(fx, "spec")
+    write_feedback(fx, "spec_intent")
     emit(fx, fx_spec_check=result, fx_spec_check_fails=fx.get("spec_check_fails", 0))
 
 
@@ -291,27 +390,40 @@ def parse_verdict(text):
 def st_capture(kind):
     """Parse ONE judge vote. Its result goes to a file that only the very next stage (`vote`)
     reads and then deletes, so no later voter in the round can find it."""
+    if kind not in KINDS:
+        raise RuntimeError(f"unknown panel kind {kind!r}")
     vfile = f"{W}/{kind}-verdict.json"
     if os.path.exists(vfile):
         os.remove(vfile)
     text = sys.stdin.read()
     obj, why = parse_verdict(text)
-    verdict, reasons = "none", []
+    verdict, reasons, kinds = "none", [], []
     if obj:
-        if kind == "spec":
-            expect = spec_id({"spec": spec_name_from_tree()})
-        else:
-            expect = short_hash(worktree_diff(base_rev()))
+        expect = packet_id(kind)
         if obj["id"] != expect:
             why = f"verdict id {obj['id']!r} != packet id {expect!r} — judge did not read the current packet, or the tree changed under it"
         else:
             verdict = obj["factory_verdict"]
             reasons = [str(r)[:400] for r in (obj.get("reasons") or [])][:8]
+            if kind in INTENT_KINDS and verdict == "raise":
+                # An intent panel may only raise about the idea: something missing, something
+                # added, or a spec/change out of proportion. Anything else is the rigor or
+                # conformance panel's job and is dropped; a raise with nothing left is no verdict.
+                reasons, kinds, dropped = tag_reasons(reasons)
+                if dropped:
+                    log(f"dropped {len(dropped)} untagged reason(s) (not missing:/added:/oversized:): "
+                        + " | ".join(d[:120] for d in dropped))
+                if not reasons:
+                    verdict, why = "none", ("intent raise carried no missing:/added:/oversized: reason — "
+                                            "test rigor and code correctness belong to the other panels")
     log(f"{kind} judge verdict: {verdict}" + (f" ({why})" if why else ""))
     for r in reasons:
         log(" -", r)
+    rec = {"verdict": verdict, "id": obj["id"] if obj else "", "reasons": reasons, "why": why}
+    if kind in INTENT_KINDS:
+        rec["kinds"] = kinds
     with open(vfile, "w") as fh:   # read (and deleted) only by `vote`, the very next stage
-        json.dump({"verdict": verdict, "id": obj["id"] if obj else "", "reasons": reasons, "why": why}, fh)
+        json.dump(rec, fh)
     emit(None, **{f"fx_{kind}_verdict": verdict, f"fx_{kind}_reasons": json.dumps(reasons or ([why] if why else []))})
 
 
@@ -332,7 +444,7 @@ def parse_panel(text):
 
 
 def validate_panel(p):
-    for kind in ("spec", "conf"):
+    for kind in KINDS:
         n, t, r = p[f"{kind}_votes"], p[f"{kind}_threshold"], p[f"{kind}_rounds"]
         if not 1 <= n <= MAX_VOTES:
             raise ValueError(f"{kind}_votes={n}: must be 1..{MAX_VOTES}")
@@ -392,7 +504,7 @@ def minority_notes(fx, kind):
     tallies = fx.get(f"{kind}_tallies") or []
     if not tallies or tallies[-1]["outcome"] != "pass" or not tallies[-1]["raise"]:
         return ""
-    name = {"spec": "Spec", "conf": "Conformance"}[kind]
+    name = NAME[kind].capitalize()
     return format_objections(fx, kind, tallies[-1],
                              f"## {name} panel passed with minority objections (NON-BLOCKING), round {tallies[-1]['round']}")
 
@@ -407,13 +519,21 @@ def write_feedback(fx, kind):
     to read. Rebuilt from fx every time, so it only ever holds what deterministic stages
     recorded. It is advice to the author, never a verdict: nothing routes on it.
     Only DECIDED raise rounds appear here, so a voter never sees another vote of its own round."""
-    out = [f"# Feedback to address ({kind}) — fix every item, then stop\n"]
+    out = [f"# Feedback to address ({NAME[kind]}) — fix every item, then stop\n"]
+    if kind in INTENT_KINDS:
+        out.append("The intent panel compares your work with the ORIGINAL idea (/tmp/factory/idea.md), not with "
+                   "earlier objections. `missing:` = the idea asks for it and it is not delivered; `added:` = the "
+                   "idea did not ask for it — remove it; `oversized:` = cut it down to the size of the ask. "
+                   "This feedback outranks the rigor/conformance feedback.\n")
     sc = fx.get("spec_check") or {}
     if kind == "spec" and sc.get("result") == "fail":
         out.append("## The deterministic spec check FAILED\n" + "".join(f"- {p}\n" for p in sc.get("problems", [])))
     raised = [t for t in fx.get(f"{kind}_tallies", []) if t["outcome"] == "raise"]
     for t in reversed(raised):
-        latest = " (LATEST — these are what the judges will re-check)" if t is raised[-1] else " (earlier round, for context)"
+        if kind in INTENT_KINDS:
+            latest = " (LATEST)" if t is raised[-1] else " (earlier round, for context)"
+        else:
+            latest = " (LATEST — these are what the judges will re-check)" if t is raised[-1] else " (earlier round, for context)"
         out.append(format_objections(fx, kind, t, f"## {kind} judge panel, round {t['round']}{latest}"))
     with open(f"{W}/{FEEDBACK[kind]}", "w") as fh:
         fh.write("\n".join(out))
@@ -423,6 +543,8 @@ def st_vote(fx, kind):
     """Record one judge vote (written by `capture` a moment ago), then tally the round.
     Emits fx_<kind>_panel = more (cast another vote) | pass | raise | none. A missing or
     unreadable vote file is a `none` vote: it can only hold, never pass."""
+    if kind not in KINDS:
+        raise RuntimeError(f"unknown panel kind {kind!r}")
     panel = fx_panel(fx)
     n, thr = panel[f"{kind}_votes"], panel[f"{kind}_threshold"]
     vfile = f"{W}/{kind}-verdict.json"
@@ -434,28 +556,67 @@ def st_vote(fx, kind):
     finally:
         if os.path.exists(vfile):
             os.remove(vfile)      # gone before the next voter of this round starts
+    # The packet every voter of this round reads must not change under the round. A voter that
+    # edited it could steer the next one; that round is decided `none` (hold), never pass.
+    tampered = ""
+    want = fx.get(f"{kind}_packet_sha")
+    if want:
+        try:
+            got = file_sha(f"{W}/{PACKET[kind]}")
+        except OSError:
+            got = "missing"
+        if got != want:
+            tampered = f"review packet {PACKET[kind]} changed during the round ({got[:12]} != {want[:12]})"
+            v = {"verdict": "none", "id": str(v.get("id") or ""), "reasons": [], "why": tampered}
     verdict = v.get("verdict") if v.get("verdict") in ("pass", "raise") else "none"
     tallies = fx.setdefault(f"{kind}_tallies", [])
     rnd = len(tallies) + 1
     open_votes = fx.setdefault(f"{kind}_open", [])
     open_votes.append(verdict)
     idx = len(open_votes)
-    fx.setdefault("judge_log", []).append({
-        "judge": kind, "round": rnd, "vote": idx, "of": n, "verdict": verdict, "packet": str(v.get("id") or ""),
-        "reasons": [str(r) for r in v.get("reasons") or []] if verdict != "none" else [],
-        "why": str(v.get("why") or "")})
-    decision = tally(open_votes, n, thr)
+    entry = {"judge": kind, "round": rnd, "vote": idx, "of": n, "verdict": verdict, "packet": str(v.get("id") or ""),
+             "reasons": [str(r) for r in v.get("reasons") or []] if verdict != "none" else [],
+             "why": str(v.get("why") or "")}
+    if kind in INTENT_KINDS:
+        entry["kinds"] = [k for k in v.get("kinds") or [] if k in INTENT_TAGS] if verdict == "raise" else []
+    fx.setdefault("judge_log", []).append(entry)
+    decision = "none" if tampered else tally(open_votes, n, thr)
     log(f"{kind} panel round {rnd}, vote {idx} of up to {n}: {verdict}" + (f" ({v.get('why')})" if v.get("why") else ""))
     if decision != "more":
         t = {"round": rnd, "n": n, "threshold": thr, "cast": len(open_votes), "raise": open_votes.count("raise"),
              "pass": open_votes.count("pass"), "none": open_votes.count("none"), "outcome": decision}
+        if tampered:
+            t["tamper"] = tampered
         tallies.append(t)
         fx.pop(f"{kind}_open", None)
         log(f"{kind} panel decided: {tally_line(t)}")
     else:
         log(f"{kind} panel: not decided yet ({open_votes.count('raise')} raise, {open_votes.count('pass')} pass, "
-            f"{open_votes.count('none')} none) -> another vote")
+            f"{open_votes.count('none')} none) -> another vote on {packet_head(kind)}")
     emit(fx, **{f"fx_{kind}_panel": decision, f"fx_{kind}_vote": f"r{rnd}v{idx}"})
+
+
+def packet_head(kind):
+    """The first line of a panel's packet (its id line), for the run log."""
+    try:
+        with open(f"{W}/{PACKET[kind]}") as fh:
+            return fh.readline().strip() or "(empty packet)"
+    except OSError:
+        return "(no packet)"
+
+
+def st_passed(fx, kind):
+    """An intent panel passed: record it and hand on to the rigor (spec) or conformance panel.
+    The forward edge tests fx_<kind>_judge=pass; anything else is a hold."""
+    if kind not in INTENT_KINDS:
+        raise RuntimeError(f"`passed` is only for the intent panels, not {kind!r}")
+    t = (fx.get(f"{kind}_tallies") or [None])[-1]
+    if not t or t["outcome"] != "pass":
+        raise RuntimeError(f"{kind} has no passing round to record")
+    fx[f"{kind}_judge"] = "pass"
+    nxt = "spec" if kind == "spec_intent" else "conf"
+    log(f"{NAME[kind]} panel passed ({tally_line(t)}) -> {NAME[nxt]} panel next, on {packet_head(nxt)}")
+    emit(fx, **{f"fx_{kind}_judge": "pass"})
 
 
 def st_raised(fx, kind):
@@ -478,22 +639,38 @@ def st_raised(fx, kind):
     emit(fx, **{f"fx_{kind}_next": nxt, f"fx_{kind}_raises": n})
 
 
-def st_forward(fx, kind):
-    """Human gate option [F]: the latest panel round's raising objections, verbatim, become the
-    revise note — exactly what a typed note does, without retyping. Nothing to forward is
-    fx_<kind>_forwarded=no, which the graph routes back to the gate."""
-    tallies = fx.get(f"{kind}_tallies") or []
-    if not tallies or not tallies[-1]["raise"]:
-        log(f"no open {kind}-panel objections to forward (latest round: {tally_line(tallies[-1]) if tallies else 'none'})")
-        emit(fx, **{f"fx_{kind}_forwarded": "no"})
-    t = tallies[-1]
-    text = format_objections(fx, kind, t, f"Panel objections forwarded by the human, round {t['round']}")
+def last_raising(fx, gate):
+    """The panel round [F] forwards at a gate: among the gate's panels (spec gate: rigor, then
+    intent), the latest round on the CURRENT version of the spec that had any raising voter.
+    One spec version gets at most one intent round and, if that passed, one rigor round, so
+    rigor-then-intent is newest-first. Without a recorded cycle (older runs) every round counts,
+    and only each panel's latest round is considered, as before. Returns (kind, tally) or (None, None)."""
+    order = {"spec": ("spec", "spec_intent")}[gate]
+    cycle = fx.get(f"{gate}_cycle") or {}
+    for kind in order:
+        ts = (fx.get(f"{kind}_tallies") or [])[cycle.get(kind, 0):]
+        if ts and ts[-1]["raise"]:
+            return kind, ts[-1]
+    return None, None
+
+
+def st_forward(fx, gate):
+    """Human gate option [F]: the last-raising panel round's objections (intent or rigor),
+    verbatim, become the revise note — exactly what a typed note does, without retyping.
+    Nothing to forward is fx_<gate>_forwarded=no, which the graph routes back to the gate."""
+    kind, t = last_raising(fx, gate)
+    if not t:
+        latest = "; ".join(f"{NAME[k]} {tally_line(fx[f'{k}_tallies'][-1])}" for k in ("spec_intent", "spec")
+                           if fx.get(f"{k}_tallies")) or "none"
+        log(f"no open {gate}-gate panel objections to forward (latest rounds: {latest})")
+        emit(fx, **{f"fx_{gate}_forwarded": "no"})
+    text = format_objections(fx, kind, t, f"{NAME[kind].capitalize()} panel objections forwarded by the human, round {t['round']}")
     with open(f"{W}/human-note.md", "a") as fh:
-        fh.write(f"## Human note at the {kind} gate ({time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}): "
+        fh.write(f"## Human note at the {gate} gate ({time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}): "
                  f"address the judges' open objections below\n{text}\n\n")
     fx.setdefault("forwards", []).append({"kind": kind, "round": t["round"]})
     log(f"forwarded to the writer:\n{text}")
-    emit(fx, **{f"fx_{kind}_forwarded": "yes"})
+    emit(fx, **{f"fx_{gate}_forwarded": "yes"})
 
 
 def st_note(where):
@@ -523,13 +700,16 @@ def st_lock(fx):
     fx["verify_blob"] = blob
     fx["spec_id"] = spec_id(fx)
     log(f"LOCKED {vs} as blob {blob}; spec id {fx['spec_id']}")
-    log(f"spec judge: {fx.get('spec_judge')}   deterministic spec check: {fx.get('spec_check', {}).get('result')}")
-    for t in fx.get("spec_tallies") or []:
-        log(f"  spec panel {tally_line(t)}")
-        for e in round_votes(fx, "spec", t["round"]):
-            log(f"    vote {e.get('vote')}: {e['verdict']}" + (f" ({e['why']})" if e.get("why") else "")
-                + "".join(f"\n      - {r}" for r in e["reasons"]))
-    notes = minority_notes(fx, "spec")
+    log(f"deterministic spec check: {fx.get('spec_check', {}).get('result')}   "
+        f"spec intent panel: {fx.get('spec_intent_judge') or 'not run on this version'}   "
+        f"spec rigor panel: {fx.get('spec_judge') or 'not run on this version'}")
+    for kind in ("spec_intent", "spec"):
+        for t in fx.get(f"{kind}_tallies") or []:
+            log(f"  {NAME[kind]} panel {tally_line(t)}" + (f" [{t['tamper']}]" if t.get("tamper") else ""))
+            for e in round_votes(fx, kind, t["round"]):
+                log(f"    vote {e.get('vote')}: {e['verdict']}" + (f" ({e['why']})" if e.get("why") else "")
+                    + "".join(f"\n      - {r}" for r in e["reasons"]))
+    notes = "\n".join(n for n in (minority_notes(fx, "spec_intent"), minority_notes(fx, "spec")) if n)
     with open(f"{W}/spec-notes.md", "w") as fh:     # the builder's prompt reads it; empty when none
         fh.write(notes)
     if notes:
@@ -578,10 +758,21 @@ def st_gates(fx):
         diff = worktree_diff(fx["base"])
         did = short_hash(diff)
         fx["gated_tree"], fx["diff_id"] = worktree_tree(), did
-        fx.pop("conf_open", None)     # a new conformance-panel round starts here
-        with open(f"{W}/review.diff", "w") as out:
-            out.write(f"DIFF-ID: {did}\nSPEC: {spec_dir(fx)}/spec.md\nBASE: {fx['base']}\n\n{diff}")
-        log(f"all gates green; review packet {W}/review.diff (DIFF-ID {did}, {len(diff)} bytes)")
+        # A new change: both build panels start a fresh round, and no earlier verdict stands.
+        for k in ("conf_intent", "conf"):
+            fx.pop(f"{k}_open", None)
+            fx.pop(f"{k}_judge", None)
+        write_packet(fx, "conf", f"DIFF-ID: {did}\nSPEC: {spec_dir(fx)}/spec.md\nBASE: {fx['base']}\n\n{diff}")
+        # The change-intent packet: the idea and the code change only (the spec dir is left out —
+        # this panel judges the change against what was asked, not against the spec's fine print).
+        cid = intent_id(did)
+        code = worktree_diff(fx["base"], exclude=spec_dir(fx) + "/")
+        cpacket = (f"CHANGE-ID: {cid}\nBASE: {fx['base']}\n\n" + idea_block()
+                   + f"\n===== THE CHANGE (unified diff against BASE, {spec_dir(fx)}/ left out) =====\n{code}")
+        write_packet(fx, "conf_intent", cpacket)
+        log(f"all gates green; change-intent packet {W}/{PACKET['conf_intent']} (CHANGE-ID {cid}), "
+            f"conformance packet {W}/review.diff (DIFF-ID {did}, {len(diff)} bytes)")
+        log(f"-----BEGIN CHANGE-INTENT PACKET {cid}-----\n{cpacket}\n-----END CHANGE-INTENT PACKET {cid}-----")
     else:
         fx["gate_fails"] = fx.get("gate_fails", 0) + 1
         log(f"\nGATE FAILED: {first_fail['gate']} (failure {fx['gate_fails']} of {MAX_GATE_FIX_ROUNDS} fix rounds)\n"
@@ -746,11 +937,15 @@ def decide(fx):
     sc = (fx.get("spec_check") or {}).get("result")
     if sc != "pass":
         hold.append(f"deterministic spec check: {sc or 'missing'}")
+    if fx.get("spec_intent_judge") != "pass":
+        hold.append(f"spec intent panel: {fx.get('spec_intent_judge') or 'missing'}")
     if fx.get("spec_judge") != "pass":
         hold.append(f"spec judge: {fx.get('spec_judge') or 'missing'}")
     g = (fx.get("gates") or {}).get("result")
     if g != "pass":
         hold.append(f"deterministic gates: {g or 'missing'}")
+    if fx.get("conf_intent_judge") != "pass":
+        hold.append(f"change intent panel: {fx.get('conf_intent_judge') or 'missing'}")
     if fx.get("conf_judge") != "pass":
         hold.append(f"conformance judge: {fx.get('conf_judge') or 'missing'}")
     if fx.get("tamper"):
@@ -798,26 +993,30 @@ def st_verdict(fx):
     record = {"verdict": verdict, "class": fx.get("class"), "reasons": reasons, "run_id": fx.get("run_id"),
               "spec": fx.get("spec"), "head": (fx.get("pr") or {}).get("head"),
               "spec_judge": fx.get("spec_judge"), "conf_judge": fx.get("conf_judge"),
+              "spec_intent_judge": fx.get("spec_intent_judge"), "conf_intent_judge": fx.get("conf_intent_judge"),
               "gate_runs": fx.get("gate_runs"), "gate_fails": fx.get("gate_fails"),
               "ci_red_rounds": fx.get("ci_red_rounds"), "required": ci.get("required"),
               "override": fx.get("override"), "factory_stage": 0, "profile": fx.get("profile"),
               "panel": fx.get("panel"),
-              "panels": {k: fx.get(f"{k}_tallies") or [] for k in ("spec", "conf")}}
+              "panels": {k: fx.get(f"{k}_tallies") or [] for k in KINDS}}
     panels = "\n".join(f"- {name}: " + ("; ".join(tally_line(t) for t in fx.get(f"{k}_tallies") or []) or "no rounds")
-                       for k, name in (("spec", "spec judge panel"), ("conf", "conformance judge panel")))
-    conf_notes = minority_notes(fx, "conf")
+                       for k, name in (("spec_intent", "spec intent panel"), ("spec", "spec rigor panel"),
+                                       ("conf_intent", "change intent panel"), ("conf", "conformance judge panel")))
+    conf_notes = "\n".join(n.replace("## ", "**", 1).replace("\n", "**\n", 1)
+                           for n in (minority_notes(fx, "conf_intent"), minority_notes(fx, "conf")) if n)
     head = "✅ **would merge**" if verdict == "would merge" else "⏸️ **hold**"
     body = "\n".join([
         VERDICT_MARKER, f"## Factory verdict: {head} · class {fx.get('class', '?')}", "",
         "Stage 0 (shadow mode): the factory never merges. This is what it *would* do; a human decides.", "",
         ("**Hold because:**\n" + "\n".join(f"- {r}" for r in reasons)) if reasons else
-        "Every deterministic gate passed, both factory judges passed, and every applicable review-hub validator was 5/5 clear.",
+        "Every deterministic gate passed, all four factory judge panels passed, and every applicable review-hub validator was 5/5 clear.",
         "", "**Factory judge panels** (votes per round):", panels, "",
-        *([conf_notes.replace("## ", "**", 1).replace("\n", "**\n", 1), ""] if conf_notes else []),
+        *([conf_notes, ""] if conf_notes else []),
         "| review-hub validator | check | report card |", "|--|--|--|", votes, "",
         f"Class reasons: " + ("; ".join(fx.get("class_reasons") or []) or "—"),
         f"<sub>run `{fx.get('run_id')}` · gates {fx.get('gate_runs')} run(s), {fx.get('gate_fails')} failed · "
-        f"CI red rounds {fx.get('ci_red_rounds')} · spec judge {fx.get('spec_judge')} · conformance judge {fx.get('conf_judge')}</sub>",
+        f"CI red rounds {fx.get('ci_red_rounds')} · spec intent {fx.get('spec_intent_judge')} · spec judge {fx.get('spec_judge')}"
+        f" · change intent {fx.get('conf_intent_judge')} · conformance judge {fx.get('conf_judge')}</sub>",
         "", f"<!-- factory:record {json.dumps(record, sort_keys=True)} -->"])
     log(body)
     pr = fx.get("pr")
@@ -859,6 +1058,8 @@ def main():
                 st_vote(fx, args[0])
             elif cmd == "forward":
                 st_forward(fx, args[0])
+            elif cmd == "passed":
+                st_passed(fx, args[0])
             elif fn:
                 fn(fx)
             else:
