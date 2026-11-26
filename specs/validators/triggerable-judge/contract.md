@@ -25,7 +25,21 @@ RE-RUNS the job, and something breaks.
    does NOT stop a manually-created Job from overlapping a scheduled run. So you
    MUST assume a manual run can overlap a scheduled run, UNLESS the job itself
    serialises with a lock (flock / a k8s Lease) or its writes are inherently
-   safe under overlap.
+   safe under overlap. A job that takes an flock / Lease around its shared
+   writes IS serialised — accept it; do not second-guess the lock's semantics
+   on the underlying filesystem (NFS, PVC) or node placement.
+   Shared state is not only volumes: another service's queue or API is shared
+   state too. A CHECK-THEN-ACT loop — read a list of pending items
+   from a service, then POST a command/write per item — lets two overlapping
+   runs both see the same item and both act on it. Do NOT assume the other
+   service dedupes, locks, or rejects the duplicate: that behaviour is not in
+   the manifest. If overlap safety rests on such an assumption, you cannot
+   prove it safe -> `flag` (not `pass`; not `fail` unless you can show the
+   duplicate action itself causes damage). This rule is about a SCRIPT's own
+   API COMMAND loops; it does NOT change how file copies are judged (see HOW TO
+   JUDGE), and it does NOT apply to a widely-known tool whose re-run/overlap
+   safety is part of its documented design (e.g. `renovate/renovate` — see
+   IMAGE-ONLY JOBS): that is documented behaviour, not an assumption.
 
 3. time-insensitive — safe to run at any wall-clock moment, not only its
    scheduled slot. A job whose behaviour depends on WHEN it runs (e.g. derives a
@@ -73,11 +87,23 @@ HOW TO JUDGE
 - Reading from a readOnly mount, or writing to a date-named file that is
   truncated (not appended), or an idempotent UPSERT (INSERT ... ON CONFLICT DO
   UPDATE), are SAFE — do not flag them.
-- A backup that uses rsync WITHOUT --delete to a date-stamped path is safe; one
-  that uses --delete (mirror-delete) or rm -rf on shared storage is not.
+- A backup that uses rsync WITHOUT --delete to a date-stamped path is safe —
+  INCLUDING when two same-day runs overlap and write the same destination file.
+  rsync writes each file to a temporary name and renames it into place
+  atomically, so overlapping rsyncs each land a complete file (last one wins);
+  neither can leave a corrupted or interleaved file. Do not fail or flag this
+  as "concurrent writes to the same file".
+- The atomic-rename point covers ONLY the no---delete case above. A backup that
+  uses rsync --delete (mirror-delete) or rm -rf / a retention sweep on SHARED
+  storage FAILS concurrency-tolerant, full stop: an overlapping run's delete
+  pass removes files and in-flight temp files the other run is still writing,
+  and a retention sweep in one run can rotate out a backup the other run is
+  relying on. Atomic renames do not prevent either. Never pass a --delete or
+  rm -rf backup on the strength of rsync's atomic file writes.
 
 VERDICTS
-- pass : you are confident ALL five criteria hold.
+- pass : you are confident ALL five criteria hold FROM THE MANIFEST ITSELF —
+         not from assumed behaviour of another service the job writes to.
 - fail : at least one criterion is clearly violated.
 - flag : you cannot PROVE it safe — a plausible violation you can't rule out from
          the manifest alone. Escalate to a human rather than guess.
@@ -87,8 +113,9 @@ VERDICTS
 
 OUTPUT FORMAT (do NOT call any tool; this is a writing task)
 
-Think step by step in plain prose FIRST: walk each of the six criteria and try
-to break it. THEN, as the LAST thing you output, emit exactly one JSON object
+Think step by step in plain prose FIRST: walk each of the five criteria and try
+to break it. Be concise — a few sentences per criterion; do not re-litigate a
+criterion once decided. THEN, as the LAST thing you output, emit exactly one JSON object
 between these two marker lines, on their own lines:
 
 ===VERDICT-BEGIN===
