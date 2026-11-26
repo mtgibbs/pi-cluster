@@ -307,6 +307,7 @@ factory/report.py                                          # time, tokens and co
 |---|---|---|---|---|---|---|
 | `all-local` | hot-coder | hot-coder (1/1) | hot-coder (1/1) | hot-coder | hot-coder (1/1) | hot-coder (1/1) |
 | `hybrid` | hot-coder | claude-haiku (5/3) | claude-haiku (5/3) | hot-coder | claude-haiku (5/3) | claude-sonnet (3/2) |
+| `hybrid-gemini` | hot-coder | gemini-flash-lite (5/3) | claude-haiku (5/3) | hot-coder | gemini-flash-lite (5/3) | claude-sonnet (3/2) |
 | `cloud-builder` | claude-haiku | hot-coder (1/1) | hot-coder (1/1) | claude-haiku | hot-coder (1/1) | hot-coder (1/1) |
 | `all-cloud` | claude-sonnet | claude-haiku (5/3) | claude-haiku (5/3) | claude-haiku | claude-haiku (5/3) | claude-sonnet (3/2) |
 

@@ -71,6 +71,24 @@ spec_intent_threshold = 3
 conf_intent_votes = 5
 conf_intent_threshold = 3
 
+# hybrid, with the two intent panels on a third model family (Gemini): the model that asks
+# "is this what the idea asked for?" is neither the one that wrote it nor the one that checks its rigor.
+[profiles.hybrid-gemini]
+writer = "hot-coder"
+spec_intent = "gemini-flash-lite"
+spec_judge = "claude-haiku"
+builder = "hot-coder"
+conf_intent = "gemini-flash-lite"
+conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
+spec_intent_votes = 5
+spec_intent_threshold = 3
+conf_intent_votes = 5
+conf_intent_threshold = 3
+
 # Hosted model builds; the local model judges it.
 [profiles.cloud-builder]
 writer = "claude-haiku"
@@ -137,3 +155,15 @@ usd_per_mtok = { input = 0.10, output = 0.50, cache_read = 0.01 }
 provider = "litellm"
 runs = "cloud"
 usd_per_mtok = { input = 2.00, output = 10.00, cache_read = 0.10 }
+
+# Gemini prices are LiteLLM's price map (read 2026-11-25). gemini-flash is a thinking model:
+# about 45 s for a one-word reply through the gateway, so it is listed but used by no profile.
+[models.gemini-flash-lite]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.30, output = 2.50, cache_read = 0.03 }
+
+[models.gemini-flash]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.75, output = 3.75, cache_read = 0.075 }
