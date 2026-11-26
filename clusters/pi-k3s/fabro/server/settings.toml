@@ -87,6 +87,23 @@ limits = { context_tokens = 200000, max_output_tokens = 32768 }
 capabilities = { text = true, tools = true }
 pricing = { input_usd_micros_per_million = 2000000, output_usd_micros_per_million = 10000000, cached_input_usd_micros_per_million = 100000 }
 
+# Hosted Gemini through the same gateway (LiteLLM aliases from beelink-ansible 50-ai-stack.yml).
+# A third model family for judge panels: neither the local Qwen nor Claude. Prices are LiteLLM's
+# price map, read 2026-11-25; limits are Google's models API, read 2026-11-26.
+[llm.providers.litellm.models."gemini-flash-lite"]
+display_name = "gemini-flash-lite (LiteLLM -> Gemini 3.5 Flash-Lite)"
+api_model = "gemini-flash-lite"
+limits = { context_tokens = 1048576, max_output_tokens = 65536 }
+capabilities = { text = true, tools = true }
+pricing = { input_usd_micros_per_million = 300000, output_usd_micros_per_million = 2500000, cached_input_usd_micros_per_million = 30000 }
+
+[llm.providers.litellm.models."gemini-flash"]
+display_name = "gemini-flash (LiteLLM -> Gemini 3.8 Flash)"
+api_model = "gemini-flash"
+limits = { context_tokens = 1048576, max_output_tokens = 65536 }
+capabilities = { text = true, tools = true }
+pricing = { input_usd_micros_per_million = 750000, output_usd_micros_per_million = 3750000, cached_input_usd_micros_per_million = 75000 }
+
 # `token`: Fabro uses the vault secret GITHUB_TOKEN (a PAT) directly — to clone, to push the run
 # branch, to open pull requests — and injects that same PAT into the sandbox as GITHUB_TOKEN. A
 # GitHub App (strategy = "app") would mint short-lived, repo-scoped tokens instead; not set up.
