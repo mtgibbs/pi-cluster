@@ -1,0 +1,169 @@
+# models.toml — which model does which job, and what each model costs.
+#
+#   factory/submit.sh --profile hybrid "<idea>"      # default profile: all-local
+#   factory/report.py                                 # time and cost per run, by role
+#
+# A PROFILE names a model for each ROLE. submit.sh stamps the chosen profile into the
+# workflow version it uploads, so the profile is part of the content-addressed version and
+# a run cannot change it part-way.
+#
+# Roles (the model-driven stages of factory/mcp/workflow.fabro), in run order:
+#   writer       ideate       — turns the idea into spec.md, tasks.txt, verify.sh
+#   spec_intent  spec_intent  — does the spec deliver the idea, all of it and nothing more?
+#                               Reads the idea verbatim + spec.md + tasks.txt; no repo crawl.
+#   spec_judge   spec_judge   — the spec RIGOR panel: testable? can verify.sh fail? (reads code)
+#   builder      implement    — writes the code and its tests
+#   conf_intent  conf_intent  — does the change do what the idea asked, and nothing more?
+#                               Reads the idea verbatim + the diff (spec dir left out).
+#   conf_judge   conf_judge   — the CONFORMANCE panel: the diff against the approved spec
+#
+# JUDGE PANELS (README "Judge panels"). Each judge role votes N times per round on the same
+# model, each vote a fresh agent visit that cannot see the others of its round. Per profile:
+#   spec_intent_votes / spec_intent_threshold   spec_votes / spec_threshold
+#   conf_intent_votes / conf_intent_threshold   conf_votes / conf_threshold   (default 1 / 1)
+# The round is decided in steps.py: raise when raise-votes >= threshold; pass only when
+# actual pass-votes >= votes - threshold + 1 (a vote with no usable verdict never counts as a
+# pass); otherwise hold. Voting stops as soon as the outcome is decided. 1 <= threshold <= votes.
+# votes=1, threshold=1 is the old single-judge behaviour. Cost scales with votes actually cast:
+# a 5-vote spec panel that raises 3-0 costs 3 visits, a split one up to 5, per round.
+# hot-coder is slow (one conformance pass took 21 min), so local judges keep one vote.
+# An intent vote is cheap next to a rigor vote: it reads two documents (the idea and the
+# spec, or the idea and the diff) and is told not to crawl the repo.
+#
+# NOT set here: the review-hub panels (9 validators x 5 votes). review-hub runs in the
+# cluster with one JUDGE_MODEL for every repo (clusters/pi-k3s/review-hub/deployment.yaml);
+# it has no per-PR model switch yet.
+#
+# Every model is reached through the one LiteLLM gateway (https://ai.lab.mtgibbs.dev), so a
+# model is usable only if (a) LiteLLM serves the alias, (b) Fabro's settings.toml lists it,
+# and (c) Fabro's LiteLLM key is allowed to call it.
+
+[profiles.all-local]
+writer = "hot-coder"
+spec_intent = "hot-coder"
+spec_judge = "hot-coder"
+builder = "hot-coder"
+conf_intent = "hot-coder"
+conf_judge = "hot-coder"
+spec_votes = 1
+spec_threshold = 1
+conf_votes = 1
+conf_threshold = 1
+spec_intent_votes = 1
+spec_intent_threshold = 1
+conf_intent_votes = 1
+conf_intent_threshold = 1
+
+# Local model builds; hosted models judge it. The judge is never the model that wrote the code.
+[profiles.hybrid]
+writer = "hot-coder"
+spec_intent = "claude-haiku"
+spec_judge = "claude-haiku"
+builder = "hot-coder"
+conf_intent = "claude-haiku"
+conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
+spec_intent_votes = 5
+spec_intent_threshold = 3
+conf_intent_votes = 5
+conf_intent_threshold = 3
+
+# hybrid, with the two intent panels on a third model family (Gemini): the model that asks
+# "is this what the idea asked for?" is neither the one that wrote it nor the one that checks its rigor.
+[profiles.hybrid-gemini]
+writer = "hot-coder"
+spec_intent = "gemini-flash-lite"
+spec_judge = "claude-haiku"
+builder = "hot-coder"
+conf_intent = "gemini-flash-lite"
+conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
+spec_intent_votes = 5
+spec_intent_threshold = 3
+conf_intent_votes = 5
+conf_intent_threshold = 3
+
+# Hosted model builds; the local model judges it.
+[profiles.cloud-builder]
+writer = "claude-haiku"
+spec_intent = "hot-coder"
+spec_judge = "hot-coder"
+builder = "claude-haiku"
+conf_intent = "hot-coder"
+conf_judge = "hot-coder"
+spec_votes = 1
+spec_threshold = 1
+conf_votes = 1
+conf_threshold = 1
+spec_intent_votes = 1
+spec_intent_threshold = 1
+conf_intent_votes = 1
+conf_intent_threshold = 1
+
+[profiles.all-cloud]
+writer = "claude-sonnet"
+spec_intent = "claude-haiku"
+spec_judge = "claude-haiku"
+builder = "claude-haiku"
+conf_intent = "claude-haiku"
+conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
+spec_intent_votes = 5
+spec_intent_threshold = 3
+conf_intent_votes = 5
+conf_intent_threshold = 3
+
+# How many times a RAISED panel sends the work back to its author (spec writer / builder)
+# before the run goes on marked `raise` (spec: to the human gate; conformance: to the PR as
+# hold). Counted per run in fx. 0..10. submit.sh refuses votes x (rounds + 4) above the
+# judge node's max_visits in workflow.fabro (headroom for human revise rounds and CI fixes),
+# and the spec-side (build-side) caps summed above ideate's (implement's) max_visits.
+[loop]
+spec_rounds = 4
+conf_rounds = 4
+# The intent panels' own caps, counted separately from the rigor/conformance ones.
+spec_intent_rounds = 3
+conf_intent_rounds = 3
+
+# Prices are USD per million tokens and are used ONLY for report.py's estimate. The bill of
+# record is LiteLLM's spend log for Fabro's key. hot-coder runs on the Beelink: no per-token
+# price (its cost is electricity and the box being busy, which the time columns show).
+# Claude prices are LiteLLM's own price map (model_prices_and_context_window.json, read
+# 2026-11-25). Haiku's are its <=100K-token-prompt tier; above that it is 0.50 / 2.50 /
+# 0.05, which this estimate ignores. cache_read applies only if the gateway passes prompt
+# caching through — unverified, so report.py prints a no-cache worst case beside it.
+[models.hot-coder]
+provider = "litellm"
+runs = "local"
+usd_per_mtok = { input = 0.0, output = 0.0, cache_read = 0.0 }
+
+[models.claude-haiku]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.10, output = 0.50, cache_read = 0.01 }
+
+[models.claude-sonnet]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 2.00, output = 10.00, cache_read = 0.10 }
+
+# Gemini prices are LiteLLM's price map (read 2026-11-25). gemini-flash is a thinking model:
+# about 45 s for a one-word reply through the gateway, so it is listed but used by no profile.
+[models.gemini-flash-lite]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.30, output = 2.50, cache_read = 0.03 }
+
+[models.gemini-flash]
+provider = "litellm"
+runs = "cloud"
+usd_per_mtok = { input = 0.75, output = 3.75, cache_read = 0.075 }
