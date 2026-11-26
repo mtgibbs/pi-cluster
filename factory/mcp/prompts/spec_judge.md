@@ -15,6 +15,8 @@ If `/tmp/factory/spec-feedback.md` exists, this spec was revised after an earlie
 
 Work by reading, not building. Do not run `npm`, `vitest` or `verify.sh`, and do not write code: the deterministic check has already shown `verify.sh` fails on today's tree. For question 2, describe in words the wrong implementation that would still pass each check (first-wins instead of a sum, zero calls under an "at most" bound, a handler nobody calls). You have about ten minutes; run 3's judge spent 35 building a counter-example, hit its time limit and produced no verdict, which holds the run. Put the problems in `reasons` as specific, fixable statements — the spec writer gets them verbatim.
 
+You are one vote on a panel of independent reviewers; you will not see the others' replies, and they will not see yours. Judge on your own reading.
+
 Raise if any answer is no. Otherwise pass.
 
 End your reply with EXACTLY one line of JSON and nothing after it (no code fence):

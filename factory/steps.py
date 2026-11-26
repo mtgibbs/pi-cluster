@@ -21,8 +21,10 @@ path, never forward.
 Usage (inside the sandbox, cwd = repo root):
   steps.py setup <spec-name> [issue]      (no stdin)
   steps.py spec_check                     stdin: fx
-  steps.py capture spec|conf              stdin: response.<judge>
+  steps.py capture spec|conf              stdin: response.<judge>   (parses ONE vote)
+  steps.py vote spec|conf                 stdin: fx   (records the vote, tallies the round: more|pass|raise|none)
   steps.py raised spec|conf               stdin: fx   (counts the raise, writes feedback, picks revise|hold)
+  steps.py forward spec                   stdin: fx   (human gate [F]: the panel's open objections become the note)
   steps.py note spec|build                stdin: human.gate.text (a human's typed note)
   steps.py merge <key> <value>            stdin: fx
   steps.py lock                           stdin: fx
@@ -34,7 +36,9 @@ Usage (inside the sandbox, cwd = repo root):
 """
 import hashlib, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
-W = "/tmp/factory"
+# FACTORY_TEST_DIR exists only for factory/test/panel.test.py; the workflow never sets it, and an
+# agent stage cannot set a command node's environment.
+W = os.environ.get("FACTORY_TEST_DIR") or "/tmp/factory"
 REQUIRED_CHECKS = ["build", "lint", "test", "typecheck", "review-hub"]
 REVIEW_HUB_APP = "empty-gibbs"           # GitHub App slug that posts review-hub's checks
 REPORT_MARKER = "<!-- review-hub:report -->"
@@ -42,7 +46,14 @@ VERDICT_MARKER = "<!-- factory:verdict -->"
 MAX_GATE_FIX_ROUNDS = 3                  # design table row 5
 MAX_CI_FIX_ROUNDS = 3                    # design table row 10
 MAX_SPEC_CHECK_RETRIES = 2               # failed deterministic spec checks sent back to ideate
-MAX_REVISE_ROUNDS = 2                    # judge raises sent back to the writer/builder before a human sees it
+# Judge panels (README "Judge panels"). Votes, thresholds and the revise cap come from
+# factory/models.toml via submit.sh -> [run.inputs] -> setup (FACTORY_PANEL) -> fx["panel"].
+# These defaults apply only when setup was given nothing.
+PANEL_KEYS = ("spec_votes", "spec_threshold", "conf_votes", "conf_threshold", "spec_rounds", "conf_rounds")
+DEFAULT_PANEL = {"spec_votes": 1, "spec_threshold": 1, "conf_votes": 1, "conf_threshold": 1,
+                 "spec_rounds": 4, "conf_rounds": 4}
+MAX_VOTES = 15
+MAX_ROUNDS = 10
 FEEDBACK = {"spec": "spec-feedback.md", "conf": "build-feedback.md"}
 CHECK_WAIT_SECONDS = int(os.environ.get("FACTORY_CHECK_WAIT", "2700"))  # 45 min
 UNANIMOUS = 5                            # rule 5: would-merge needs 5/5 clear per validator
@@ -212,8 +223,10 @@ def st_setup(spec, issue=""):
           "base": base, "branch": f"factory/{spec}-{suffix}", "gate_fails": 0, "gate_runs": 0,
           "ci_red_rounds": 0, "notes": [],
           # "<profile name> writer=<model> spec_judge=<model> builder=<model> conf_judge=<model>"
-          "profile": os.environ.get("FACTORY_PROFILE", "")}
+          "profile": os.environ.get("FACTORY_PROFILE", ""),
+          "panel": parse_panel(os.environ.get("FACTORY_PANEL", ""))}
     log(f"model profile: {fx['profile'] or '(none recorded)'}")
+    log("judge panels: " + panel_line(fx["panel"]))
     emit(fx, fx_spec=spec)
 
 
@@ -245,6 +258,7 @@ def st_spec_check(fx):
     else:
         sid = spec_id(fx)
         fx["spec_id_checked"] = sid
+        fx.pop("spec_open", None)     # a new spec-panel round starts here; no stale votes carry in
         os.makedirs(W, exist_ok=True)
         packet = f"SPEC-ID: {sid}\n\n" + "".join(f"===== {f} =====\n{open(f).read()}\n" for f in spec_files(fx))
         with open(f"{W}/spec-review.md", "w") as out:
@@ -275,6 +289,11 @@ def parse_verdict(text):
 
 
 def st_capture(kind):
+    """Parse ONE judge vote. Its result goes to a file that only the very next stage (`vote`)
+    reads and then deletes, so no later voter in the round can find it."""
+    vfile = f"{W}/{kind}-verdict.json"
+    if os.path.exists(vfile):
+        os.remove(vfile)
     text = sys.stdin.read()
     obj, why = parse_verdict(text)
     verdict, reasons = "none", []
@@ -291,49 +310,190 @@ def st_capture(kind):
     log(f"{kind} judge verdict: {verdict}" + (f" ({why})" if why else ""))
     for r in reasons:
         log(" -", r)
-    with open(f"{W}/{kind}-verdict.json", "w") as fh:   # read only by `raised`, the very next stage
-        json.dump({"verdict": verdict, "id": obj["id"] if obj else "", "reasons": reasons}, fh)
+    with open(vfile, "w") as fh:   # read (and deleted) only by `vote`, the very next stage
+        json.dump({"verdict": verdict, "id": obj["id"] if obj else "", "reasons": reasons, "why": why}, fh)
     emit(None, **{f"fx_{kind}_verdict": verdict, f"fx_{kind}_reasons": json.dumps(reasons or ([why] if why else []))})
+
+
+# ---------------------------------------------------------------- judge panels
+def parse_panel(text):
+    """'spec_votes=5 spec_threshold=3 ...' -> validated dict. Unset keys take DEFAULT_PANEL.
+    Raises ValueError on anything malformed (setup then crashes -> abort, never a silent default)."""
+    p = dict(DEFAULT_PANEL)
+    for tok in (text or "").split():
+        k, sep, v = tok.partition("=")
+        if not sep or k not in PANEL_KEYS:
+            raise ValueError(f"panel setting {tok!r}: expected one of {', '.join(PANEL_KEYS)} as key=<integer>")
+        if not re.fullmatch(r"\d{1,3}", v):
+            raise ValueError(f"panel setting {tok!r}: value must be a non-negative integer")
+        p[k] = int(v)
+    validate_panel(p)
+    return p
+
+
+def validate_panel(p):
+    for kind in ("spec", "conf"):
+        n, t, r = p[f"{kind}_votes"], p[f"{kind}_threshold"], p[f"{kind}_rounds"]
+        if not 1 <= n <= MAX_VOTES:
+            raise ValueError(f"{kind}_votes={n}: must be 1..{MAX_VOTES}")
+        if not 1 <= t <= n:
+            raise ValueError(f"{kind}_threshold={t}: must satisfy 1 <= threshold <= votes ({n})")
+        if not 0 <= r <= MAX_ROUNDS:
+            raise ValueError(f"{kind}_rounds={r}: must be 0..{MAX_ROUNDS}")
+    return p
+
+
+def panel_line(p):
+    return " ".join(f"{k}={p[k]}" for k in PANEL_KEYS)
+
+
+def fx_panel(fx):
+    return validate_panel({**DEFAULT_PANEL, **(fx.get("panel") or {})})
+
+
+def tally(verdicts, n, threshold):
+    """Decide one panel round from the votes cast so far. Deterministic; fails closed.
+      raise  when raise-votes >= threshold
+      pass   only when actual pass-votes >= n - threshold + 1 (a `none` vote never counts as a pass)
+      none   when every vote is in, or the outcome can no longer reach either bar
+      more   otherwise (cast another vote)
+    Both bars cannot be met at once: threshold + (n - threshold + 1) > n."""
+    r, p = verdicts.count("raise"), verdicts.count("pass")
+    left = n - len(verdicts)
+    need_pass = n - threshold + 1
+    if r >= threshold:
+        return "raise"
+    if p >= need_pass:
+        return "pass"
+    if left <= 0 or (r + left < threshold and p + left < need_pass):
+        return "none"
+    return "more"
+
+
+def round_votes(fx, kind, rnd):
+    return [e for e in fx.get("judge_log", []) if e.get("judge") == kind and e.get("round") == rnd]
+
+
+def format_objections(fx, kind, t, heading):
+    """The raising voters' objections of one tallied round, grouped per voter, verbatim.
+    No model merges or dedupes them."""
+    raisers = [e for e in round_votes(fx, kind, t["round"]) if e.get("verdict") == "raise"]
+    cast = f" ({t['cast']} votes cast; voting stops once the outcome is decided)" if t["cast"] < t["n"] else ""
+    out = [f"{heading}: {t['raise']} of {t['n']} voters raised{cast}\n"]
+    for e in raisers:
+        out.append(f"### Voter {e.get('vote', '?')}\n" + ("".join(f"- {r}\n" for r in e.get("reasons") or [])
+                                                        or "- (raised with no reasons)\n"))
+    return "\n".join(out)
+
+
+def minority_notes(fx, kind):
+    """The last round of a panel PASSED but some voters raised: their objections, kept as
+    non-blocking notes. Empty string otherwise."""
+    tallies = fx.get(f"{kind}_tallies") or []
+    if not tallies or tallies[-1]["outcome"] != "pass" or not tallies[-1]["raise"]:
+        return ""
+    name = {"spec": "Spec", "conf": "Conformance"}[kind]
+    return format_objections(fx, kind, tallies[-1],
+                             f"## {name} panel passed with minority objections (NON-BLOCKING), round {tallies[-1]['round']}")
+
+
+def tally_line(t):
+    return (f"r{t['round']} {t['outcome']} ({t['raise']} raise / {t['pass']} pass / {t['none']} none"
+            f" of {t['cast']} cast; panel {t['n']}, threshold {t['threshold']})")
 
 
 def write_feedback(fx, kind):
     """Render what the writer (spec) or builder (conf) must fix into a file its prompt tells it
     to read. Rebuilt from fx every time, so it only ever holds what deterministic stages
-    recorded. It is advice to the author, never a verdict: nothing routes on it."""
+    recorded. It is advice to the author, never a verdict: nothing routes on it.
+    Only DECIDED raise rounds appear here, so a voter never sees another vote of its own round."""
     out = [f"# Feedback to address ({kind}) — fix every item, then stop\n"]
     sc = fx.get("spec_check") or {}
     if kind == "spec" and sc.get("result") == "fail":
         out.append("## The deterministic spec check FAILED\n" + "".join(f"- {p}\n" for p in sc.get("problems", [])))
-    rounds = [e for e in fx.get("judge_log", []) if e["judge"] == kind and e["verdict"] == "raise"]
-    for e in reversed(rounds):
-        latest = " (LATEST — these are what the judge will re-check)" if e is rounds[-1] else " (earlier round, for context)"
-        out.append(f"## {kind} judge objections, round {e['round']}{latest}\n" + "".join(f"- {r}\n" for r in e["reasons"]))
+    raised = [t for t in fx.get(f"{kind}_tallies", []) if t["outcome"] == "raise"]
+    for t in reversed(raised):
+        latest = " (LATEST — these are what the judges will re-check)" if t is raised[-1] else " (earlier round, for context)"
+        out.append(format_objections(fx, kind, t, f"## {kind} judge panel, round {t['round']}{latest}"))
     with open(f"{W}/{FEEDBACK[kind]}", "w") as fh:
         fh.write("\n".join(out))
 
 
-def st_raised(fx, kind):
-    """A judge raised. Count it in fx (the engine's own visit counter is not usable in edge
-    conditions), log the objections, and choose: back to the author, or hold for a human.
-    Runs straight after `capture` with no agent stage in between, so the reasons file it
-    reads is the one capture just wrote."""
-    reasons, pid = [], ""
+def st_vote(fx, kind):
+    """Record one judge vote (written by `capture` a moment ago), then tally the round.
+    Emits fx_<kind>_panel = more (cast another vote) | pass | raise | none. A missing or
+    unreadable vote file is a `none` vote: it can only hold, never pass."""
+    panel = fx_panel(fx)
+    n, thr = panel[f"{kind}_votes"], panel[f"{kind}_threshold"]
+    vfile = f"{W}/{kind}-verdict.json"
     try:
-        v = json.load(open(f"{W}/{kind}-verdict.json"))
-        if v.get("verdict") == "raise":
-            reasons, pid = [str(r) for r in v.get("reasons", [])], str(v.get("id", ""))
-    except (OSError, ValueError):
-        pass
+        with open(vfile) as fh:
+            v = json.load(fh)
+    except (OSError, ValueError) as e:
+        v = {"verdict": "none", "id": "", "reasons": [], "why": f"no readable vote from capture ({type(e).__name__})"}
+    finally:
+        if os.path.exists(vfile):
+            os.remove(vfile)      # gone before the next voter of this round starts
+    verdict = v.get("verdict") if v.get("verdict") in ("pass", "raise") else "none"
+    tallies = fx.setdefault(f"{kind}_tallies", [])
+    rnd = len(tallies) + 1
+    open_votes = fx.setdefault(f"{kind}_open", [])
+    open_votes.append(verdict)
+    idx = len(open_votes)
+    fx.setdefault("judge_log", []).append({
+        "judge": kind, "round": rnd, "vote": idx, "of": n, "verdict": verdict, "packet": str(v.get("id") or ""),
+        "reasons": [str(r) for r in v.get("reasons") or []] if verdict != "none" else [],
+        "why": str(v.get("why") or "")})
+    decision = tally(open_votes, n, thr)
+    log(f"{kind} panel round {rnd}, vote {idx} of up to {n}: {verdict}" + (f" ({v.get('why')})" if v.get("why") else ""))
+    if decision != "more":
+        t = {"round": rnd, "n": n, "threshold": thr, "cast": len(open_votes), "raise": open_votes.count("raise"),
+             "pass": open_votes.count("pass"), "none": open_votes.count("none"), "outcome": decision}
+        tallies.append(t)
+        fx.pop(f"{kind}_open", None)
+        log(f"{kind} panel decided: {tally_line(t)}")
+    else:
+        log(f"{kind} panel: not decided yet ({open_votes.count('raise')} raise, {open_votes.count('pass')} pass, "
+            f"{open_votes.count('none')} none) -> another vote")
+    emit(fx, **{f"fx_{kind}_panel": decision, f"fx_{kind}_vote": f"r{rnd}v{idx}"})
+
+
+def st_raised(fx, kind):
+    """A judge panel raised. Count it in fx (the engine's own visit counter is not usable in
+    edge conditions), write the raising voters' objections as feedback, and choose: back to
+    the author, or hold for a human."""
+    cap = fx_panel(fx)[f"{kind}_rounds"]
+    tallies = fx.get(f"{kind}_tallies") or []
+    last = tallies[-1] if tallies and tallies[-1]["outcome"] == "raise" else None
+    reasons = [r for e in (round_votes(fx, kind, last["round"]) if last else []) if e.get("verdict") == "raise"
+               for r in e.get("reasons") or []]
     n = fx.get(f"{kind}_raises", 0) + 1
     fx[f"{kind}_raises"] = n
     fx[f"{kind}_judge"] = "raise"
-    fx.setdefault("judge_log", []).append({"judge": kind, "round": n, "verdict": "raise", "packet": pid, "reasons": reasons})
-    nxt = "revise" if n <= MAX_REVISE_ROUNDS and reasons else "hold"
+    nxt = "revise" if last and n <= cap and reasons else "hold"
     write_feedback(fx, kind)
-    log(f"{kind} judge raised (raise {n}; {MAX_REVISE_ROUNDS} revise rounds allowed) -> {nxt}")
-    for r in reasons:
-        log(" -", r)
+    log(f"{kind} judge panel raised (raise {n}; {cap} revise rounds allowed) -> {nxt}")
+    if last:
+        log(format_objections(fx, kind, last, f"{kind} panel round {last['round']}"))
     emit(fx, **{f"fx_{kind}_next": nxt, f"fx_{kind}_raises": n})
+
+
+def st_forward(fx, kind):
+    """Human gate option [F]: the latest panel round's raising objections, verbatim, become the
+    revise note — exactly what a typed note does, without retyping. Nothing to forward is
+    fx_<kind>_forwarded=no, which the graph routes back to the gate."""
+    tallies = fx.get(f"{kind}_tallies") or []
+    if not tallies or not tallies[-1]["raise"]:
+        log(f"no open {kind}-panel objections to forward (latest round: {tally_line(tallies[-1]) if tallies else 'none'})")
+        emit(fx, **{f"fx_{kind}_forwarded": "no"})
+    t = tallies[-1]
+    text = format_objections(fx, kind, t, f"Panel objections forwarded by the human, round {t['round']}")
+    with open(f"{W}/human-note.md", "a") as fh:
+        fh.write(f"## Human note at the {kind} gate ({time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}): "
+                 f"address the judges' open objections below\n{text}\n\n")
+    fx.setdefault("forwards", []).append({"kind": kind, "round": t["round"]})
+    log(f"forwarded to the writer:\n{text}")
+    emit(fx, **{f"fx_{kind}_forwarded": "yes"})
 
 
 def st_note(where):
@@ -350,12 +510,7 @@ def st_note(where):
 
 
 def st_merge(fx, key, value):
-    fx[key] = value
-    if key.endswith("_judge"):            # keep passes and no-verdicts in the same log as raises
-        kind = key[: -len("_judge")]
-        pid = fx.get("spec_id_checked", "") if kind == "spec" else fx.get("diff_id", "")
-        fx.setdefault("judge_log", []).append({"judge": kind, "round": fx.get(f"{kind}_raises", 0) + 1,
-                                               "verdict": value, "packet": pid, "reasons": []})
+    fx[key] = value                       # every judge vote is already in judge_log (st_vote)
     log(f"fx.{key} = {value}")
     emit(fx)
 
@@ -369,8 +524,16 @@ def st_lock(fx):
     fx["spec_id"] = spec_id(fx)
     log(f"LOCKED {vs} as blob {blob}; spec id {fx['spec_id']}")
     log(f"spec judge: {fx.get('spec_judge')}   deterministic spec check: {fx.get('spec_check', {}).get('result')}")
-    for e in [e for e in fx.get("judge_log", []) if e["judge"] == "spec"]:
-        log(f"  spec judge round {e['round']}: {e['verdict']}" + "".join(f"\n    - {r}" for r in e["reasons"]))
+    for t in fx.get("spec_tallies") or []:
+        log(f"  spec panel {tally_line(t)}")
+        for e in round_votes(fx, "spec", t["round"]):
+            log(f"    vote {e.get('vote')}: {e['verdict']}" + (f" ({e['why']})" if e.get("why") else "")
+                + "".join(f"\n      - {r}" for r in e["reasons"]))
+    notes = minority_notes(fx, "spec")
+    with open(f"{W}/spec-notes.md", "w") as fh:     # the builder's prompt reads it; empty when none
+        fh.write(notes)
+    if notes:
+        log("\n" + notes)
     for f in spec_files(fx):
         log(f"\n===== {f} =====\n" + open(f).read())
     emit(fx)
@@ -415,6 +578,7 @@ def st_gates(fx):
         diff = worktree_diff(fx["base"])
         did = short_hash(diff)
         fx["gated_tree"], fx["diff_id"] = worktree_tree(), did
+        fx.pop("conf_open", None)     # a new conformance-panel round starts here
         with open(f"{W}/review.diff", "w") as out:
             out.write(f"DIFF-ID: {did}\nSPEC: {spec_dir(fx)}/spec.md\nBASE: {fx['base']}\n\n{diff}")
         log(f"all gates green; review packet {W}/review.diff (DIFF-ID {did}, {len(diff)} bytes)")
@@ -636,14 +800,21 @@ def st_verdict(fx):
               "spec_judge": fx.get("spec_judge"), "conf_judge": fx.get("conf_judge"),
               "gate_runs": fx.get("gate_runs"), "gate_fails": fx.get("gate_fails"),
               "ci_red_rounds": fx.get("ci_red_rounds"), "required": ci.get("required"),
-              "override": fx.get("override"), "factory_stage": 0, "profile": fx.get("profile")}
+              "override": fx.get("override"), "factory_stage": 0, "profile": fx.get("profile"),
+              "panel": fx.get("panel"),
+              "panels": {k: fx.get(f"{k}_tallies") or [] for k in ("spec", "conf")}}
+    panels = "\n".join(f"- {name}: " + ("; ".join(tally_line(t) for t in fx.get(f"{k}_tallies") or []) or "no rounds")
+                       for k, name in (("spec", "spec judge panel"), ("conf", "conformance judge panel")))
+    conf_notes = minority_notes(fx, "conf")
     head = "✅ **would merge**" if verdict == "would merge" else "⏸️ **hold**"
     body = "\n".join([
         VERDICT_MARKER, f"## Factory verdict: {head} · class {fx.get('class', '?')}", "",
         "Stage 0 (shadow mode): the factory never merges. This is what it *would* do; a human decides.", "",
         ("**Hold because:**\n" + "\n".join(f"- {r}" for r in reasons)) if reasons else
         "Every deterministic gate passed, both factory judges passed, and every applicable review-hub validator was 5/5 clear.",
-        "", "| review-hub validator | check | report card |", "|--|--|--|", votes, "",
+        "", "**Factory judge panels** (votes per round):", panels, "",
+        *([conf_notes.replace("## ", "**", 1).replace("\n", "**\n", 1), ""] if conf_notes else []),
+        "| review-hub validator | check | report card |", "|--|--|--|", votes, "",
         f"Class reasons: " + ("; ".join(fx.get("class_reasons") or []) or "—"),
         f"<sub>run `{fx.get('run_id')}` · gates {fx.get('gate_runs')} run(s), {fx.get('gate_fails')} failed · "
         f"CI red rounds {fx.get('ci_red_rounds')} · spec judge {fx.get('spec_judge')} · conformance judge {fx.get('conf_judge')}</sub>",
@@ -684,6 +855,10 @@ def main():
                 st_merge(fx, args[0], args[1])
             elif cmd == "raised":
                 st_raised(fx, args[0])
+            elif cmd == "vote":
+                st_vote(fx, args[0])
+            elif cmd == "forward":
+                st_forward(fx, args[0])
             elif fn:
                 fn(fx)
             else:

@@ -13,6 +13,16 @@
 #   builder     implement   — writes the code and its tests
 #   conf_judge  conf_judge  — reads the finished diff against the spec
 #
+# JUDGE PANELS (README "Judge panels"). Each judge role votes N times per round on the same
+# model, each vote a fresh agent visit that cannot see the others of its round. Per profile:
+#   spec_votes / spec_threshold   conf_votes / conf_threshold     (default 1 / 1 if omitted)
+# The round is decided in steps.py: raise when raise-votes >= threshold; pass only when
+# actual pass-votes >= votes - threshold + 1 (a vote with no usable verdict never counts as a
+# pass); otherwise hold. Voting stops as soon as the outcome is decided. 1 <= threshold <= votes.
+# votes=1, threshold=1 is the old single-judge behaviour. Cost scales with votes actually cast:
+# a 5-vote spec panel that raises 3-0 costs 3 visits, a split one up to 5, per round.
+# hot-coder is slow (one conformance pass took 21 min), so local judges keep one vote.
+#
 # NOT set here: the review-hub panels (9 validators x 5 votes). review-hub runs in the
 # cluster with one JUDGE_MODEL for every repo (clusters/pi-k3s/review-hub/deployment.yaml);
 # it has no per-PR model switch yet.
@@ -26,6 +36,10 @@ writer = "hot-coder"
 spec_judge = "hot-coder"
 builder = "hot-coder"
 conf_judge = "hot-coder"
+spec_votes = 1
+spec_threshold = 1
+conf_votes = 1
+conf_threshold = 1
 
 # Local model builds; hosted models judge it. The judge is never the model that wrote the code.
 [profiles.hybrid]
@@ -33,6 +47,10 @@ writer = "hot-coder"
 spec_judge = "claude-haiku"
 builder = "hot-coder"
 conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
 
 # Hosted model builds; the local model judges it.
 [profiles.cloud-builder]
@@ -40,12 +58,28 @@ writer = "claude-haiku"
 spec_judge = "hot-coder"
 builder = "claude-haiku"
 conf_judge = "hot-coder"
+spec_votes = 1
+spec_threshold = 1
+conf_votes = 1
+conf_threshold = 1
 
 [profiles.all-cloud]
 writer = "claude-sonnet"
 spec_judge = "claude-haiku"
 builder = "claude-haiku"
 conf_judge = "claude-sonnet"
+spec_votes = 5
+spec_threshold = 3
+conf_votes = 3
+conf_threshold = 2
+
+# How many times a RAISED panel sends the work back to its author (spec writer / builder)
+# before the run goes on marked `raise` (spec: to the human gate; conformance: to the PR as
+# hold). Counted per run in fx. 0..10. submit.sh refuses votes x (rounds + 4) above the
+# judge node's max_visits in workflow.fabro (headroom for human revise rounds and CI fixes).
+[loop]
+spec_rounds = 4
+conf_rounds = 4
 
 # Prices are USD per million tokens and are used ONLY for report.py's estimate. The bill of
 # record is LiteLLM's spend log for Fabro's key. hot-coder runs on the Beelink: no per-token

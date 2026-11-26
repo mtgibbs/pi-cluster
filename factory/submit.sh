@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # submit.sh — start one factory run from an idea, and print the run URL.
 #
-#   FABRO_URL=... FABRO_DEV_TOKEN=... factory/submit.sh [--profile <name>] [--spec <name>] [--issue <n>] [--create-only] "<idea text>"
+#   FABRO_URL=... FABRO_DEV_TOKEN=... factory/submit.sh [--profile <name>] [--panel "<k=v ...>"] [--spec <name>] [--issue <n>] [--create-only] [--dry-run] "<idea text>"
 #
-# --profile picks a row of factory/models.toml (which model writes, builds and judges);
-# the default is all-local.
+# --profile picks a row of factory/models.toml (which model writes, builds and judges, and
+# how many votes each judge panel casts); the default is all-local.
+# --panel overrides panel settings for this run, e.g. "spec_votes=3 spec_threshold=2 spec_rounds=2"
+# (keys: spec_votes spec_threshold conf_votes conf_threshold spec_rounds conf_rounds).
+# --dry-run resolves and validates the profile and panel, prints the [run.inputs] it would
+# stamp (code is shown by size only), and exits without contacting the server.
 #
 # Uploads factory/mcp/{workflow.fabro,workflow.toml,prompts/*} as a workflow version, with
 # factory/steps.py and factory/classify.sh packed into [run.inputs] (so the code that judges
@@ -16,14 +20,16 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO="mtgibbs/pi-cluster-mcp"
-spec="" issue="" create_only=0 profile="${FACTORY_PROFILE:-all-local}"
+spec="" issue="" create_only=0 dry_run=0 panel="" profile="${FACTORY_PROFILE:-all-local}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) profile="$2"; shift 2 ;;
     --spec) spec="$2"; shift 2 ;;
     --issue) issue="$2"; shift 2 ;;
+    --panel) panel="$2"; shift 2 ;;
     --create-only) create_only=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --dry-run) dry_run=1; shift ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     --) shift; break ;;
     -*) echo "unknown flag $1" >&2; exit 2 ;;
     *) break ;;
@@ -31,17 +37,19 @@ while [ $# -gt 0 ]; do
 done
 idea="${1:-}"
 [ -n "$idea" ] || { echo "usage: submit.sh [--spec name] [--issue n] \"<idea text>\"" >&2; exit 2; }
-: "${FABRO_URL:?set FABRO_URL}" "${FABRO_DEV_TOKEN:?set FABRO_DEV_TOKEN}"
+[ "$dry_run" = 1 ] || : "${FABRO_URL:?set FABRO_URL}" "${FABRO_DEV_TOKEN:?set FABRO_DEV_TOKEN}"
 if [ -z "$spec" ]; then   # kebab slug of the idea's first words
   spec=$(printf %s "$idea" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-//' | cut -d- -f1-5 | sed 's/-$//')
 fi
 
-IDEA="$idea" PROFILE="$profile" SPEC="$spec" ISSUE="$issue" HERE="$HERE" REPO="$REPO" CREATE_ONLY="$create_only" python3 - <<'PY'
-import base64, hashlib, json, os, pathlib, sys, tomllib, urllib.error, urllib.request
+IDEA="$idea" PROFILE="$profile" PANEL="$panel" SPEC="$spec" ISSUE="$issue" HERE="$HERE" REPO="$REPO" CREATE_ONLY="$create_only" DRY_RUN="$dry_run" python3 - <<'PY'
+import base64, hashlib, importlib.util, json, os, pathlib, re, sys, tomllib, urllib.error, urllib.request
+sys.dont_write_bytecode = True   # importing steps.py below must not drop a __pycache__ in factory/
 here = pathlib.Path(os.environ["HERE"])
 wf = pathlib.Path(os.environ.get("FACTORY_WORKFLOW_DIR") or here / "mcp")   # override only for test/loop-control.py
-url = os.environ["FABRO_URL"].rstrip("/"); api = url + "/api/v1"
-tok = os.environ["FABRO_DEV_TOKEN"]
+dry = os.environ["DRY_RUN"] == "1"
+url = os.environ.get("FABRO_URL", "").rstrip("/"); api = url + "/api/v1"
+tok = os.environ.get("FABRO_DEV_TOKEN", "")
 
 def call(method, path, body=None):
     req = urllib.request.Request(api + path, method=method,
@@ -67,6 +75,25 @@ for r in ROLES:
     if prof.get(r) not in cfg["models"]:
         sys.exit(f"profile {pname}: role {r} names model {prof.get(r)!r}, which models.toml does not define")
 profile_line = pname + " " + " ".join(f"{r}={prof[r]}" for r in ROLES)
+# Judge panels: profile votes/thresholds + [loop] round caps, then --panel overrides. Parsed
+# and validated by steps.py's own parse_panel, the same code setup runs in the sandbox.
+spec_ = importlib.util.spec_from_file_location("factory_steps", here / "steps.py")
+steps_mod = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(steps_mod)
+loop = cfg.get("loop") or {}
+base = {k: v for k, v in {**{k: prof.get(k) for k in steps_mod.PANEL_KEYS}, **loop}.items()
+        if k in steps_mod.PANEL_KEYS and v is not None}
+try:
+    panel = steps_mod.parse_panel(" ".join(f"{k}={v}" for k, v in base.items()) + " " + os.environ["PANEL"])
+except ValueError as e:
+    sys.exit(f"profile {pname}: bad judge-panel settings: {e}")
+graph = (wf / "workflow.fabro").read_text()
+for kind in ("spec", "conf"):
+    m = re.search(rf"^\s*{kind}_judge \[[^\n]*max_visits=(\d+)", graph, re.M)
+    cap = int(m.group(1)) if m else 0
+    need = panel[f"{kind}_votes"] * (panel[f"{kind}_rounds"] + 4)
+    if need > cap:
+        sys.exit(f"{kind} panel: {panel[f'{kind}_votes']} votes x ({panel[f'{kind}_rounds']} rounds + 4) = {need} "
+                 f"visits > {kind}_judge max_visits={cap} in workflow.fabro; raise max_visits or lower the panel")
 toml = files["workflow.toml"]
 if any(l.strip().startswith("[run.inputs") for l in toml.splitlines()):
     sys.exit("workflow.toml must not define [run.inputs]; submit.sh owns it")
@@ -74,7 +101,16 @@ files["workflow.toml"] = toml.rstrip() + "\n\n# --- appended by factory/submit.s
     f'{k} = "{v}"\n' for k, v in [("steps_b64", base64.b64encode(steps).decode()),
                                    ("classify_b64", base64.b64encode(classify).decode()),
                                    ("code_sha", code_sha), ("profile", profile_line)]
-                                  + [("m_" + r, prof[r]) for r in ROLES])
+                                  + [("m_" + r, prof[r]) for r in ROLES]
+                                  + [(k, str(panel[k])) for k in steps_mod.PANEL_KEYS])
+if dry:
+    print(f"profile {profile_line}")
+    print("judge panels: " + steps_mod.panel_line(panel))
+    for l in files["workflow.toml"].split("[run.inputs]\n", 1)[1].splitlines():
+        k, _, v = l.partition(" = ")
+        print(f"  input {k} = " + (f"<{len(v) - 2} chars>" if k.endswith("_b64") else v))
+    print("dry run: nothing uploaded, no run created")
+    sys.exit(0)
 wv = call("POST", "/workflow-versions", {"entrypoint": "workflow.fabro", "files": files, "workflow_dependencies": {}})
 spec, issue = os.environ["SPEC"], os.environ["ISSUE"]
 title = f"factory: {spec}" + (f" (#{issue})" if issue else "")

@@ -10,4 +10,6 @@ Hard rules:
 
 If the stages above show a failing gate, a conformance-judge objection, red CI or review-hub findings, or if `/tmp/factory/build-feedback.md` or `/tmp/factory/human-note.md` exists (read them), you are in a fix round: fix exactly that problem, re-run the checks, and do not start over. If a large output was saved to a file, read the file.
 
+If `/tmp/factory/spec-notes.md` is non-empty, it holds objections a minority of the spec judges raised although the spec panel passed. They are non-blocking: read them, honour them where the approved spec leaves room, but the spec and `verify.sh` win.
+
 When done, reply with a short summary of what you changed and the result of each check.

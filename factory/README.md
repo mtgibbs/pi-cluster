@@ -42,12 +42,12 @@ candidate eval cases), `evals/` (those cases), `test/classify.test.sh`.
 | 0 | setup | command | Unpacks the factory code (below), `npm ci`, records the base commit and the PR branch `factory/<spec>-<run>`. Refuses a spec name that already exists on main. |
 | 1 | ideate | agent | Reads `CLAUDE.md` and the code, drafts `specs/<name>/{spec.md,tasks.txt,verify.sh}` in a condensed REASONS shape (see deviations). |
 | 1b | spec_check | command | Deterministic: the three files exist, ideate wrote nothing outside `specs/<name>/`, and `STRICT=1 verify.sh` **fails on the unimplemented tree** (red-before-green: a gate that passes before the change exists cannot fail). Failure → back to ideate with the problems in `/tmp/factory/spec-feedback.md`, at most 2 retries (counted in `fx`), then abort. Echoes the review packet into the run log for `harvest.py`. |
-| 2 | spec_judge → spec_capture | judge + command | Judge reads the spec packet from a file, answers with a last-line JSON verdict that must echo the packet's SPEC-ID. `spec_capture` parses Fabro's recorded reply. `raise` → `spec_raised`, which counts the raise in `fx`, writes the objections to `/tmp/factory/spec-feedback.md` and sends the spec back to ideate (≤2 rounds); the third raise goes to the human gate marked `raise`. Anything unparseable / absent / wrong id → hold marker, no revise. |
+| 2 | spec_judge → spec_capture → spec_vote | judge panel + commands | A **panel** of `spec_votes` same-model votes (see [Judge panels](#judge-panels)). Each vote: the judge reads the spec packet from a file and answers with a last-line JSON verdict that must echo the packet's SPEC-ID; `spec_capture` parses Fabro's recorded reply; `spec_vote` records it and tallies the round, looping back for another vote until the outcome is decided. `raise` → `spec_raised`, which counts the raise in `fx`, writes the raising voters' objections to `/tmp/factory/spec-feedback.md` and sends the spec back to ideate (≤ `spec_rounds`, default 4); the next raise goes to the human gate marked `raise`. A round with no decision (unparseable / absent / wrong-id votes) → hold marker, no revise. |
 | 2b | lock | command | Writes the approved `verify.sh` into git's object store and records its blob id; prints the spec for the human. |
-| 3 | approve_spec | **human** | `[A]` approve / `[X]` reject / **revise = type a note** instead of picking an option. Fabro does not render the freeform edge as a button; a typed answer follows it to `spec_note`, which saves the note for ideate, and the spec is checked and judged again. `lock` prints every judge round first. |
+| 3 | approve_spec | **human** | `[A]` approve / `[F]` send the judges' open objections back / `[X]` reject / **revise = type a note** instead of picking an option. Fabro does not render the freeform edge as a button; a typed answer follows it to `spec_note`, which saves the note for ideate, and the spec is checked and judged again. `[F]` (`spec_forward`) does the same with the latest panel round's raising objections, verbatim, as the note — no retyping; with nothing open it re-presents the gate. `lock` prints every panel round and vote first, plus any non-blocking minority objections on a pass (also written to `/tmp/factory/spec-notes.md` for the builder). |
 | 4 | implement | agent | Works `tasks.txt`; told it may not touch `specs/<name>/`, deps, CI or config; runs the gates itself. Also the target of every fix round. |
 | 5 | gates | command | Tamper check, then `npm ci`, `lint`, `typecheck`, `test`, `build`, `STRICT=1 verify.sh`. Red → implement while failures ≤ 3; then the `gates_escalate` human gate (one more round / open PR as hold / abandon). Green → writes the review diff to a file with a DIFF-ID and records the gated tree hash. |
-| 6 | conf_judge → conf_capture | judge + command | Same contract as the spec judge, on `/tmp/factory/review.diff`. `raise` → `conf_raised` (same counter and feedback file, `build-feedback.md`) → implement (≤2), then hold marker; no usable verdict → hold marker. |
+| 6 | conf_judge → conf_capture → conf_vote | judge panel + commands | Same contract as the spec panel (`conf_votes` / `conf_threshold`), on `/tmp/factory/review.diff`. `raise` → `conf_raised` (same counter and feedback file, `build-feedback.md`) → implement (≤ `conf_rounds`, default 4), then hold marker; undecided round → hold marker. A pass with minority raises puts those objections in the verdict comment as non-blocking notes. |
 | 7 | classify | command | `classify.sh` on the full-context diff, with `--tampered` when `verify.sh` differs from the locked blob; also holds if the tree changed after the gates passed (a judge or later stage edited files). |
 | 8 | open_pr | command | Pushes `factory/<spec>-<run>`, opens or refreshes the PR, creates/applies labels `factory` and `factory:class-<x>`. Refuses to push to anything not under `factory/`. |
 | 9 | wait_checks | command | Polls the head commit's check runs until build, lint, test, typecheck and review-hub have all completed (45 min cap), then reads each validator's check and the review-hub report card. Red → prints the failing checks (with Actions log tails and review-hub findings) for the builder. |
@@ -86,7 +86,7 @@ evidence is one JSON object (`fx`) threaded through the deterministic stages, pl
 - **Added `spec_check`** (deterministic, before the spec judge): files present, nothing
   written outside the spec dir, and red-before-green. A model is no longer the only thing
   asking "can verify.sh fail?".
-- **A spec judge that keeps raising does not stop the human gate.** After two revisions the
+- **A spec judge that keeps raising does not stop the human gate.** After `spec_rounds` revisions the
   run still reaches `approve_spec` (the human can read the objection), but the verdict is
   hold whatever happens later.
 - **"Judge is wrong" is logged, not a pass.** The override is recorded on the PR (and is
@@ -155,20 +155,24 @@ own in Stage 0.
 
 | Signal | Feeds | How | State |
 |---|---|---|---|
-| Spec judge raises | the spec writer, same run | `spec_raised` → feedback file → ideate, 2 rounds | **built** |
-| Human types a note at a gate | the spec writer / builder, same run | `spec_note` / `build_note` | **built** |
-| Conformance judge raises | the builder, same run | `conf_raised` → feedback file → implement, 2 rounds | **built**, not yet exercised |
-| Every spec-judge verdict + what the human did next | the spec judge's eval set | `harvest.py <run>` writes `evals/spec-judge/cases/<run>-r<n>.json` (packet, verdict, reasons, human action, `label: null`); a person sets the label in the PR | **built** (collection). Scoring a judge against the set is not built |
+| Spec judge panel raises | the spec writer, same run | `spec_raised` → feedback file (per raising voter) → ideate, `spec_rounds` rounds | **built** |
+| Human types a note at a gate, or picks `[F]` | the spec writer / builder, same run | `spec_note` / `spec_forward` / `build_note` | **built** (`[F]` not yet exercised live) |
+| Conformance judge panel raises | the builder, same run | `conf_raised` → feedback file → implement, `conf_rounds` rounds | **built**, not yet exercised |
+| Every spec-judge vote + what the human did next | the spec judge's eval set | `harvest.py <run>` writes one case per vote, `evals/spec-judge/cases/<run>-r<round>-v<vote>.json` (packet, verdict, reasons, the round's outcome, human action, `label: null`; pre-panel runs keep `<run>-r<n>.json`); a person sets the label in the PR | **built** (collection). Scoring a judge against the set is not built |
 | A lesson that recurs across cases | the ideate prompt | A person folds it into `prompts/ideate.md` ("Pin the assertions…" came from run 2's objections) | **manual**. Mining recurring objections and proposing the prompt PR is deferred until there are enough cases to tell a pattern from one run |
 | "Judge is wrong" at `review_escalate` | that validator's `eval/expected.yaml` in review-hub | not built; the override is logged on the PR today | deferred (review-hub change) |
 | Human merges/closes vs. the factory verdict | the earn-out ladder | `ledger.mjs` | built, no data yet |
 
 The revise loop has a positive control (`test/loop-control.py`): the real graph with ideate
-and the spec judge swapped for fixed stand-ins, the judge always raising. Expected, and
-observed on 2026-11-20 (run `01M7X7SB1VMEYNKQCF4DWKKM90`): raise → ideate twice, third raise →
-human gate, typed note → `spec_note` → ideate with both the objections and the note in its
-input, fourth raise → straight to the gate. Re-run it after any change to the spec half of
-the graph.
+and the spec judge swapped for fixed stand-ins, the judge always raising. Observed on
+2026-11-20 with the single judge and a 2-round cap (run `01M7X7SB1VMEYNKQCF4DWKKM90`): raise →
+ideate twice, third raise → human gate, typed note → `spec_note` → ideate with both the
+objections and the note in its input, fourth raise → straight to the gate. **Not yet re-run
+since the judge panels landed**; the expected stage list for the vote loop is in the
+script's docstring (`--panel "spec_votes=3 spec_threshold=2 spec_rounds=2"`: two votes per
+round, the third never cast). Re-run it after any change to the spec half of the graph.
+`test/panel.test.py` covers the tally, the vote/raised/forward/verdict stages and the
+graph's shape locally, with no server.
 
 A judge that runs out of time is "no verdict", which holds. Run 3's spec judge spent 35
 minutes building a counter-example and timed out; the prompt now limits it to reading.
@@ -179,7 +183,8 @@ What the first cases already show: runs 1 and 2 drafted near-identical specs for
 with the same hole (test titles pinned, assertions not; the builder writes the tests). The
 same judge, same model, passed run 1 and raised run 2. **One spec-judge vote is a coin
 with a bias, not a gate** — it needs several votes or a second model before its `pass`
-means anything, which is the same conclusion review-hub reached for its validators.
+means anything, which is the same conclusion review-hub reached for its validators. The
+judge panels below are the several-votes half of that; the second-model half is not built.
 
 The structural fix the judge's objection points at, not built: have the spec ship the test
 file itself, frozen with `verify.sh` at approval, so the builder writes only `src/`. Then
@@ -205,7 +210,9 @@ factory/submit.sh --spec pihole-secondary-stats --issue 45 "<idea text>"   # pri
 node factory/ledger.mjs                                               # evidence table from GitHub
 factory/harvest.py <run-id>                                           # judge verdicts → evals/spec-judge/cases/ (then PR)
 bash factory/test/classify.test.sh                                    # classifier unit tests
-python3 factory/test/loop-control.py /tmp/loopctl && FACTORY_WORKFLOW_DIR=/tmp/loopctl factory/submit.sh --spec loop-control "CONTROL"   # no-model positive control for the revise loop; never Approve its gate
+python3 factory/test/panel.test.py                                    # judge-panel tally + stage + graph-shape tests (local)
+factory/submit.sh --dry-run --profile hybrid "<idea>"                 # resolve + validate profile and panels; contacts nothing
+python3 factory/test/loop-control.py /tmp/loopctl && FACTORY_WORKFLOW_DIR=/tmp/loopctl factory/submit.sh --panel "spec_votes=3 spec_threshold=2 spec_rounds=2" --spec loop-control "CONTROL"   # no-model positive control for the vote + revise loops; never Approve its gate
 ```
 
 The run stops at `approve_spec`; answer it in the Fabro UI or with
@@ -276,15 +283,16 @@ factory/submit.sh --profile hybrid --issue 45 "<idea>"     # default: all-local
 factory/report.py                                          # time, tokens and cost per run, by role
 ```
 
-| Profile | writer | spec judge | builder | conformance judge |
+| Profile | writer | spec judge (votes/threshold) | builder | conformance judge (votes/threshold) |
 |---|---|---|---|---|
-| `all-local` | hot-coder | hot-coder | hot-coder | hot-coder |
-| `hybrid` | hot-coder | claude-haiku | hot-coder | claude-sonnet |
-| `cloud-builder` | claude-haiku | hot-coder | claude-haiku | hot-coder |
-| `all-cloud` | claude-sonnet | claude-haiku | claude-haiku | claude-sonnet |
+| `all-local` | hot-coder | hot-coder (1/1) | hot-coder | hot-coder (1/1) |
+| `hybrid` | hot-coder | claude-haiku (5/3) | hot-coder | claude-sonnet (3/2) |
+| `cloud-builder` | claude-haiku | hot-coder (1/1) | claude-haiku | hot-coder (1/1) |
+| `all-cloud` | claude-sonnet | claude-haiku (5/3) | claude-haiku | claude-sonnet (3/2) |
 
 How it works: `submit.sh` writes the profile into `[run.inputs]` (`m_writer`, `m_spec_judge`,
-`m_builder`, `m_conf_judge`, `profile`), and the graph's `model_stylesheet` reads them, one
+`m_builder`, `m_conf_judge`, `profile`, plus the panel keys `spec_votes`, `spec_threshold`,
+`conf_votes`, `conf_threshold`, `spec_rounds`, `conf_rounds`), and the graph's `model_stylesheet` reads them, one
 `#node { model: ... }` rule per role. The profile is therefore part of the uploaded workflow
 version, is logged by `setup`, and is written into the verdict record on the PR.
 
@@ -309,3 +317,75 @@ per-PR switch, so the "tiny judges" cannot follow a factory profile until review
 Unverified: whether prompt caching survives the LiteLLM hop to Anthropic. An agent stage
 re-sends its history every turn (run 4's builder read 7.3M cached tokens), so this decides
 whether a Sonnet conformance pass costs about $0.80 or about $9.
+
+
+## Judge panels
+
+A live run showed the problem with one judge call per round: a strict judge (claude-haiku)
+found something new every round, the 2-round cap was hit, and the human retyped the
+judge's objections as a revise note five times. One sample is also not a consensus.
+
+**What a vote is.** Each judge role (`spec_judge`, `conf_judge`) is a panel of N votes from
+the role's one model. A vote is one fresh agent visit to the judge node, parsed by
+`*_capture` into pass / raise / none, then recorded by `*_vote` in `fx.judge_log` with its
+round and vote index. The graph is a counted loop: judge → capture → vote → judge while
+`fx_<kind>_panel=more`. A sequential loop rather than Fabro's parallel fan-out
+(`shape=component` / `for_each`) because N is per-profile data, the loop can stop early,
+the tally stays one deterministic step, and the existing capture contract (one
+`response.<judge>` at a time) is unchanged.
+
+**The rule** (`tally()` in `steps.py`, deterministic):
+
+- `raise` when raise-votes ≥ threshold;
+- `pass` only when *actual* pass-votes ≥ N − threshold + 1 — a `none` vote (no reply,
+  unparseable, wrong packet id, timeout) never counts as a pass;
+- otherwise `none` → hold, as before.
+
+Voting stops as soon as the outcome is decided (3 raises of 5 skip the last two votes; so
+do 3 nones, since neither bar can then be reached). The two bars cannot both be met.
+N=1, threshold=1 is exactly the old single judge.
+
+**Independence.** Votes of one round cannot see each other: judges run with
+`fidelity="truncate"` (Fabro's preamble is the goal and run id only: no stage outputs, no
+context values; `response.*` keys are never in a preamble), no `thread_id` (no shared
+session), and a vote's parsed reply exists in `/tmp/factory` only between its capture and
+vote stages (`vote` deletes it). The feedback files a judge is told to read
+(`spec-feedback.md`, `build-feedback.md`) are rewritten only by `spec_check`, `gates` and
+`*_raised` — between rounds — so each voter sees earlier rounds' objections, never its own
+round's. Not proven: that a revisited Fabro agent node starts a fresh session without a
+`thread_id` (Fabro's docs do not say), and a judge that broke its "do not modify any file"
+instruction could leave a note for the next voter somewhere outside the checked packet.
+
+**Feedback on a raise.** All objections from that round's raising voters, verbatim, grouped
+per voter, under a header "k of N voters raised" (plus how many were cast when voting
+stopped early). On a **pass with minority raises**, those objections are kept as
+non-blocking notes: spec panel → printed by `lock` for the human and written to
+`/tmp/factory/spec-notes.md`, which the builder's prompt reads; conformance panel → a
+section of the verdict comment.
+
+**`[F]` at the spec gate** forwards the latest round's raising objections to the writer as
+the revise note (what typing them used to do). The freeform note is still there.
+`review_escalate` has no `[F]`: its objections come from CI and review-hub, not a panel.
+
+**Settings** (`models.toml`): `spec_votes`, `spec_threshold`, `conf_votes`, `conf_threshold` per
+profile (default 1/1); `[loop] spec_rounds`, `conf_rounds` (default 4) cap the automatic revise
+rounds. `submit.sh --panel "k=v ..."` overrides them for one run. All are validated
+(1 ≤ threshold ≤ votes ≤ 15, rounds 0..10) by `steps.py`'s own `parse_panel`, in `submit.sh` and
+again in `setup`; `submit.sh` also refuses votes × (rounds + 4) above the judge node's
+`max_visits` (60), so a panel cannot silently run out of visits.
+
+**Records.** `fx.judge_log` holds every vote (round, vote, of, verdict, packet, reasons,
+why); `fx.<kind>_tallies` every decided round; the verdict record on the PR gains `panel`
+(the settings) and `panels` (per-round tallies). `report.py` prints votes cast and each round's
+tally per judge role (time and cost already sum over visits, i.e. over votes); `harvest.py`
+writes one eval case per vote.
+
+**Cost.** A judge's cost and time scale with the votes actually cast: a 5/3 Haiku spec panel
+is 3–5 Haiku calls per round, a 3/2 Sonnet conformance panel 2–3 Sonnet calls per round. With
+the 4-round cap a spec that never satisfies the panel costs up to 25 votes before the human
+sees it. That is why `all-local` and `cloud-builder` keep 1 vote: hot-coder is slow (one
+conformance pass took 21 minutes) and the Beelink serves one request at a time.
+
+**Not done in this version.** No cross-model blended vote (a panel is one model); no merging,
+deduping or summarising of objections (no model touches them between judge and author);
+votes are sequential, not parallel; `review_escalate` has no forward option.

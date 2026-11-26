@@ -9,6 +9,10 @@ Answer these, briefly:
 2. Would the new tests fail on a wrong implementation? Mentally mutate the change (drop a branch, swap an aggregation, return early, ignore an error) and check that some test catches it. Tests that only check types or shapes do not count.
 3. Does the change stay in scope, keep failures visible (no fail-open, no silent "healthy" on error), keep secrets out of output, and avoid giving a read-only tool a write?
 
+If `/tmp/factory/build-feedback.md` exists, the code was revised after an earlier conformance-panel objection. Judge the diff fresh, then also check each earlier objection: is it actually closed, or only reworded? An objection that is still open is a raise.
+
+You are one vote on a panel of independent reviewers; you will not see the others' replies, and they will not see yours. Judge on your own reading.
+
 Raise if any answer is no. Otherwise pass.
 
 End your reply with EXACTLY one line of JSON and nothing after it (no code fence):

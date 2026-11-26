@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
-"""loop-control.py <out-dir> — build a no-model positive control for the spec revise loop.
+"""loop-control.py <out-dir> — build a no-model positive control for the spec vote + revise loops.
 
-Copies mcp/workflow.fabro and swaps exactly two things, leaving every capture/raised/
-note/lock node and every edge between them verbatim:
+Copies mcp/workflow.fabro and swaps exactly two things, leaving every capture/vote/raised/
+note/forward/lock node and every edge between them verbatim:
   * ideate      -> a command that writes a fixed spec and prints the feedback files it sees
   * spec_judge  -> a single-shot prompt told to reply `raise` with the packet's SPEC-ID
 The build half of the graph is left in place (Fabro rejects unreachable nodes): answer the
 gate with a typed note or Reject, never Approve.
-A judge that always raises must produce: 2 automatic revise rounds, then the human gate
-marked raise; a typed note must send it round once more. Upload the out-dir with
-submit-style inputs (see README "Running it") and read the stage list.
+Upload it with submit.sh (FACTORY_WORKFLOW_DIR=<out-dir>) and read the stage list.
+
+Single-vote control (any profile with spec_votes=1, e.g. all-local), --panel "spec_rounds=2":
+a judge that always raises gives judge->capture->vote->raised, 2 automatic revise rounds,
+then the human gate marked raise; a typed note sends it round once more.
+
+Vote-loop control, --panel "spec_votes=3 spec_threshold=2 spec_rounds=2": every round casts
+exactly TWO votes (the second raise decides it; the third is never cast), the vote stage
+logs `round r, vote 1` / `vote 2` and `decided: rN raise (2 raise / 0 pass / 0 none of 2
+cast; panel 3, threshold 2)`; 2 automatic revise rounds, ideate sees
+"2 of 3 voters raised (2 votes cast ...)" with Voter 1 and Voter 2 sections; the third raise
+goes to the gate. Answer [F]: spec_forward -> ideate, whose IDEATE-SEES-NOTE shows the
+forwarded objections; the fourth raise goes straight back to the gate. Then Reject.
 """
 import pathlib, re, sys
 here = pathlib.Path(__file__).resolve().parent.parent
 out = pathlib.Path(sys.argv[1]); (out / "prompts").mkdir(parents=True, exist_ok=True)
 g = (here / "mcp" / "workflow.fabro").read_text()
-fake_ideate = ('ideate [label="CONTROL ideate (fixed spec)", max_visits=8, script="d=specs/{{ inputs.spec }}; mkdir -p $d; '
+fake_ideate = ('ideate [label="CONTROL ideate (fixed spec)", max_visits=16, script="d=specs/{{ inputs.spec }}; mkdir -p $d; '
                "echo '# Spec: control' > $d/spec.md; echo 'T1: x' > $d/tasks.txt; printf '#!/usr/bin/env bash\\\\nexit 1\\\\n' > $d/verify.sh; "
                "echo IDEATE-SEES-FEEDBACK:; cat /tmp/factory/spec-feedback.md 2>/dev/null; echo IDEATE-SEES-NOTE:; cat /tmp/factory/human-note.md 2>/dev/null; true\"]")
-fake_judge = ('spec_judge [shape=tab, max_visits=8, prompt="Find a line containing SPEC-ID in the stage output above; the id is the 12 hex characters after it. '
+fake_judge = ('spec_judge [shape=tab, max_visits=60, prompt="Find a line containing SPEC-ID in the stage output above; the id is the 12 hex characters after it. '
               'Reply with exactly one line and nothing else: {\\"factory_verdict\\": \\"raise\\", \\"id\\": \\"<that id>\\", \\"reasons\\": [\\"control objection: always raise\\"]}"]')
 g, n1 = re.subn(r'ideate \[label="Ideate.*?\]', lambda m: fake_ideate, g, count=1)
-g, n2 = re.subn(r'spec_judge \[label="Spec judge".*?\]', lambda m: fake_judge, g, count=1)
+g, n2 = re.subn(r'spec_judge \[label="Spec judge.*?\]', lambda m: fake_judge, g, count=1)
 assert n1 == n2 == 1
 (out / "workflow.fabro").write_text(g)
 (out / "workflow.toml").write_text((here / "mcp" / "workflow.toml").read_text())

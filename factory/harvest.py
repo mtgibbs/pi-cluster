@@ -3,10 +3,12 @@
 
   FABRO_URL=... FABRO_DEV_TOKEN=... factory/harvest.py <run-id> [<run-id> ...]
 
-For every spec-judge round in the run it writes
-  factory/evals/spec-judge/cases/<run-id>-r<N>.json
-holding exactly what the judge was shown (the review packet), what it said, and what the
-human then did at the gate. Existing case files are never overwritten.
+For every spec-judge VOTE in the run it writes one case:
+  factory/evals/spec-judge/cases/<run-id>-r<R>-v<V>.json   (panel runs: round R, vote V)
+  factory/evals/spec-judge/cases/<run-id>-r<N>.json        (runs from before judge panels)
+holding exactly what the judge was shown (the review packet), what it said, the panel
+round's outcome, and what the human then did at the gate. Existing case files are never
+overwritten, so re-harvesting an old run reproduces its old file names.
 
 Why a script on the laptop and not a stage in the run: a judge must not be able to write
 the cases that grade it. This reads the run's recorded log after the fact; the cases reach
@@ -70,8 +72,28 @@ def harvest(rid):
             packets[m.group(1)] = out[out.index("===== specs/"):]
     answers = gate_answers(rid)
     caps = by_node("spec_capture")
+    # Panel runs: each capture is followed by a `spec_vote` stage that names the vote
+    # (fx_spec_vote = "r<R>v<V>") and the round's state after it (fx_spec_panel). Paired by
+    # visit order; a vote stage that crashed has no output and its vote keeps the visit index.
+    votes = []
+    for vs in [x for x in stages if x["node_id"] == "spec_vote"]:
+        try:
+            u = json.loads(stage_output(rid, vs["id"]).strip().splitlines()[-1])["context_updates"]
+            m = re.fullmatch(r"r(\d+)v(\d+)", u.get("fx_spec_vote", ""))
+            votes.append({"round": int(m.group(1)), "vote": int(m.group(2)), "after": u.get("fx_spec_panel")} if m else None)
+        except Exception:
+            votes.append(None)
+    outcome = {}                                   # round -> decided outcome (last vote of the round)
+    for v in votes:
+        if v and v["after"] != "more":
+            outcome[v["round"]] = v["after"]
+    last_round = max((v["round"] for v in votes if v), default=None)
+    if votes:          # panel run: index every capture visit so judge/capture/vote stay aligned
+        caps = [x for x in stages if x["node_id"] == "spec_capture"]
     written = []
     for n, s in enumerate(caps, 1):
+        if s["status"] != "succeeded":                  # a crashed capture recorded no verdict to harvest
+            continue
         out = stage_output(rid, s["id"])
         upd = json.loads(out.strip().splitlines()[-1])["context_updates"]
         verdict, reasons = upd["fx_spec_verdict"], json.loads(upd["fx_spec_reasons"])
@@ -87,7 +109,8 @@ def harvest(rid):
         pid = m.group(1) if m else ""
         if not pid and len(packets) == 1:                # no reply to read the id from (timeout)
             pid = next(iter(packets))
-        last = n == len(caps)
+        vote = votes[n - 1] if n <= len(votes) else None
+        last = (vote["round"] == last_round) if vote else n == len(caps)
         case = {
             "judge": "spec-judge",
             "source": {"run": rid, "round": n, "of": len(caps), "title": run.get("title"),
@@ -97,16 +120,25 @@ def harvest(rid):
             "packet": packets.get(pid),
             "verdict": verdict,
             "reasons": reasons,
+            "panel": ({"round": vote["round"], "vote": vote["vote"], "round_outcome": outcome.get(vote["round"])}
+                      if vote else None),
             "judge_seconds": judge.get("wall_time_ms", 0) // 1000,
             "judge_stage_status": judge.get("status"),
             # Only the last round reaches a human; earlier raises were answered by the spec writer.
+            # (A panel run that went round the human gate more than once attributes only the
+            # final answer, to the final round, as before.)
             "followed_by": ("human gate" if last else "automatic revise round"),
             "human_action": (action(answers[-1]) if last and answers else None),
             "human_answered_as": (answers[-1]["by"] if last and answers else None),
             "label": None,
             "label_note": "",
         }
-        f = OUT / f"{rid}-r{n}.json"
+        if vote:
+            f = OUT / f"{rid}-r{vote['round']}-v{vote['vote']}.json"
+        elif votes:                                # panel run, but this vote stage crashed
+            f = OUT / f"{rid}-c{n}.json"
+        else:
+            f = OUT / f"{rid}-r{n}.json"
         if f.exists():
             print(f"skip   {f.name} (exists)")
             continue

@@ -13,6 +13,9 @@ Both are estimates; LiteLLM's spend log for Fabro's key is the bill of record.
 
 Outcome columns come from the run's own state: where it ended, the factory verdict, how
 many times the local gates and CI went red, and how many times each judge raised.
+Judge panels: each judge role's `visits` is the number of votes cast (one agent visit per
+vote), and a `panel` line per judge shows every round's tally (raise / pass / none of the
+votes cast, panel size, threshold, outcome). Runs from before panels show one vote per round.
 """
 import json, os, pathlib, sys, tomllib, urllib.request
 
@@ -86,6 +89,12 @@ def one(rid):
         d["usd_est"], d["usd_no_cache"] = cost(d["model"], d["tokens"]) if d["model"] else (None, None)
     fx = last_fx(rid, stages)
     log = fx.get("judge_log") or []
+    tallies = {k: fx.get(f"{k}_tallies") for k in ("spec", "conf")}
+
+    def raises(k):          # panel runs count raised ROUNDS; older runs logged one entry per round
+        if tallies[k] is not None:
+            return sum(1 for t in tallies[k] if t.get("outcome") == "raise")
+        return sum(1 for j in log if j.get("judge") == k and j.get("verdict") == "raise")
     status = ((run.get("lifecycle") or {}).get("status") or {}).get("kind") or (run.get("status") or {}).get("kind")
     gate = sum(s["wall_time_ms"] or 0 for s in stages if s.get("handler") == "human" or s["node_id"].startswith("approve")) // 1000
     total = sum((s.get("wall_time_ms") or 0) for s in stages) // 1000
@@ -100,8 +109,10 @@ def one(rid):
         "verdict": (fx.get("verdict") or {}).get("verdict"),
         "class": fx.get("class"),
         "gate_fails": fx.get("gate_fails"), "ci_red_rounds": fx.get("ci_red_rounds"),
-        "spec_raises": sum(1 for j in log if j.get("judge") == "spec" and j.get("verdict") == "raise"),
-        "conf_raises": sum(1 for j in log if j.get("judge") == "conf" and j.get("verdict") == "raise"),
+        "spec_raises": raises("spec"), "conf_raises": raises("conf"),
+        "panel": fx.get("panel"),
+        "votes_cast": {k: sum(1 for j in log if j.get("judge") == k) for k in ("spec", "conf")},
+        "tallies": {k: tallies[k] or [] for k in ("spec", "conf")},
         "pr": (fx.get("pr") or {}).get("url"),
     }
 
@@ -129,6 +140,13 @@ def show(r):
         v = f"{d['visits']}" + (f" ({d['failed']}✗)" if d["failed"] else "")
         print(f"  {name:<11}{d['model'] or '?':<15}{mins(d['seconds']):>6}{v:>7}{t['input']:>9}{t['cache_read']:>10}"
               f"{t['output'] + t['reasoning']:>8}{e:>8}{w:>12}")
+    for k, name in (("spec", "spec_judge"), ("conf", "conf_judge")):
+        ts = r["tallies"][k]
+        if not ts and not r["votes_cast"][k]:
+            continue
+        rounds = "; ".join(f"r{t['round']} {t['outcome']} {t['raise']}R/{t['pass']}P/{t['none']}N of {t['cast']}"
+                           f" (panel {t['n']}, threshold {t['threshold']})" for t in ts) or "no decided rounds"
+        print(f"  {name} panel: {r['votes_cast'][k]} vote(s) cast · {rounds}")
 
 
 if __name__ == "__main__":
