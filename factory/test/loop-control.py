@@ -62,7 +62,9 @@ def stand_in(node, idtag, verdict, reason):
 fake_spec_intent = (stand_in("spec_intent", "INTENT-ID", "raise", "added: control objection: always raise") if intent_raise
                     else stand_in("spec_intent", "INTENT-ID", "pass", "control: always pass"))
 fake_conf_intent = stand_in("conf_intent", "CHANGE-ID", "pass", "control: always pass")
-fake_judge = stand_in("spec_judge", "SPEC-ID", "raise", "control objection: always raise")
+# The reason carries an unbalanced brace on purpose: Fabro brace-matches stage stdout, and a
+# real judge quoting `async () => {` once failed every capture stage (steps.py `directive`).
+fake_judge = stand_in("spec_judge", "SPEC-ID", "raise", "control objection: always raise, quoting async () => {{")
 g, n1 = re.subn(r'ideate \[label="Ideate.*?\]', lambda m: fake_ideate, g, count=1)
 g, n2 = re.subn(r'spec_judge \[label="Spec rigor judge.*?\]', lambda m: fake_judge, g, count=1)
 g, n3 = re.subn(r'spec_intent \[label="Spec intent.*?\]', lambda m: fake_spec_intent, g, count=1)

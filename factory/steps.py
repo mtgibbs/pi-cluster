@@ -84,6 +84,39 @@ UNANIMOUS = 5                            # rule 5: would-merge needs 5/5 clear p
 
 
 # ---------------------------------------------------------------- plumbing
+# Fabro finds a stage's routing directive by brace-matching its stdout. One unbalanced "{"
+# in echoed model text (a judge quoting `it('x', async () => {`) and it finds no JSON at all:
+# the stage is marked failed with "not a routing directive" (run 01M8B66RQXT5T7NYFN4R7YW1KK,
+# spec round 3). So no brace other than the directive's own structure ever reaches stdout:
+#   * human-readable stdout lines show braces as the look-alikes U+2983 / U+2984;
+#   * inside the directive, braces in string values are written as \u007b / \u007d, which
+#     any JSON parser decodes back to the exact original text.
+import builtins
+_SHOW = str.maketrans({"{": "\u2983", "}": "\u2984"})
+_MARK = str.maketrans({"{": "\ue000", "}": "\ue001"})
+
+
+def print(*a, **k):
+    if k.get("file") in (None, sys.stdout):
+        a = tuple(str(x).translate(_SHOW) for x in a)
+    builtins.print(*a, **k)
+
+
+def _mark(o):
+    if isinstance(o, str):
+        return o.translate(_MARK)
+    if isinstance(o, dict):
+        return {_mark(k): _mark(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_mark(v) for v in o]
+    return o
+
+
+def directive(obj):
+    """obj as one JSON line whose only literal braces are structural."""
+    return json.dumps(_mark(obj), sort_keys=True).replace("\\ue000", "\\u007b").replace("\\ue001", "\\u007d")
+
+
 def log(*a):
     print(*a, flush=True)
 
@@ -92,7 +125,7 @@ def emit(fx=None, **flat):
     upd = dict(flat)
     if fx is not None:
         upd["fx"] = fx
-    print(json.dumps({"context_updates": upd}, sort_keys=True))
+    builtins.print(directive({"context_updates": upd}))
     sys.exit(0)
 
 

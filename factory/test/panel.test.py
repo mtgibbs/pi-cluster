@@ -198,7 +198,7 @@ check("conf 3/2: R P P -> pass", d == "pass")
 fx["conf_judge"] = "pass"
 p, upd = run("verdict", fx)
 check("verdict stage runs without a PR", p.returncode == 0 and upd.get("fx_verdict") == "hold", p.stdout + p.stderr)
-rec = json.loads(re.search(r"<!-- factory:record (.*) -->", p.stdout).group(1))
+rec = json.loads(re.search(r"<!-- factory:record (.*) -->", p.stdout.replace("\u2983", "{").replace("\u2984", "}")).group(1))  # stdout shows braces as look-alikes
 check("verdict record has per-round tallies", rec["panels"]["conf"][0]["outcome"] == "pass"
       and len(rec["panels"]["spec"]) == 2 and rec["panel"]["conf_votes"] == 3, rec.get("panels"))
 check("verdict body shows conf minority notes", "missing AC3" in p.stdout and "NON-BLOCKING" in p.stdout, p.stdout)
@@ -401,7 +401,7 @@ for k in ("conf_intent_judge", "spec_intent_judge"):
         check(f"decide: {k}={bad} -> hold", v == "hold" and any("intent panel" in w for w in why), why)
 f2 = {**fx, "conf_intent_judge": "raise"}
 p, upd = run("verdict", f2)
-rec = json.loads(re.search(r"<!-- factory:record (.*) -->", p.stdout).group(1))
+rec = json.loads(re.search(r"<!-- factory:record (.*) -->", p.stdout.replace("\u2983", "{").replace("\u2984", "}")).group(1))  # stdout shows braces as look-alikes
 check("verdict: conf_intent raise after its cap -> hold", upd.get("fx_verdict") == "hold" and rec["verdict"] == "hold", p.stdout)
 check("verdict record: four panels' tallies and both intent verdicts",
       set(rec["panels"]) == {"spec_intent", "spec", "conf_intent", "conf"} and len(rec["panels"]["conf_intent"]) == 2
@@ -600,6 +600,17 @@ harvest = importlib.util.module_from_spec(hs); hs.loader.exec_module(harvest)
 check("harvest: rigor cases stay in evals/spec-judge/cases", harvest.PANELS["spec"]["out"] == HERE / "evals/spec-judge/cases")
 check("harvest: intent cases go to their own dirs", harvest.PANELS["spec_intent"]["out"] == HERE / "evals/spec-intent/cases"
       and harvest.PANELS["conf_intent"]["out"] == HERE / "evals/change-intent/cases")
+
+# --- stage output must never carry a stray brace (Fabro brace-matches stdout for the directive)
+_o = {"context_updates": {"fx": {"r": ["it('x', async () => {", 'a } b {"q"}']}, "fx_v": "raise"}}
+_d = steps.directive(_o)
+check("directive round-trips", json.loads(_d) == _o)
+check("directive has only structural braces", _d.count("{") == 3 and _d.count("}") == 3, _d)
+import io, contextlib
+_b = io.StringIO()
+with contextlib.redirect_stdout(_b):
+    steps.print("judge said: async () => {")
+check("human stdout shows no real brace", "{" not in _b.getvalue() and "\u2983" in _b.getvalue(), _b.getvalue())
 
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
