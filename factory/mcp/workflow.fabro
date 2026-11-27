@@ -31,7 +31,7 @@
 //     the first visit, which silently skipped the revise loop.
 //   * Nothing a judge says can reach a stage after a red deterministic gate: the judges
 //     only run on the `fx_gates=pass` / `fx_spec_check=pass` edges.
-//   * Panel order: spec_check -> spec INTENT -> spec RIGOR (spec_judge) -> lock/human gate ->
+//   * Panel order: spec_check -> spec INTENT -> spec RIGOR (spec_judge) -> lock -> spec_route (person or code) ->
 //     implement -> gates -> change INTENT (conf_intent) -> CONFORMANCE (conf_judge) -> classify.
 //     The intent panels compare the work with the ORIGINAL idea (/tmp/factory/idea.md, written
 //     by setup from inputs.idea_b64 and covered by inputs.code_sha, so every sha256 check below
@@ -55,7 +55,7 @@ digraph Factory {
 
     // ------------------------------------------------------------------ setup
     setup [label="Setup (npm ci, record base)", timeout="25m", output_schema="routing",
-        script="set -e; mkdir -p /tmp/factory; printf %s {{ inputs.steps_b64 }} | base64 -d > /tmp/factory/steps.py; printf %s {{ inputs.classify_b64 }} | base64 -d > /tmp/factory/classify.sh; printf %s {{ inputs.idea_b64 }} | base64 -d > /tmp/factory/idea.md; [ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea does not match inputs.code_sha'; exit 1; }; FACTORY_PROFILE='{{ inputs.profile }}' FACTORY_PANEL='spec_votes={{ inputs.spec_votes }} spec_threshold={{ inputs.spec_threshold }} conf_votes={{ inputs.conf_votes }} conf_threshold={{ inputs.conf_threshold }} spec_rounds={{ inputs.spec_rounds }} conf_rounds={{ inputs.conf_rounds }} spec_intent_votes={{ inputs.spec_intent_votes }} spec_intent_threshold={{ inputs.spec_intent_threshold }} spec_intent_rounds={{ inputs.spec_intent_rounds }} conf_intent_votes={{ inputs.conf_intent_votes }} conf_intent_threshold={{ inputs.conf_intent_threshold }} conf_intent_rounds={{ inputs.conf_intent_rounds }}' python3 /tmp/factory/steps.py setup {{ inputs.spec }} {{ inputs.issue }}"]
+        script="set -e; mkdir -p /tmp/factory; printf %s {{ inputs.steps_b64 }} | base64 -d > /tmp/factory/steps.py; printf %s {{ inputs.classify_b64 }} | base64 -d > /tmp/factory/classify.sh; printf %s {{ inputs.idea_b64 }} | base64 -d > /tmp/factory/idea.md; [ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea does not match inputs.code_sha'; exit 1; }; FACTORY_PROFILE='{{ inputs.profile }}' FACTORY_PANEL='spec_votes={{ inputs.spec_votes }} spec_threshold={{ inputs.spec_threshold }} conf_votes={{ inputs.conf_votes }} conf_threshold={{ inputs.conf_threshold }} spec_rounds={{ inputs.spec_rounds }} conf_rounds={{ inputs.conf_rounds }} spec_intent_votes={{ inputs.spec_intent_votes }} spec_intent_threshold={{ inputs.spec_intent_threshold }} spec_intent_rounds={{ inputs.spec_intent_rounds }} conf_intent_votes={{ inputs.conf_intent_votes }} conf_intent_threshold={{ inputs.conf_intent_threshold }} conf_intent_rounds={{ inputs.conf_intent_rounds }}' FACTORY_GATE_MODE='{{ inputs.gate_mode }}' FACTORY_ORIGIN='{{ inputs.origin }}' FACTORY_REQUEST='{{ inputs.request }}' FACTORY_TARGET_STAGE='{{ inputs.target_stage }}' python3 /tmp/factory/steps.py setup {{ inputs.spec }} {{ inputs.issue }}"]
 
     // ------------------------------------------------------------------ spec
     ideate [label="Ideate (draft spec)", prompt="@prompts/ideate.md", timeout="40m", max_visits=24]
@@ -104,6 +104,16 @@ digraph Factory {
     lock [label="Lock spec (freeze verify.sh)", timeout="5m", stdin_source="fx", output_schema="routing", max_visits=16,
         script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py lock"]
 
+    // Who answers a gate: a person (gate_mode=human, the laptop) or code (gate_mode=auto, the intake;
+    // docs/design/factory-intake.md). The mode comes from inputs on the command line and must match
+    // setup's record. auto: the spec is approved only when the spec check and BOTH spec panels passed,
+    // otherwise the run ends with no PR (spec_held); an escalation becomes a hold. In auto mode no
+    // hexagon is reachable, so a run never holds the one Fabro slot waiting for a person.
+    spec_route [label="Spec gate: person or code? (auto approves only a full pass)", timeout="5m", stdin_source="fx", output_schema="routing", max_visits=16,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py route spec {{ inputs.gate_mode }}"]
+    spec_held [label="auto: spec held (no PR, run ends)", stdin_source="fx", output_schema="routing", max_visits=4,
+        script="python3 /tmp/factory/steps.py merge spec_held yes"]
+
     approve_spec [shape=hexagon, label="Approve this spec? Read the `lock` stage output: spec.md, tasks.txt, verify.sh and every round and vote of BOTH spec panels, intent (does it match the idea?) and rigor (can verify.sh fail?), plus any non-blocking minority objections on a pass. [F] sends the objections of whichever panel raised last to the spec writer verbatim, as if you had typed them. To REVISE with your own words, type a note instead of picking an option: it goes to the spec writer and the spec is checked and judged again. On approval verify.sh is frozen; any later edit to it makes the PR class C and holds it."]
 
     // A typed answer at a gate lands in context key human.gate.text and follows the freeform
@@ -119,6 +129,8 @@ digraph Factory {
     gates [label="Gates: npm ci, lint, typecheck, test, build, STRICT verify.sh", timeout="40m", stdin_source="fx", output_schema="routing", max_visits=28,
         script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py gates"]
 
+    gates_route [label="Gates exhausted: person or hold?", timeout="5m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py route gates {{ inputs.gate_mode }}"]
     gates_escalate [shape=hexagon, label="The deterministic gates are still red after 3 fix rounds (or the gate stage crashed). Read the `gates` output, then choose."]
     gates_hold [label="human: open PR as hold", stdin_source="fx", output_schema="routing", max_visits=4,
         script="python3 /tmp/factory/steps.py merge gates_escalated opened-as-hold"]
@@ -166,6 +178,8 @@ digraph Factory {
     wait_checks [label="Wait for CI + review-hub", timeout="50m", stdin_source="fx", output_schema="routing", max_visits=20,
         script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py wait_checks"]
 
+    review_route [label="CI still red: person or hold?", timeout="5m", stdin_source="fx", output_schema="routing", max_visits=8,
+        script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py route review {{ inputs.gate_mode }}"]
     review_escalate [shape=hexagon, label="CI or review-hub is still red after 3 fix rounds. Read the `wait_checks` output and the PR. Is the judge right (type a note for the builder), wrong (override, logged, verdict stays hold), or abandon?"]
     build_note [label="human: judge is right (note saved)", timeout="5m", stdin_source="human.gate.text", output_schema="routing", max_visits=6,
         script="[ \"$(sha256sum /tmp/factory/steps.py /tmp/factory/classify.sh /tmp/factory/idea.md | cut -c1-64 | tr -d '\\n')\" = {{ inputs.code_sha }} ] || { echo 'factory code or idea changed since setup'; exit 1; }; python3 /tmp/factory/steps.py note build"]
@@ -226,8 +240,15 @@ digraph Factory {
     spec_raised -> lock
     spec_none   -> lock
 
-    lock -> approve_spec [condition="outcome=succeeded"]
+    lock -> spec_route [condition="outcome=succeeded"]
     lock -> abort
+
+    spec_route -> approve_spec [condition="outcome=succeeded && fx_spec_route=human"]
+    spec_route -> implement    [condition="outcome=succeeded && fx_spec_route=approve"]
+    spec_route -> spec_held    [condition="outcome=succeeded && fx_spec_route=held"]
+    spec_route -> abort
+    spec_held -> exit [condition="outcome=succeeded"]
+    spec_held -> abort
 
     approve_spec -> implement [label="[A] Approve - build it"]
     approve_spec -> spec_forward [label="[F] Send the last-raising panel's objections back to the writer"]
@@ -246,7 +267,11 @@ digraph Factory {
 
     gates -> conf_intent    [condition="outcome=succeeded && fx_gates=pass"]
     gates -> implement      [condition="outcome=succeeded && fx_gates=fail && fx_gate_fails <= 3"]
-    gates -> gates_escalate
+    gates -> gates_route
+
+    gates_route -> gates_escalate [condition="outcome=succeeded && fx_gates_route=human"]
+    gates_route -> classify       [condition="outcome=succeeded && fx_gates_route=hold"]
+    gates_route -> abort
 
     gates_escalate -> implement  [label="[R] One more fix round"]
     gates_escalate -> gates_hold [label="[H] Open the PR anyway (verdict: hold)"]
@@ -291,8 +316,11 @@ digraph Factory {
 
     wait_checks -> verdict         [condition="outcome=succeeded && fx_ci=green"]
     wait_checks -> implement       [condition="outcome=succeeded && fx_ci=red && fx_ci_red_rounds <= 3", weight=10]
-    wait_checks -> review_escalate [condition="outcome=succeeded && fx_ci=red", weight=1]
+    wait_checks -> review_route    [condition="outcome=succeeded && fx_ci=red", weight=1]
     wait_checks -> verdict
+
+    review_route -> review_escalate [condition="outcome=succeeded && fx_review_route=human"]
+    review_route -> verdict
 
     review_escalate -> build_note [label="[J] Judge is right (type a note for the builder)", freeform=true]
     build_note -> implement [condition="outcome=succeeded"]

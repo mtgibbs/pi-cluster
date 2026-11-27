@@ -34,6 +34,7 @@ Usage (inside the sandbox, cwd = repo root):
   steps.py open_pr                        stdin: fx
   steps.py wait_checks                    stdin: fx
   steps.py verdict                        stdin: fx
+  steps.py route spec|gates|review <mode> stdin: fx   (<mode> = inputs.gate_mode: who answers the gate — a person, or code)
 
 <kind> is a judge panel: spec_intent, spec (rigor), conf_intent, conf (conformance). The panel
 order is spec_intent -> spec -> (build, gates) -> conf_intent -> conf; see README "Judge panels".
@@ -42,6 +43,14 @@ The idea text. setup writes it verbatim to /tmp/factory/idea.md (from inputs.ide
 inputs.code_sha covers it alongside steps.py and classify.sh, so the sha256 check every
 deterministic stage runs first also catches an agent editing the idea the intent panels judge
 against.
+
+Gate mode (inputs.gate_mode, docs/design/factory-intake.md). `human`: the run stops at approve_spec,
+and at gates_escalate / review_escalate when those loops run out, for a person. `auto` (the intake):
+no person mid-run. `route spec auto` approves the spec only when the deterministic spec check AND
+both spec panels recorded a pass; anything else ends the run with no PR ("spec held"). `route
+gates|review auto` turns an escalation into a hold. A model can only raise: nothing here can turn a
+raise, a `none` or a crash into an approval. The mode comes from the version's inputs (on the
+command line), and must match what setup recorded, so an agent forging fx cannot change it.
 """
 import hashlib, json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
@@ -343,13 +352,75 @@ def st_setup(spec, issue=""):
           # "<profile name> writer=<model> spec_judge=<model> builder=<model> conf_judge=<model>"
           "profile": os.environ.get("FACTORY_PROFILE", ""),
           "panel": parse_panel(os.environ.get("FACTORY_PANEL", "")),
-          "idea_sha": idea_sha()}
+          "idea_sha": idea_sha(),
+          # Who asked, how, and at what earn-out stage (inputs; written into the verdict record).
+          "gate_mode": gate_mode_of(os.environ.get("FACTORY_GATE_MODE", "")),
+          "origin": os.environ.get("FACTORY_ORIGIN", "") or "human",
+          "request": os.environ.get("FACTORY_REQUEST", ""),
+          "target_stage": int(os.environ.get("FACTORY_TARGET_STAGE", "0") or 0)}
     if not idea_text().strip():
         raise RuntimeError(f"{W}/idea.md is empty — the intent panels would have nothing to judge against")
     log(f"model profile: {fx['profile'] or '(none recorded)'}")
     log(f"idea ({len(idea_text())} chars, sha256 {fx['idea_sha'][:12]}) saved verbatim to {W}/idea.md")
     log("judge panels: " + panel_line(fx["panel"]))
-    emit(fx, fx_spec=spec)
+    log(f"gate mode {fx['gate_mode']} · origin {fx['origin']}" + (f" · request {fx['request']}" if fx["request"] else ""))
+    emit(fx, fx_spec=spec, fx_gate_mode=fx["gate_mode"])
+
+
+GATE_MODES = ("human", "auto")
+
+
+def gate_mode_of(mode):
+    if mode not in GATE_MODES:
+        raise RuntimeError(f"gate mode {mode!r} is not one of {GATE_MODES}")
+    return mode
+
+
+def spec_held_reasons(fx):
+    """Why code may not approve this spec in auto mode; empty means approve. The same evidence
+    lock prints for a person: the deterministic check and the latest result of BOTH spec panels."""
+    why = []
+    sc = (fx.get("spec_check") or {}).get("result")
+    if sc != "pass":
+        why.append(f"deterministic spec check: {sc or 'missing'}")
+    for kind, key in (("spec_intent", "spec_intent_judge"), ("spec", "spec_judge")):
+        if fx.get(key) != "pass":
+            why.append(f"{NAME[kind]} panel: {fx.get(key) or 'did not run on this version'}")
+        else:
+            t = (fx.get(f"{kind}_tallies") or [None])[-1]
+            if not t or t.get("outcome") != "pass":
+                why.append(f"{NAME[kind]} panel: recorded pass without a passing round")
+    return why
+
+
+def st_route(fx, where, mode):
+    """Who answers this gate. human -> the person's gate (today's behaviour). auto -> code:
+    spec: approve only on a full pass, else held (the run ends, no PR); gates/review: hold."""
+    if where not in ("spec", "gates", "review"):
+        raise RuntimeError(f"unknown gate {where!r}")
+    mode = gate_mode_of(mode)
+    if fx.get("gate_mode") != mode:
+        raise RuntimeError(f"gate mode on the command line ({mode}) differs from setup's ({fx.get('gate_mode')!r})")
+    key = f"fx_{where}_route"
+    if mode == "human":
+        log(f"gate mode human: the {where} gate is a person's")
+        emit(fx, **{key: "human"})
+    if where != "spec":
+        fx[f"{where}_escalated"] = "auto-hold"
+        log(f"gate mode auto: no person to escalate to at the {where} gate -> the PR is held")
+        emit(fx, **{key: "hold"})
+    why = spec_held_reasons(fx)
+    if not why:
+        fx["spec_approval"] = "auto"
+        log("gate mode auto: deterministic spec check and both spec panels passed -> spec approved by code, building")
+        emit(fx, **{key: "approve"})
+    kind, t = last_raising(fx, "spec")
+    objections = format_objections(fx, kind, t, f"{NAME[kind].capitalize()} panel objections, round {t['round']}") if t else ""
+    fx["spec_approval"] = "held"
+    fx["verdict"] = {"verdict": "spec held", "reasons": why, "objections": objections[:8000]}
+    log("gate mode auto: spec NOT approved -> the run ends here, no PR\n" + "\n".join(f"- {w}" for w in why)
+        + ("\n" + objections if objections else ""))
+    emit(fx, **{key: "held", "fx_verdict": "spec held"})
 
 
 def st_spec_check(fx):
@@ -1029,7 +1100,9 @@ def st_verdict(fx):
               "spec_intent_judge": fx.get("spec_intent_judge"), "conf_intent_judge": fx.get("conf_intent_judge"),
               "gate_runs": fx.get("gate_runs"), "gate_fails": fx.get("gate_fails"),
               "ci_red_rounds": fx.get("ci_red_rounds"), "required": ci.get("required"),
-              "override": fx.get("override"), "factory_stage": 0, "profile": fx.get("profile"),
+              "override": fx.get("override"), "factory_stage": fx.get("target_stage", 0), "profile": fx.get("profile"),
+              "gate_mode": fx.get("gate_mode", "human"), "origin": fx.get("origin", "human"),
+              "request": fx.get("request", ""), "spec_approval": fx.get("spec_approval", "human"),
               "panel": fx.get("panel"),
               "panels": {k: fx.get(f"{k}_tallies") or [] for k in KINDS}}
     panels = "\n".join(f"- {name}: " + ("; ".join(tally_line(t) for t in fx.get(f"{k}_tallies") or []) or "no rounds")
@@ -1093,6 +1166,8 @@ def main():
                 st_forward(fx, args[0])
             elif cmd == "passed":
                 st_passed(fx, args[0])
+            elif cmd == "route":
+                st_route(fx, args[0], args[1])
             elif fn:
                 fn(fx)
             else:
