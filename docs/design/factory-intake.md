@@ -197,11 +197,13 @@ same webhook at any time; a human request is the same envelope with `source.kind
   with fakes, the HTTP bearer, `route`, and a graph check that no human gate is reachable in auto mode.
 
 **Decisions taken while building** (say if any is wrong):
-- `intake_profile = "all-local"`: intake runs spend no hosted-model budget. The auto spec approval
-  then rests on 1-vote hot-coder panels; the final human gate is the backstop. Switching to
-  `hybrid-gemini` is a one-line change in the target file — but the rigor panel's known
-  raise-every-round weakness would end most auto runs as `spec held` until objection-level
-  consensus lands.
+- `intake_profile = "hybrid-gemini"` (Matt, 2026-11-27): the auto spec approval rests on hosted
+  multi-vote panels (gemini-flash-lite intent 5/3, claude-haiku rigor 5/3, claude-sonnet
+  conformance 3/2), not 1-vote hot-coder ones. Cost: every intake run draws on Fabro's LiteLLM
+  key ($100 per 30 days), capped by `runs_per_day`. Known effect: the rigor panel's
+  raise-every-round weakness will end many auto runs as `spec held` until objection-level
+  consensus lands; the pause rule (below) stops a feeder that keeps hitting it. Switching back
+  to `all-local` is a one-line change in the target file.
 - The cooldown applies to every outcome (14 days), including "would merge": a problem that comes
   back after its fix merged is worth a look, not an instant resubmission.
 - Pause: ≥ 6 of an agent's last 10 finished requests ended `spec held` → that origin gets 423 until

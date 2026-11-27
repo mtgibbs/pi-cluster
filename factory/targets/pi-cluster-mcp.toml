@@ -16,7 +16,7 @@ origins = ["human", "agent:ops-investigator", "agent:mcp-researcher"]
 max_open = 2                     # unfinished factory runs + open `factory` PRs on the repo
 runs_per_day = 3                 # submissions per UTC day
 cooldown_days = 14               # a request key that ended held/closed waits this long
-intake_profile = "all-local"     # models.toml profile for intake runs (hot-coder: no token spend)
+intake_profile = "hybrid-gemini" # models.toml profile for intake runs (hosted judges; spends Fabro's LiteLLM budget)
 
 # Which research-agent plans n8n routes here: regexes over the plan's fingerprint.resource
 # (scripts/agentrunner/CONTRACT.md §5a). First feeder: MCP tool defects.

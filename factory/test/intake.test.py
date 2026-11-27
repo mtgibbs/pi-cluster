@@ -152,7 +152,7 @@ check("first request is submitted", code == 202 and body["state"] == "submitted"
 p0 = f.submitted[0]
 check("intake submits gate_mode auto, never auto_approve",
       ("gate_mode", "auto") in p0["inputs"] and p0["run"]["args"]["auto_approve"] is False)
-check("intake submits the target's intake_profile", p0["profile_line"].startswith("all-local "))
+check("intake submits the target's intake_profile", p0["profile_line"].startswith("hybrid-gemini "))
 check("intake submits against the target repo", p0["run"]["target"]["repo"] == "mtgibbs/pi-cluster-mcp")
 check("n8n is told the run started", f.notified and f.notified[-1]["event"] == "submitted" and f.notified[-1]["run_id"] == "run1")
 code, body = it.receive(req())
