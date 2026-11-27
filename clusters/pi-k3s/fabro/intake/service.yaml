@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: factory-intake
+  namespace: fabro
+spec:
+  selector:
+    app: factory-intake
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

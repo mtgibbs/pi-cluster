@@ -1,0 +1,45 @@
+name: build-factory-intake
+
+# Builds + pushes the factory-intake image to GHCR on change. Version comes from
+# factory/intake/VERSION (bump it to cut a release); Flux image-automation then rolls the
+# Deployment (clusters/pi-k3s/fabro/intake/). Multi-arch so it runs on the arm64 Pis.
+#
+# The image carries the whole factory/ tree (workflow, steps.py, targets), so a change to the
+# factory itself only reaches intake-submitted runs once VERSION is bumped.
+#
+# NOTE: after the first push, flip the GHCR package public (cluster pulls anon):
+#   gh api -X PATCH /user/packages/container/factory-intake -f visibility=public
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'factory/**'
+      - '.github/workflows/build-factory-intake.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tests
+        run: python3 factory/test/intake.test.py
+      - id: ver
+        run: echo "v=$(cat factory/intake/VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: factory/intake/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ghcr.io/mtgibbs/factory-intake:${{ steps.ver.outputs.v }}

@@ -93,7 +93,7 @@ curated tables below, or `grep -r "remoteRef" clusters/`. To walk it as an agent
 
 ## Connectivity graph (auto-derived from `clusters/**`)
 
-_77 ExternalSecrets · 54 1Password items · 77 consumer edges · 20 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
+_78 ExternalSecrets · 55 1Password items · 78 consumer edges · 20 shared identities. Skeleton is regenerated; the un-derivable consumers come from `docs/secrets-overlay.yaml`._
 
 ### Reuse lens — shared identities and their fan-out
 
@@ -104,6 +104,8 @@ graph LR
   n14ulz31 --> nr8be8h
   nbsjbtm["fabro-vault-seed<br/>(fabro)"]
   n14ulz31 --> nbsjbtm
+  n1b02850["factory-intake-env<br/>(fabro)"]
+  n14ulz31 --> n1b02850
   n1uid43c(["🔑 ghcr-read-token"])
   n1dgsmvl["ghcr-pull-secret<br/>(flux-system)"]
   n1uid43c --> n1dgsmvl
@@ -247,9 +249,12 @@ graph LR
     - `cloudflare-tunnel/cloudflare-tunnel`
 - **discord-alerts** → 1 ExternalSecret(s):
     - `flux-system/discord-webhook`
-- **fabro** → 2 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
+- **fabro** → 3 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `fabro/fabro-server-env`
     - `fabro/fabro-vault-seed`
+    - `fabro/factory-intake-env`
+- **factory-intake** → 1 ExternalSecret(s):
+    - `fabro/factory-intake-env`
 - **ghcr-read-token** `safe` → 5 ExternalSecret(s):  ⟵ **SHARED — reuse, do not mint a parallel one**
     - `flux-system/ghcr-pull-secret`
     - `harness-fleet/ghcr-pull-secret`
@@ -435,6 +440,9 @@ graph LR
 - **`fabro/fabro-vault-seed`** ← `fabro`, `harness-fleet`
   produces Secret `fabro-vault-seed` in `fabro`
     → `fabro/fabro` (StatefulSet, volume)
+- **`fabro/factory-intake-env`** ← `fabro`, `factory-intake`
+  produces Secret `factory-intake-env` in `fabro`
+    → `fabro/factory-intake` (Deployment, envFrom)
 - **`family-board/family-board-feed`** ← `n8n-automation`
   produces Secret `family-board-feed` in `family-board`
     → `family-board/family-board` (Deployment, env)

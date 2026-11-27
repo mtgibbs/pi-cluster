@@ -1,0 +1,49 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: factory-intake
+  namespace: flux-system
+spec:
+  image: ghcr.io/mtgibbs/factory-intake
+  interval: 5m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: factory-intake
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: factory-intake
+  filterTags:
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+  policy:
+    semver:
+      range: ">=0.1.0"
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: factory-intake
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore: update factory-intake to {{range .Changed.Changes}}{{.NewValue}}{{end}}
+    push:
+      branch: main
+  update:
+    path: ./clusters/pi-k3s/fabro/intake
+    strategy: Setters

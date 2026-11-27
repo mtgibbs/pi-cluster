@@ -970,3 +970,27 @@ spec:
     name: flux-system
   wait: true
   timeout: 10m
+---
+# 43. fabro-intake - the factory intake (docs/design/factory-intake.md): the service n8n hands
+# research-agent problems to; it applies admission control and submits factory runs to Fabro with
+# gate_mode=auto. Deployment + Service + 100Mi PVC (sqlite queue) + NetworkPolicy (n8n-only
+# ingress) + its own ExternalSecret `factory-intake-env` (`fabro/dev-token` REUSED,
+# `factory-intake/token` MINTED) + image automation. Its own Kustomization so a missing intake
+# credential or image never holds back the Fabro server. Needs the 1Password item and the GHCR
+# image (build-factory-intake.yml) before it goes green.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: fabro-intake
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: fabro
+  interval: 10m
+  path: ./clusters/pi-k3s/fabro/intake
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  timeout: 5m

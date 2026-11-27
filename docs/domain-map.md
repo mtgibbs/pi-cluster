@@ -37,7 +37,7 @@ Deployment manifest in the dir.
 <!-- Regenerate: node scripts/gen-domain-map.mjs clusters/pi-k3s --inject docs/domain-map.md -->
 <!-- Do not hand-edit between these markers; edits are overwritten. -->
 
-_43 services · 73 workloads · 47 Flux Kustomizations · 10 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
+_43 services · 74 workloads · 48 Flux Kustomizations · 11 services on a private image. Auto-derived from `clusters/pi-k3s/**`._
 
 ## Deploy-order DAG (Flux `dependsOn`)
 
@@ -79,6 +79,8 @@ graph LR
   k1sskdlf --> k4x6ehp
   kkuvy6m --> k4x6ehp
   k19g0j44 --> k4x6ehp
+  k17bs84c["fabro-intake<br/>(fabro/intake)"]
+  k4x6ehp --> k17bs84c
   k1unc8vb --> k1sskdlf
   k1xirz5w["family-board"]
   k1unc8vb --> k1xirz5w
@@ -239,8 +241,11 @@ _Images are listed **without tags** on purpose — this map is topology, and the
   - ingress: `nas.lab.mtgibbs.dev`, `qnap.lab.mtgibbs.dev`, `unifi.lab.mtgibbs.dev`
 
 ### fabro
+- **Deployment/factory-intake** — `ghcr.io/mtgibbs/factory-intake` 🔒priv
 - **StatefulSet/fabro** — `ghcr.io/fabro-sh/fabro`, `docker`, `curlimages/curl`
-  - creds: `fabro-server-env`  _(→ secrets-map.md)_
+  - creds: `fabro-server-env`, `factory-intake-env`  _(→ secrets-map.md)_
+  - storage: `factory-intake-data`
+  - ⚠️ private image → needs `ghcr-pull-secret` (reuse `ghcr-read-token`)
   - ingress: `fabro.lab.mtgibbs.dev`
 
 ### family-board  ·  Flux: `family-board` (after: `external-secrets-config`, `ingress`, `cert-manager-config`)

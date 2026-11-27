@@ -38,6 +38,15 @@ spec:
       ports:
         - protocol: TCP
           port: 32276
+    # The factory intake (../intake/): the one automated client of the API, holding the dev token.
+    # Same namespace, so a bare podSelector. Its egress side is ../intake/networkpolicy.yaml.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: factory-intake
+      ports:
+        - protocol: TCP
+          port: 32276
   egress:
     # DNS — CoreDNS in kube-system. Both protocols: large/truncated answers retry over TCP.
     - to:
