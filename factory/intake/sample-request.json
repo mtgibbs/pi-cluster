@@ -1,0 +1,12 @@
+{"v": 1,
+ "target": "pi-cluster-mcp",
+ "source": {"kind": "agent", "agent": "ops-investigator", "run_id": "01JSAMPLE0000000000000000",
+            "ref": "https://github.com/mtgibbs/homelab-plans/issues/1"},
+ "dedupe_key": "3f1c0a9e5b7d2e4f6a8c0b1d3e5f7a9c1b3d5e7f9a1c3e5b7d9f1a3c5e7b9d1f",
+ "title": "get_tailscale_status reports the tailnet down while it is up",
+ "severity": "medium",
+ "problem": {
+   "found": "get_tailscale_status returns connected=false for the subnet router although tailscale status on the node shows it online and peers reach the LAN through it.",
+   "evidence": "mcp-homelab get_tailscale_status -> {\"connected\": false, ...}\nnode: `tailscale status` -> pi-k3s online, offers 192.168.1.0/24",
+   "proposed_change": "Make get_tailscale_status read the connection state from the field the Tailscale API actually populates for a subnet router, and add a test with a recorded API response for an online subnet router.",
+   "verify": "A unit test with the recorded response asserts connected=true; the existing offline fixture still asserts connected=false."}}
