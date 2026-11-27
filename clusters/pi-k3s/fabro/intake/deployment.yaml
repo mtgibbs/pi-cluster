@@ -1,0 +1,90 @@
+# factory-intake — the one door from the research agents to the factory. n8n POSTs a request
+# (docs/design/factory-intake.md §1); this service renders the idea by code, applies admission
+# control (dedupe, cooldown, runs_per_day, the open-PR cap, the pause rule) and submits to Fabro
+# with gate_mode=auto. It holds Fabro's event stream open (no polling) and reports each finished
+# run to n8n. No Ingress: only n8n can reach it (networkpolicy.yaml).
+#
+# One replica, Recreate: the sqlite file on a RWO volume has one writer.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: factory-intake
+  namespace: fabro
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: factory-intake
+  template:
+    metadata:
+      labels:
+        app: factory-intake
+    spec:
+      # pi3-worker-2 has 1 GB RAM and is excluded from most workloads.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - pi3-worker-2
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: factory-intake
+          image: ghcr.io/mtgibbs/factory-intake:0.1.0 # {"$imagepolicy": "flux-system:factory-intake"}
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - secretRef:
+                name: factory-intake-env
+          env:
+            # The Service, in this namespace. networkpolicy.yaml + the Fabro policy's intake rule
+            # are what allow it.
+            - name: FABRO_URL
+              value: "http://fabro.fabro.svc.cluster.local:32276"
+            # FACTORY_RESULT_URL (the n8n `factory-result` webhook) is added with that workflow
+            # in PR 3. Unset, the intake only logs each result.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: factory-intake-data
+        - name: tmp
+          emptyDir: {}

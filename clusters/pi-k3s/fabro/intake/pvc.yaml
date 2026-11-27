@@ -1,0 +1,15 @@
+# The intake's sqlite queue (requests + pause resets). Small, and not backed up: losing it forgets
+# dedupe/cooldown history and any parked request, which n8n re-sends on its next finding. Fabro
+# keeps the runs themselves.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: factory-intake-data
+  namespace: fabro
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Mi

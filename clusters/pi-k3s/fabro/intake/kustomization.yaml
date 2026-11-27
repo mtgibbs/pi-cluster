@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The factory intake (docs/design/factory-intake.md): its own Flux Kustomization `fabro-intake`,
+# dependsOn `fabro`. Its ExternalSecret lives HERE, not in ../secrets, on purpose: `fabro-secrets`
+# has `wait: true`, so a missing intake item there would hold the Fabro server back too. Here it
+# can only hold back the intake.
+#
+# No top-level `namespace:`; every file declares `namespace: fabro`.
+resources:
+  - external-secret.yaml
+  - pvc.yaml
+  - networkpolicy.yaml
+  - deployment.yaml
+  - service.yaml
+  - image-automation.yaml

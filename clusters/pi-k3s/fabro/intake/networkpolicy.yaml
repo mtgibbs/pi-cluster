@@ -1,0 +1,74 @@
+# What the factory intake may talk to, and who may talk to it. Enforcement is on in this cluster
+# (k3s' kube-router; full note in ../../agents/networkpolicies.yaml): rules match the backend pod
+# and port after kube-proxy's DNAT, never a Service ClusterIP.
+#
+# The intake holds Fabro's all-powerful dev token, so its ingress is n8n only: nothing else in the
+# cluster, and nothing outside it (there is no Ingress object), can POST a request.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: factory-intake
+  namespace: fabro
+spec:
+  podSelector:
+    matchLabels:
+      app: factory-intake
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # n8n decides WHEN; whole namespace, because in queue mode a workflow can execute on the main
+    # pod, a worker or the webhook pod. Kubelet probes come from the node and need no rule.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: n8n
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # DNS — CoreDNS in kube-system.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The Fabro API (submit, run status, the /api/v1/attach event stream). The matching ingress
+    # rule is in ../server/networkpolicy.yaml.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: fabro
+      ports:
+        - protocol: TCP
+          port: 32276
+    # api.github.com — the open factory-PR count (unauthenticated read of a public repo). Public
+    # :443 only, every private range carved out, same shape as the Fabro policy.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+    # The n8n result webhook (FACTORY_RESULT_URL, wired in PR 3). Both n8n Services listen on 5678.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: n8n
+      ports:
+        - protocol: TCP
+          port: 5678
